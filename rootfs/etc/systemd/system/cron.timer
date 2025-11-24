@@ -1,9 +1,10 @@
 [Unit]
-Description=prune
+Description=cron
 
 [Timer]
 OnBootSec=10m
-OnUnitActiveSec=1h
+OnUnitInactiveSec=24h
+WakeSystem=true
 
 [Install]
 WantedBy=timers.target

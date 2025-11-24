@@ -9,7 +9,10 @@ terraform {
   }
 }
 
-provider "google" {}
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
 
 locals {
   rootFs = "${path.module}/rootfs"
@@ -127,7 +130,6 @@ resource "google_compute_instance" "cloud-compose" {
     GCP_INSTANCE_NAME            = var.name
     GCP_REGION                   = var.region
     GCP_ZONE                     = var.zone
-    LIBOPS_SITE                  = var.name
     DOCKER_COMPOSE_REPO          = var.docker_compose_repo
     DOCKER_COMPOSE_BRANCH        = var.docker_compose_branch
     DOCKER_COMPOSE_INIT_CMD      = var.docker_compose_init
@@ -175,7 +177,6 @@ resource "google_project_iam_member" "gce-suspend" {
   member  = "serviceAccount:${google_service_account.cloud-compose.email}"
 }
 
-
 # =============================================================================
 # CLOUD RUN INGRESS
 # =============================================================================
@@ -205,15 +206,15 @@ EOT
     name         = var.name
     usePrivateIp = "true"
   }
-  allowed_ips = [
+  allowed_ips = tolist([
     "127.0.0.1/32",
     "10.0.0.0/8",
     "172.16.0.0/12",
     "192.168.0.0/16",
-  ]
+  ])
 
   dynamic_properties = {
-    allowedIps      = merge(local.allowed_ips, var.allowed_ips)
+    allowedIps      = concat(local.allowed_ips, var.allowed_ips)
     machineMetadata = local.machine
   }
 

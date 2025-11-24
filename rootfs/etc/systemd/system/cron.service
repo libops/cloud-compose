@@ -1,0 +1,10 @@
+[Unit]
+Description=cron
+After=internal-services.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/cloud-compose/cron.sh
+User=root
+Group=root
+SuccessExitStatus=0

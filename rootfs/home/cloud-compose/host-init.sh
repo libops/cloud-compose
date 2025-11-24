@@ -36,6 +36,10 @@ echo "SITE_DOCKER_REGISTRY=us-docker.pkg.dev/${GCP_PROJECT}/private" >> env.tmp
 
 if ! diff <(md5sum env.tmp) <(md5sum env); then
   mv env.tmp env
+  cp env /etc/libops/.env
+  if [ -d /mnt/disks/data/compose ]; then
+    cp env /mnt/disks/data/compose/.env
+  fi
 fi
 
 # generate the docker compose init/up/down commands

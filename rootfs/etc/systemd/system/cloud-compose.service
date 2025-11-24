@@ -6,8 +6,8 @@ StartLimitIntervalSec=120
 StartLimitBurst=3
 
 [Service]
+Environment="HOME=/home/cloud-compose"
 WorkingDirectory=/mnt/disks/data/compose
-EnvironmentFile=/home/cloud-compose/env
 ExecStart=/mnt/disks/data/up
 ExecStop=/mnt/disks/data/down
 Restart=on-failure

@@ -5,5 +5,5 @@ lint:
 	@find . -type f -name "*.sh" -exec shellcheck {} +
 
 docs:
-	terraform-docs markdown table --output-file README.md .
+	terraform-docs markdown table --sort-by required --output-file README.md .
 

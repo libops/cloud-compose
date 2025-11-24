@@ -1,11 +1,11 @@
 variable "project_id" {
-  description = "libops project ID (logical identifier, not GCP project ID)"
+  description = "The GCP project ID"
   type        = string
 }
 
 variable "project_number" {
   type        = string
-  description = "The GCP project to use"
+  description = "The GCP project number"
 }
 
 variable "region" {
@@ -22,7 +22,7 @@ variable "zone" {
 
 variable "name" {
   type        = string
-  description = "The site name"
+  description = "The site name (will be the name of the GCP instance)"
 }
 
 variable "machine_type" {
@@ -39,7 +39,7 @@ variable "disk_size_gb" {
 
 variable "os" {
   type        = string
-  default     = "cos-117-18613-439-28"
+  default     = "cos-125-19216-104-25"
   description = "The host OS to install on the GCP instance"
 }
 
@@ -76,4 +76,16 @@ variable "allowed_ips" {
   type        = list(string)
   default     = []
   description = "CIDR IP Addresses allowed to turn on this site's GCP instance"
+}
+
+variable "allowed_ssh_ipv4" {
+  type        = list(string)
+  default     = []
+  description = "CIDR IPv4 Addresses allowed to to SSH into this site's GCP instance"
+}
+
+variable "allowed_ssh_ipv6" {
+  type        = list(string)
+  default     = []
+  description = "CIDR IPv6 Addresses allowed to SSH into this site's GCP instance"
 }

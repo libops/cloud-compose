@@ -2,7 +2,7 @@ networks:
   internal:
 services:
   libops-lightsout:
-    image: ghcr.io/libops/lightsout:main@sha256:66b761007d196e05e7039eaa16da7a55388b8851065b256b020d5dce0df4ca3c
+    image: ghcr.io/libops/lightsout:main@sha256:b61680d4c2ad03f9cfe1f47341eec128df8782a453bcfd708068a6d5c8877a02
     ports:
       - "8808:8808"
     networks:
@@ -36,7 +36,7 @@ services:
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
   libops-cap:
-    image: ghcr.io/libops/cap:main@sha256:d94b9524c2c9e75915a47fbcbce2dfc132816002cdb1fcf4c21b136c7dc3ddbb
+    image: ghcr.io/libops/cap:main@sha256:e81950f30fd31dcbbe5ce024b87335aa6be4e24553df2744769267715e404364
     networks:
       - internal
     restart: unless-stopped
