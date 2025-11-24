@@ -1,0 +1,24 @@
+#cloud-config
+
+users:
+- name: cloud-compose
+  shell: /bin/bash
+
+bootcmd:
+- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-data)
+- mkdir -p /mnt/disks/data
+- mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
+- chmod a+w /mnt/disks/data
+
+write_files:
+${WRITE_FILES_CONTENT}
+
+runcmd:
+- bash /home/cloud-compose/host-conf.sh
+- bash /home/cloud-compose/host-init.sh
+- bash /home/cloud-compose/init-app.sh
+- systemctl start cloud-compose.service
+# - systemctl start runner.service
+- systemctl start prune.timer
+# - systemctl start rollout.timer
+- systemctl start internal-services.service

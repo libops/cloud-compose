@@ -1,0 +1,7 @@
+[Unit]
+Description=prune
+
+[Service]
+Type=oneshot
+# TODO - race possible here. Check logs before running
+ExecStart=/usr/bin/docker system prune -af

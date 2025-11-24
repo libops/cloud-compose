@@ -1,0 +1,18 @@
+[Unit]
+Description=Internal Services (Ping, SSH, Power Management)
+BindsTo=docker.service
+After=cloud-compose.service
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+EnvironmentFile=/home/cloud-compose/env
+WorkingDirectory=/etc/libops
+ExecStartPre=/usr/bin/docker compose -f docker-compose.internal.yml pull
+ExecStart=/usr/bin/docker compose -f docker-compose.internal.yml up
+ExecStop=/usr/bin/docker compose -f docker-compose.internal.yml down
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=prune
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

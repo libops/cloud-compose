@@ -1,0 +1,31 @@
+[Unit]
+Description=GitHub Actions Runner
+BindsTo=docker.service
+After=docker.service
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Restart=on-failure
+RestartSec=60s
+EnvironmentFile=/home/lnmp/env
+ExecStartPre=/usr/bin/docker-credential-gcr configure-docker --registries us-docker.pkg.dev
+ExecStartPre=-/usr/bin/docker rm -f github-actions-runner
+ExecStart=/usr/bin/docker run \
+                            --pull=always \
+                            -v /sys/fs/cgroup:/sys/fs/cgroup \
+                            -v /run:/run \
+                            -v /mnt/disks/data/docker:/var/lib/docker \
+                            -v /mnt/disks/data/runner:/app \
+                            -v /mnt/disks/data/compose:/mnt/disks/data/compose:ro \
+                            -v /home/lnmp/env:/home/runner/libops.env:ro \
+                            -v /usr/bin/docker-credential-gcr:/usr/bin/docker-credential-gcr \
+                            --env LIBOPS_ENVIRONMENT="${LIBOPS_ENVIRONMENT}" \
+                            --env LIBOPS_GCLOUD_PROJECT_ID="${LIBOPS_GCLOUD_PROJECT_ID}" \
+                            --rm \
+                            --name=github-actions-runner \
+                            us-docker.pkg.dev/libops-images/shared/actions-runner:main
+ExecStop=/usr/bin/docker stop github-actions-runner

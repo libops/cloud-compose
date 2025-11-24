@@ -1,0 +1,49 @@
+networks:
+  internal:
+services:
+  libops-lightsout:
+    image: ghcr.io/libops/lightsout:main@sha256:66b761007d196e05e7039eaa16da7a55388b8851065b256b020d5dce0df4ca3c
+    ports:
+      - "8808:8808"
+    networks:
+      - internal
+    restart: unless-stopped
+    environment:
+      INACTIVITY_TIMEOUT: 90
+      GCP_PROJECT: ${GCP_PROJECT}
+      GCP_ZONE: ${GCP_ZONE}
+      GCP_INSTANCE_NAME: ${GCP_INSTANCE_NAME}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /mnt/disks/data:/mnt/disks/data
+  libops-cadvisor:
+    image: ghcr.io/google/cadvisor:v0.53.0@sha256:c3770bd6fc6c6a9cb2b47143e6b3cc3fdd9d20a8453dffbb7e09a145e7e0c4e4
+    command:
+      - -disable_metrics
+      - cpu_topology,referenced_memory,disk,memory_numa,perf_event,sched,tcp,udp
+      - -store_container_labels
+      - "false"
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - internal
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /mnt/disks/data/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+  libops-cap:
+    image: ghcr.io/libops/cap:main@sha256:d94b9524c2c9e75915a47fbcbce2dfc132816002cdb1fcf4c21b136c7dc3ddbb
+    networks:
+      - internal
+    restart: unless-stopped
+    environment:
+      GCP_PROJECT: ${GCP_PROJECT}
+      GCP_ZONE: ${GCP_ZONE}
+      GCP_INSTANCE_NAME: ${GCP_INSTANCE_NAME}
+      CADVISOR_HOST: "libops-cadvisor:8080"
+    depends_on:
+      - libops-cadvisor
