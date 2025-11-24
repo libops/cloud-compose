@@ -2,15 +2,11 @@
 
 set -eou pipefail
 
-awk -v prepend="$(cat /home/cloud-compose/fluent-bit.conf)" '/# Collects docker.service logs/ {print prepend} 1' /etc/fluent-bit/fluent-bit.conf > /etc/fluent-bit/fluent-bit.conf.new
-mv /etc/fluent-bit/fluent-bit.conf /etc/fluent-bit/fluent-bit.bak
-mv /etc/fluent-bit/fluent-bit.conf.new /etc/fluent-bit/fluent-bit.conf
+# restart services we've overwritten files for
 systemctl restart fluent-bit
-
-mkdir -p /mnt/disks/data/docker
-echo '{"data-root": "/mnt/disks/data/docker"}' | jq . > /etc/docker/daemon.json
 systemctl restart --no-block docker
 
+# since COS is read only FS, install docker compose/buildx in home directory
 if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-compose" ]; then
     curl -sSL \
         https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-x86_64 \
