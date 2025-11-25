@@ -3,10 +3,9 @@
 set -eou pipefail
 
 # shellcheck disable=SC1091
-source /home/cloud-compose/env
-export HOME
+. /home/cloud-compose/env
 
-DIR=${DIR:-/mnt/disks/data/compose}
+export DIR=${DIR:-/mnt/disks/data/compose}
 
 if [ ! -d "$DIR" ]; then
   git clone -b "$DOCKER_COMPOSE_BRANCH" "$DOCKER_COMPOSE_REPO" "$DIR"
@@ -20,7 +19,6 @@ git pull origin "$DOCKER_COMPOSE_BRANCH" || echo "Unable to git pull"
 # run the docker compose init command if it exists
 /mnt/disks/data/init
 
-export DIR
 bash /home/cloud-compose/rollout.sh
 
 chgrp developers /mnt/disks/data/compose

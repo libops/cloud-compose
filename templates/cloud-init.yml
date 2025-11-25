@@ -16,6 +16,9 @@ write_files:
 ${WRITE_FILES_CONTENT}
 
 runcmd:
+# block metadata server from docker and non-root
+- /sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP
+- /sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP
 - bash /home/cloud-compose/host-conf.sh
 - bash /home/cloud-compose/host-init.sh
 - bash /home/cloud-compose/init-app.sh

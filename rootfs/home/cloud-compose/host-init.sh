@@ -7,6 +7,13 @@ cleanup() {
   popd
 }
 
+# make sure out internal services dir exists
+DIR=/mnt/disks/data/libops
+if [ ! -d "$DIR" ]; then
+  mkdir "$DIR"
+fi
+cp /etc/libops/docker-compose.yaml /mnt/disks/data/libops
+
 pushd /home/cloud-compose
 
 trap cleanup EXIT
@@ -22,7 +29,11 @@ curl -sf \
 echo "HOME=/home/cloud-compose" > env.tmp
 for K in $(jq -r '.instance.attributes | keys | .[]' tmp.attr | grep -E '(DOCKER|GCP|LIBOPS)'); do
   V=$(jq -r .instance.attributes."$K" tmp.attr)
-  echo "$K=\"$V\"" >> env.tmp
+  if [[ "$V" =~ [[:space:]\$\`\\\"\'\(\)\{\}\[\]\|\&\;\<\>\*\?] ]]; then
+    echo "$K=\"$V\"" >> env.tmp
+  else
+    echo "$K=$V" >> env.tmp
+  fi
 done
 
 {
@@ -31,12 +42,13 @@ done
 } >> env.tmp
 
 # shellcheck disable=SC1091
-source env.tmp
+. ./env.tmp
+
 echo "SITE_DOCKER_REGISTRY=us-docker.pkg.dev/${GCP_PROJECT}/private" >> env.tmp
 
 if ! diff <(md5sum env.tmp) <(md5sum env); then
   mv env.tmp env
-  cp env /etc/libops/.env
+  cp env /mnt/disks/data/compose/.env
   if [ -d /mnt/disks/data/compose ]; then
     cp env /mnt/disks/data/compose/.env
   fi

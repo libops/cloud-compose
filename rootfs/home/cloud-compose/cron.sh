@@ -4,7 +4,11 @@ set -eou pipefail
 
 echo "Running daily cron"
 
-export DIR=/etc/libops
-bash /home/cloud-compose/rollout.sh
+pushd /home/cloud-compose
+
+bash rotate-keys-internal.sh
+bash rotate-keys-app.sh
 
 /usr/bin/docker system prune -af
+
+popd

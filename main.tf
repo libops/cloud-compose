@@ -63,13 +63,6 @@ resource "google_service_account_iam_member" "token-creator" {
   member             = "serviceAccount:${google_service_account.cloud-compose.email}"
 }
 
-# push metrics to GCP
-resource "google_project_iam_member" "stackdriver" {
-  project = var.project_id
-  role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.cloud-compose.email}"
-}
-
 # push logs to GCP
 resource "google_project_iam_member" "log" {
   project = var.project_id
@@ -171,10 +164,50 @@ data "google_project_iam_custom_role" "gce-suspend" {
   project = var.project_id
   role_id = "suspendVM"
 }
+
+
+# =============================================================================
+# LIBOPS ADMIN SERVICES IDENTITY
+# =============================================================================
+
+resource "google_service_account" "internal-services" {
+  account_id = format("internal-services-%s", var.name)
+  project    = var.project_id
+}
+
+resource "google_service_account_iam_member" "internal-services-keys" {
+  service_account_id = google_service_account.internal-services.id
+  role               = "roles/iam.serviceAccountKeyAdmin"
+  member             = "serviceAccount:${google_service_account.cloud-compose.email}"
+}
+
+# push metrics to GCP
+resource "google_project_iam_member" "stackdriver" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.internal-services.email}"
+}
+
+# suspend the GCP instance
 resource "google_project_iam_member" "gce-suspend" {
   project = var.project_id
   role    = data.google_project_iam_custom_role.gce-suspend.name
-  member  = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member  = "serviceAccount:${google_service_account.internal-services.email}"
+}
+
+# =============================================================================
+# DOCKER COMPOSE APP IDENTITY
+# =============================================================================
+
+resource "google_service_account" "app" {
+  account_id = var.name
+  project    = var.project_id
+}
+
+resource "google_service_account_iam_member" "app-keys" {
+  service_account_id = google_service_account.app.id
+  role               = "roles/iam.serviceAccountKeyAdmin"
+  member             = "serviceAccount:${google_service_account.cloud-compose.email}"
 }
 
 # =============================================================================

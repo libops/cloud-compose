@@ -7,7 +7,9 @@ StartLimitBurst=3
 
 [Service]
 Environment="HOME=/home/cloud-compose"
-WorkingDirectory=/etc/libops
+WorkingDirectory=/mnt/disks/data/libops
+ExecStartPre=/bin/bash /home/cloud-compose/rotate-keys-internal.sh
+ExecStartPre=/usr/bin/test -f /mnt/disks/data/libops/GOOGLE_APPLICATION_CREDENTIALS
 ExecStart=/usr/bin/docker compose up
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
