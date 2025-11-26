@@ -149,12 +149,17 @@ resource "google_compute_instance" "cloud-compose" {
 
   service_account {
     email  = google_service_account.cloud-compose.email
-    scopes = ["cloud-platform"]
+    scopes = [
+      "https://www.googleapis.com/auth/logging.write",
+      "https://www.googleapis.com/auth/monitoring.write",
+      "https://www.googleapis.com/auth/devstorage.read_only",
+      "https://www.googleapis.com/auth/iam",
+    ]
   }
 
   shielded_instance_config {
     enable_integrity_monitoring = "true"
-    enable_secure_boot          = "false"
+    enable_secure_boot          = "true"
     enable_vtpm                 = "true"
   }
 }
