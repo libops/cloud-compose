@@ -72,23 +72,20 @@ resource "google_project_iam_member" "log" {
 
 resource "google_compute_disk" "boot" {
   # force re-create VM when cloud-init changes
-  name                      = format("cloud-compose-boot-%s-%s", var.name, md5(data.cloudinit_config.ci.rendered))
+  name                      = format("%s-boot-%s", var.name, md5(data.cloudinit_config.ci.rendered))
   project                   = var.project_id
-  type                      = "pd-ssd"
+  type                      = "hyperdisk-balanced"
   zone                      = var.zone
-  size                      = 10
+  size                      = 20
   image                     = "projects/cos-cloud/global/images/${var.os}"
   physical_block_size_bytes = 4096
 }
 
 resource "google_compute_disk" "data" {
-  name    = format("%s-data-disk", var.name)
-  project = var.project_id
-  type    = "pd-ssd"
-  zone    = var.zone
-  # to resize, extend in console or gcloud CLI
-  # then SSH into VM and run
-  # sudo resize2fs /dev/sdb
+  name                      = format("%s-data-disk", var.name)
+  project                   = var.project_id
+  type                      = "hyperdisk-balanced"
+  zone                      = var.zone
   size                      = var.disk_size_gb
   image                     = "debian-13-trixie-v20251111"
   physical_block_size_bytes = 4096
@@ -100,7 +97,7 @@ resource "google_compute_instance" "cloud-compose" {
   machine_type              = var.machine_type
   zone                      = var.zone
   allow_stopping_for_update = true
-  tags                      = ["cloud-compose", format("cloud-compose-%s", var.name)]
+  tags                      = ["cloud-compose", var.name]
   can_ip_forward            = "false"
 
   boot_disk {
@@ -148,7 +145,7 @@ resource "google_compute_instance" "cloud-compose" {
   }
 
   service_account {
-    email  = google_service_account.cloud-compose.email
+    email = google_service_account.cloud-compose.email
     scopes = [
       "https://www.googleapis.com/auth/logging.write",
       "https://www.googleapis.com/auth/monitoring.write",

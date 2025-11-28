@@ -27,13 +27,34 @@ variable "name" {
 
 variable "machine_type" {
   type        = string
-  default     = "e2-medium"
-  description = "VM machine type"
+  default     = "n4-standard-2"
+  description = "VM machine type (General-purpose series that support Hyperdisk Balanced"
+
+  validation {
+    condition = contains([
+      "n4-standard-2",
+      "n4-standard-4",
+      "n4-standard-8",
+      "n4-standard-16",
+      "n4-standard-32",
+      "n4-standard-48",
+      "n4-standard-64",
+      "n4-standard-80",
+      "c4-standard-2",
+      "c4-standard-4",
+      "c4-standard-8",
+      "c4-standard-16",
+      "c4-standard-32",
+      "c4-standard-48",
+      "c4-standard-96",
+    ], var.machine_type)
+    error_message = "The 'machine_type' must be from a General-Purpose family that supports Hyperdisk Balanced (C4, or N4 series)"
+  }
 }
 
 variable "disk_size_gb" {
   type        = number
-  default     = 25
+  default     = 50
   description = "Data disk size in GB"
 }
 

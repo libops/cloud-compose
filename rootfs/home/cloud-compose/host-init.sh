@@ -41,18 +41,13 @@ done
   echo "GCP_PRIVATE_IP=$(jq -r '.instance.networkInterfaces[0].ip' tmp.attr)"
 } >> env.tmp
 
-# shellcheck disable=SC1091
-. ./env.tmp
-
-echo "SITE_DOCKER_REGISTRY=us-docker.pkg.dev/${GCP_PROJECT}/private" >> env.tmp
-
 if ! diff <(md5sum env.tmp) <(md5sum env); then
   mv env.tmp env
-  cp env /mnt/disks/data/compose/.env
-  if [ -d /mnt/disks/data/compose ]; then
-    cp env /mnt/disks/data/compose/.env
-  fi
+  cp env /mnt/disks/data/libops/.env
 fi
+
+# shellcheck disable=SC1091
+. ./env
 
 # generate the docker compose init/up/down commands
 # used by the systemd service
@@ -68,6 +63,7 @@ for name in "${!SCRIPTS[@]}"; do
 
 set -eou pipefail
 
+echo "Running dokcer compose ${name}"
 ${SCRIPTS[${name}]}
 EOT
   chmod +x "${SCRIPT_DIR}/${name}"

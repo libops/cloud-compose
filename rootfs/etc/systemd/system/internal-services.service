@@ -2,6 +2,8 @@
 Description=Internal Services (Ping, Metrics, Power Management)
 BindsTo=docker.service
 After=cloud-compose.service
+Requires=internal-services.timer
+After=internal-services.timer
 StartLimitIntervalSec=120
 StartLimitBurst=3
 

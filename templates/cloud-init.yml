@@ -3,8 +3,6 @@
 users:
 - name: cloud-compose
   shell: /bin/bash
-groups:
-  - developers
 
 bootcmd:
 - fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-data)
@@ -22,6 +20,5 @@ runcmd:
 - bash /home/cloud-compose/host-conf.sh
 - bash /home/cloud-compose/host-init.sh
 - bash /home/cloud-compose/init-app.sh
-- systemctl start cloud-compose.service
-- systemctl start internal-services.service
+- systemctl start internal-services.timer
 - systemctl start cron.timer

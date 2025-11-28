@@ -26,6 +26,7 @@ shopt -u nullglob
 if [ "$RESTART" -eq 1 ]; then
   SERVICE=$(grep -sl "WorkingDirectory=$DIR" /etc/systemd/system/*.service | xargs basename)
   if [ -n "$SERVICE" ]; then
+    echo "Restarting $SERVICE"
     systemctl restart "$SERVICE"
   fi
 fi
