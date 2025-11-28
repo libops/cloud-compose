@@ -55,10 +55,15 @@ EOT
         DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
         DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
 EOT
+  use_overlay      = length(var.overlay_paths) > 0
+  prod_disk_name   = var.overlay_source_instance != "" ? format("%s-data-disk", var.overlay_source_instance) : ""
+  prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-data-disk", var.project_id, var.zone, var.overlay_source_instance) : ""
   cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
     WRITE_FILES_CONTENT    = local.write_files_content,
     DOCKER_COMPOSE_SCRIPTS = local.docker_compose_scripts,
     ENV_FILE_CONTENT       = local.env_file_content,
+    USE_OVERLAY            = local.use_overlay,
+    OVERLAY_PATHS          = var.overlay_paths,
   })
 }
 
@@ -70,7 +75,7 @@ data "cloudinit_config" "ci" {
 }
 
 resource "google_service_account" "cloud-compose" {
-  account_id = format("cloud-compose-%s", var.name)
+  account_id = format("libops-vm-%s", var.name)
   project    = var.project_id
 }
 
@@ -124,6 +129,72 @@ resource "google_compute_disk" "data" {
   physical_block_size_bytes = 4096
 }
 
+# Daily snapshot schedule for production data disk
+resource "google_compute_resource_policy" "daily_snapshot" {
+  count   = var.daily_snapshots ? 1 : 0
+  name    = format("%s-daily-snapshot-policy", var.name)
+  project = var.project_id
+  region  = var.region
+
+  snapshot_schedule_policy {
+    schedule {
+      daily_schedule {
+        days_in_cycle = 1
+        start_time    = "04:00" # 4 AM UTC
+      }
+    }
+
+    retention_policy {
+      max_retention_days    = 7
+      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
+    }
+
+    snapshot_properties {
+      labels = {
+        managed_by = "terraform"
+        instance   = var.name
+      }
+      storage_locations = [var.region]
+      guest_flush       = false
+    }
+  }
+}
+
+# Attach snapshot policy to data disk
+resource "google_compute_disk_resource_policy_attachment" "daily_snapshot" {
+  count   = var.daily_snapshots ? 1 : 0
+  name    = google_compute_resource_policy.daily_snapshot[0].name
+  disk    = google_compute_disk.data.name
+  project = var.project_id
+  zone    = var.zone
+}
+
+# Get the latest snapshot from production instance's data disk
+data "google_compute_snapshot" "latest_prod" {
+  count   = local.use_overlay ? 1 : 0
+  project = var.project_id
+
+  # Filter to snapshots of the production data disk, get most recent
+  most_recent = true
+  filter      = "sourceDisk eq ${local.prod_disk_url}"
+}
+
+# Restore production snapshot to a staging-specific disk for overlays
+resource "google_compute_disk" "overlay_disk" {
+  count                     = local.use_overlay ? 1 : 0
+  name                      = format("%s-overlay-disk", var.name)
+  project                   = var.project_id
+  type                      = "hyperdisk-balanced"
+  zone                      = var.zone
+  snapshot                  = data.google_compute_snapshot.latest_prod[0].self_link
+  physical_block_size_bytes = 4096
+
+  lifecycle {
+    # Allow recreation when snapshot changes (new production data)
+    create_before_destroy = true
+  }
+}
+
 resource "google_compute_instance" "cloud-compose" {
   name                      = var.name
   project                   = var.project_id
@@ -141,6 +212,17 @@ resource "google_compute_instance" "cloud-compose" {
   attached_disk {
     device_name = "data"
     source      = google_compute_disk.data.self_link
+  }
+
+  # Conditionally attach overlay disk (restored from production snapshot)
+  # Mounted read-only at the OS level in cloud-init
+  dynamic "attached_disk" {
+    for_each = local.use_overlay ? [1] : []
+    content {
+      device_name = "prod-data"
+      source      = google_compute_disk.overlay_disk[0].self_link
+      mode        = "READ_WRITE"
+    }
   }
 
   metadata = {
@@ -196,7 +278,7 @@ data "google_project_iam_custom_role" "gce-suspend" {
 # =============================================================================
 
 resource "google_service_account" "internal-services" {
-  account_id = format("internal-services-%s", var.name)
+  account_id = format("internal-%s", var.name)
   project    = var.project_id
 }
 
@@ -286,7 +368,7 @@ resource "google_service_account" "ppb" {
 }
 
 module "ppb" {
-  source = "git::https://github.com/libops/terraform-cloudrun-v2?ref=0.4.0"
+  source = "git::https://github.com/libops/terraform-cloudrun-v2?ref=0.5.0"
 
   name              = var.name
   project           = var.project_id

@@ -9,6 +9,16 @@ bootcmd:
 - mkdir -p /mnt/disks/data
 - mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
 - chmod a+w /mnt/disks/data
+%{ if USE_OVERLAY ~}
+- mkdir -p /mnt/disks/prod-readonly
+- mount -o ro $(readlink -f /dev/disk/by-id/google-prod-data) /mnt/disks/prod-readonly
+%{ for path in OVERLAY_PATHS ~}
+- mkdir -p /mnt/disks/data/${path}
+- mkdir -p /mnt/disks/data/.overlay/${path}/upper
+- mkdir -p /mnt/disks/data/.overlay/${path}/work
+- mount -t overlay overlay -o lowerdir=/mnt/disks/prod-readonly/${path},upperdir=/mnt/disks/data/.overlay/${path}/upper,workdir=/mnt/disks/data/.overlay/${path}/work /mnt/disks/data/${path}
+%{ endfor ~}
+%{ endif ~}
 
 write_files:
 ${WRITE_FILES_CONTENT}
