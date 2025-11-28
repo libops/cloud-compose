@@ -5,15 +5,15 @@ set -eou pipefail
 pushd /home/cloud-compose
 
 # shellcheck disable=SC1091
-. ./env
+source /home/cloud-compose/profile.sh
 
-if [ -d /mnt/disks/data/compose/secrets ]; then
+if [ -d "$DOCKER_COMPOSE_DIR/secrets" ]; then
   exit 0
 fi
 
 bash rotate-keys.sh \
     "$GCP_INSTANCE_NAME@$GCP_PROJECT.iam.gserviceaccount.com" \
     "$GCP_PROJECT" \
-    /mnt/disks/data/compose/secrets/GOOGLE_APPLICATION_CREDENTIALS
+    "$DOCKER_COMPOSE_DIR/secrets/GOOGLE_APPLICATION_CREDENTIALS"
 
 popd

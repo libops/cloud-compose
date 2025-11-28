@@ -22,10 +22,43 @@ locals {
         permissions: "0644"
         content: |
           ${indent(4, file("${local.rootFs}/${file}"))}
-    EOT
+EOT
   ])
+  docker_compose_scripts = join("\n", [
+    for name, cmd in {
+      "init" = var.docker_compose_init
+      "up"   = var.docker_compose_up
+      "down" = var.docker_compose_down
+    } : <<-EOT
+      - path: "/mnt/disks/data/${name}"
+        permissions: "0755"
+        content: |
+          #!/usr/bin/env bash
+
+          set -eou pipefail
+
+          echo "Running docker compose ${name}"
+          ${cmd}
+EOT
+  ])
+  env_file_content = <<-EOT
+    - path: "/home/cloud-compose/.env"
+      permissions: "0640"
+      content: |
+        HOME=/home/cloud-compose
+        GCP_PROJECT="${var.project_id}"
+        GCP_PROJECT_NUMBER="${var.project_number}"
+        GCP_INSTANCE_NAME="${var.name}"
+        GCP_REGION="${var.region}"
+        GCP_ZONE="${var.zone}"
+        DOCKER_COMPOSE_DIR=/mnt/disks/data/compose
+        DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
+        DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
+EOT
   cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
-    WRITE_FILES_CONTENT = local.write_files_content,
+    WRITE_FILES_CONTENT    = local.write_files_content,
+    DOCKER_COMPOSE_SCRIPTS = local.docker_compose_scripts,
+    ENV_FILE_CONTENT       = local.env_file_content,
   })
 }
 
@@ -115,16 +148,6 @@ resource "google_compute_instance" "cloud-compose" {
     google-logging-use-fluentbit = "true"
     google-monitoring-enabled    = "true"
     user-data                    = data.cloudinit_config.ci.part[0].content
-    GCP_PROJECT                  = var.project_id
-    GCP_PROJECT_NUMBER           = var.project_number
-    GCP_INSTANCE_NAME            = var.name
-    GCP_REGION                   = var.region
-    GCP_ZONE                     = var.zone
-    DOCKER_COMPOSE_REPO          = var.docker_compose_repo
-    DOCKER_COMPOSE_BRANCH        = var.docker_compose_branch
-    DOCKER_COMPOSE_INIT_CMD      = var.docker_compose_init
-    DOCKER_COMPOSE_UP_CMD        = var.docker_compose_up
-    DOCKER_COMPOSE_DOWN_CMD      = var.docker_compose_down
   }
 
   network_interface {

@@ -12,13 +12,8 @@ bootcmd:
 
 write_files:
 ${WRITE_FILES_CONTENT}
+${DOCKER_COMPOSE_SCRIPTS}
+${ENV_FILE_CONTENT}
 
 runcmd:
-# block metadata server from docker and non-root
-- /sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP
-- /sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP
-- bash /home/cloud-compose/host-conf.sh
-- bash /home/cloud-compose/host-init.sh
-- bash /home/cloud-compose/init-app.sh
-- systemctl start internal-services.timer
-- systemctl start cron.timer
+- bash -lx /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1

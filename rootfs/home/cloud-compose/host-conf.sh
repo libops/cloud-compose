@@ -2,9 +2,13 @@
 
 set -eou pipefail
 
+# block metadata server from docker and non-root
+/sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP
+/sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP
+
 # restart services we've overwritten files for
 systemctl restart fluent-bit
-systemctl restart --no-block docker
+systemctl restart docker
 
 # since COS is read only FS, install docker compose/buildx in home directory
 if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-compose" ]; then

@@ -2,8 +2,8 @@
 Description=Delay Internal Services until 10m after initial boot
 
 [Timer]
-OnBootSec=10min
-RuntimeMaxSec=10min
+OnBootSec=20min
+RuntimeMaxSec=20min
 Unit=internal-services.service
 
 [Install]

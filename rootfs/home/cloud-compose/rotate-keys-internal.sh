@@ -5,7 +5,7 @@ set -eou pipefail
 pushd /home/cloud-compose
 
 # shellcheck disable=SC1091
-. ./env
+source /home/cloud-compose/profile.sh
 
 bash rotate-keys.sh \
     "internal-services-$GCP_INSTANCE_NAME@$GCP_PROJECT.iam.gserviceaccount.com" \

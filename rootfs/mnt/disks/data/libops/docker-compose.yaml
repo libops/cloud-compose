@@ -1,7 +1,7 @@
 networks:
   internal:
 services:
-  libops-lightsout:
+  lightsout:
     image: ghcr.io/libops/lightsout:main@sha256:4d38ac380c86514d72efbcce0af9ea8ffd7ff86e97abea3d0b3c946cf204eaae
     ports:
       - "8808:8808"
@@ -18,7 +18,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /mnt/disks/data:/mnt/disks/data
       - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
-  libops-cadvisor:
+  cadvisor:
     image: ghcr.io/google/cadvisor:v0.53.0@sha256:c3770bd6fc6c6a9cb2b47143e6b3cc3fdd9d20a8453dffbb7e09a145e7e0c4e4
     command:
       - -disable_metrics
@@ -37,7 +37,7 @@ services:
       - /sys:/sys:ro
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
-  libops-cap:
+  cap:
     image: ghcr.io/libops/cap:main@sha256:e81950f30fd31dcbbe5ce024b87335aa6be4e24553df2744769267715e404364
     networks:
       - internal
@@ -46,9 +46,9 @@ services:
       GCP_PROJECT: ${GCP_PROJECT}
       GCP_ZONE: ${GCP_ZONE}
       GCP_INSTANCE_NAME: ${GCP_INSTANCE_NAME}
-      CADVISOR_HOST: "libops-cadvisor:8080"
+      CADVISOR_HOST: "cadvisor:8080"
       GOOGLE_APPLICATION_CREDENTIALS: /app/GOOGLE_APPLICATION_CREDENTIALS
     volumes:
       - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
     depends_on:
-      - libops-cadvisor
+      - cadvisor
