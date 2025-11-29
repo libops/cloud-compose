@@ -111,10 +111,10 @@ variable "allowed_ssh_ipv6" {
   description = "CIDR IPv6 Addresses allowed to SSH into this site's GCP instance"
 }
 
-variable "daily_snapshots" {
+variable "run_snapshots" {
   type        = bool
   default     = false
-  description = "Enable daily snapshots of the data disk (recommended for production). Snapshots are retained for 7 days."
+  description = "Enable daily snapshots of the data disk (recommended for production). Last seven days of snapshots are available. Also weekly snapshots for past year."
 }
 
 variable "overlay_source_instance" {
@@ -123,8 +123,8 @@ variable "overlay_source_instance" {
   description = "Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments."
 }
 
-variable "overlay_paths" {
+variable "volume_names" {
   type        = list(string)
   default     = []
-  description = "List of subdirectory paths to overlay from production snapshot (e.g., ['docker/volumes/compose_ojs-public/_data']). Production data is mounted read-only as lower layer, staging writes go to upper layer."
+  description = "List of docker volumes to overlay from production snapshot (e.g., ['compose_ojs-public']). Production data is mounted read-only as lower layer, staging writes go to upper layer."
 }

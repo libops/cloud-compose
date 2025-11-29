@@ -1,7 +1,8 @@
 output "instance" {
   value = {
     id : google_compute_instance.cloud-compose.instance_id,
-    disk : google_compute_disk.data.name,
+    name : google_compute_instance.cloud-compose.name,
+    disk : google_compute_disk.docker-volumes.name,
     zone : google_compute_instance.cloud-compose.zone,
     gsa : {
       email : google_service_account.cloud-compose.email,
@@ -9,17 +10,7 @@ output "instance" {
       name : google_service_account.cloud-compose.name,
     }
   }
-  description = "The Google Compute instance ID, zone, data disk, GSA for the instance."
-}
-
-output "data_disk_name" {
-  value       = google_compute_disk.data.name
-  description = "Name of the data disk"
-}
-
-output "zone" {
-  value       = var.zone
-  description = "Zone where resources are deployed"
+  description = "The Google Compute instance ID, name, zone, data disk, GSA for the instance."
 }
 
 output "serviceGsa" {

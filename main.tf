@@ -14,6 +14,8 @@ provider "google" {
   region  = var.region
 }
 
+resource "time_static" "snapshot_time_static" {}
+
 locals {
   rootFs = "${path.module}/rootfs"
   write_files_content = join("\n", [
@@ -55,16 +57,20 @@ EOT
         DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
         DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
 EOT
-  use_overlay      = length(var.overlay_paths) > 0
+  use_overlay      = length(var.volume_names) > 0
   prod_disk_name   = var.overlay_source_instance != "" ? format("%s-data-disk", var.overlay_source_instance) : ""
-  prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-data-disk", var.project_id, var.zone, var.overlay_source_instance) : ""
+  prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
   cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
     WRITE_FILES_CONTENT    = local.write_files_content,
     DOCKER_COMPOSE_SCRIPTS = local.docker_compose_scripts,
     ENV_FILE_CONTENT       = local.env_file_content,
     USE_OVERLAY            = local.use_overlay,
-    OVERLAY_PATHS          = var.overlay_paths,
+    DOCKER_VOLUME_OVERLAYS = var.volume_names,
   })
+
+  # have prod snapshot begin ten minutes after the initial run
+  # so non-prod environments can have a snapshot disk to overlay
+  snapshot_start_time = formatdate("h:00", time_static.snapshot_time_static.rfc3339)
 }
 
 data "cloudinit_config" "ci" {
@@ -75,7 +81,7 @@ data "cloudinit_config" "ci" {
 }
 
 resource "google_service_account" "cloud-compose" {
-  account_id = format("libops-vm-%s", var.name)
+  account_id = format("vm-%s", var.name)
   project    = var.project_id
 }
 
@@ -114,7 +120,7 @@ resource "google_compute_disk" "boot" {
   project                   = var.project_id
   type                      = "hyperdisk-balanced"
   zone                      = var.zone
-  size                      = 20
+  size                      = 15
   image                     = "projects/cos-cloud/global/images/${var.os}"
   physical_block_size_bytes = 4096
 }
@@ -124,15 +130,26 @@ resource "google_compute_disk" "data" {
   project                   = var.project_id
   type                      = "hyperdisk-balanced"
   zone                      = var.zone
+  size                      = 20
+  image                     = "debian-13-trixie-v20251111"
+  physical_block_size_bytes = 4096
+}
+
+resource "google_compute_disk" "docker-volumes" {
+  name                      = format("%s-docker-volumes", var.name)
+  project                   = var.project_id
+  type                      = "hyperdisk-balanced"
+  zone                      = var.zone
   size                      = var.disk_size_gb
   image                     = "debian-13-trixie-v20251111"
   physical_block_size_bytes = 4096
 }
 
-# Daily snapshot schedule for production data disk
+
+# Daily snapshot schedule for production docker volume disk
 resource "google_compute_resource_policy" "daily_snapshot" {
-  count   = var.daily_snapshots ? 1 : 0
-  name    = format("%s-daily-snapshot-policy", var.name)
+  count   = var.run_snapshots ? 1 : 0
+  name    = format("%s-daily-snapshot", var.name)
   project = var.project_id
   region  = var.region
 
@@ -140,7 +157,7 @@ resource "google_compute_resource_policy" "daily_snapshot" {
     schedule {
       daily_schedule {
         days_in_cycle = 1
-        start_time    = "04:00" # 4 AM UTC
+        start_time    = local.snapshot_start_time
       }
     }
 
@@ -159,12 +176,46 @@ resource "google_compute_resource_policy" "daily_snapshot" {
     }
   }
 }
-
-# Attach snapshot policy to data disk
 resource "google_compute_disk_resource_policy_attachment" "daily_snapshot" {
-  count   = var.daily_snapshots ? 1 : 0
+  count   = var.run_snapshots ? 1 : 0
   name    = google_compute_resource_policy.daily_snapshot[0].name
-  disk    = google_compute_disk.data.name
+  disk    = google_compute_disk.docker-volumes.name
+  project = var.project_id
+  zone    = var.zone
+}
+
+resource "google_compute_resource_policy" "weekly_snapshot" {
+  count   = var.run_snapshots ? 1 : 0
+  name    = format("%s-weekly-snapshot", var.name)
+  project = var.project_id
+  region  = var.region
+
+  snapshot_schedule_policy {
+    schedule {
+      weekly_schedule {
+        day_of_weeks {
+          day        = "SUNDAY"
+          start_time = "01:00"
+        }
+      }
+    }
+
+    retention_policy {
+      max_retention_days    = 365
+      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
+    }
+
+    snapshot_properties {
+      storage_locations = [var.region]
+      guest_flush       = false
+    }
+  }
+}
+
+resource "google_compute_disk_resource_policy_attachment" "weekly_snapshot" {
+  count   = var.run_snapshots ? 1 : 0
+  name    = google_compute_resource_policy.weekly_snapshot[0].name
+  disk    = google_compute_disk.docker-volumes.name
   project = var.project_id
   zone    = var.zone
 }
@@ -190,7 +241,6 @@ resource "google_compute_disk" "overlay_disk" {
   physical_block_size_bytes = 4096
 
   lifecycle {
-    # Allow recreation when snapshot changes (new production data)
     create_before_destroy = true
   }
 }
@@ -213,15 +263,19 @@ resource "google_compute_instance" "cloud-compose" {
     device_name = "data"
     source      = google_compute_disk.data.self_link
   }
+  attached_disk {
+    device_name = "docker-volumes"
+    source      = google_compute_disk.docker-volumes.self_link
+  }
 
-  # Conditionally attach overlay disk (restored from production snapshot)
-  # Mounted read-only at the OS level in cloud-init
   dynamic "attached_disk" {
     for_each = local.use_overlay ? [1] : []
     content {
-      device_name = "prod-data"
+      device_name = "prod-volumes"
       source      = google_compute_disk.overlay_disk[0].self_link
-      mode        = "READ_WRITE"
+      # hyperdisk needs to be attached rw
+      # even though we're setting this as lowerdir read only
+      mode = "READ_WRITE"
     }
   }
 
@@ -263,6 +317,10 @@ resource "google_compute_instance" "cloud-compose" {
     enable_integrity_monitoring = "true"
     enable_secure_boot          = "true"
     enable_vtpm                 = "true"
+  }
+
+  lifecycle {
+    create_before_destroy = false
   }
 }
 

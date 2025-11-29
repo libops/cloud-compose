@@ -10,6 +10,15 @@ set -eou pipefail
 systemctl restart fluent-bit
 systemctl restart docker
 
+# wait until our data-root /etc/docker/daemon.json setting are applied
+until test -d /mnt/disks/data/docker/volumes; do
+  echo "Waiting for docker volumes dir"
+  sleep 1
+done
+
+rm -rf /mnt/disks/data/docker/volumes
+ln -s /mnt/disks/volumes /mnt/disks/data/docker/volumes
+
 # since COS is read only FS, install docker compose/buildx in home directory
 if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-compose" ]; then
     curl -sSL \

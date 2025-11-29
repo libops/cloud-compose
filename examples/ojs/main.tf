@@ -13,25 +13,26 @@ module "production" {
   docker_compose_init = var.docker_compose_init
   region              = var.region
   zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
-  daily_snapshots     = true
+  run_snapshots       = true
   allowed_ips         = var.allowed_ips
-
 }
 
 module "staging" {
   source = "../.."
 
-  name                    = "ojs-staging"
-  project_id              = var.project_id
-  project_number          = var.project_number
-  docker_compose_repo     = var.docker_compose_repo
-  docker_compose_init     = var.docker_compose_init
-  region                  = var.region
-  zone                    = format("%s-%s", var.region, random_shuffle.zone.result[0])
-  disk_size_gb            = 20
+  name                = "ojs-staging"
+  project_id          = var.project_id
+  project_number      = var.project_number
+  docker_compose_repo = var.docker_compose_repo
+  docker_compose_init = var.docker_compose_init
+  region              = var.region
+  zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
+  disk_size_gb        = 20
+  allowed_ips         = var.allowed_ips
+
+  # make production public files available in staging
   overlay_source_instance = "ojs-production"
-  allowed_ips             = var.allowed_ips
-  overlay_paths = [
-    "docker/volumes/compose_ojs-public/_data"
+  volume_names = [
+    "compose_ojs-public"
   ]
 }

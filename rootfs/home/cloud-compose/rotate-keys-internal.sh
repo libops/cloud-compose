@@ -8,7 +8,7 @@ pushd /home/cloud-compose
 source /home/cloud-compose/profile.sh
 
 bash rotate-keys.sh \
-    "libops-$GCP_INSTANCE_NAME@$GCP_PROJECT.iam.gserviceaccount.com" \
+    "internal-$GCP_INSTANCE_NAME@$GCP_PROJECT.iam.gserviceaccount.com" \
     "$GCP_PROJECT" \
     /mnt/disks/data/libops/GOOGLE_APPLICATION_CREDENTIALS
 
