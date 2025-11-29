@@ -10,7 +10,18 @@ set -eou pipefail
 systemctl restart fluent-bit
 systemctl restart docker
 
+# wait until our data-root /etc/docker/daemon.json setting are applied
+until test -d /mnt/disks/data/docker/volumes; do
+  echo "Waiting for docker volumes dir"
+  sleep 1
+done
+
+# move volumes from docker's data root to our volumes disk
+rm -rf /mnt/disks/data/docker/volumes
+ln -s /mnt/disks/volumes /mnt/disks/data/docker/volumes
+
 # since COS is read only FS, install docker compose/buildx in home directory
+# and symlink to our data disk which can have executables
 if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-compose" ]; then
     curl -sSL \
         https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-x86_64 \

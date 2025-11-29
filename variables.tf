@@ -11,13 +11,13 @@ variable "project_number" {
 variable "region" {
   description = "GCP region for resources"
   type        = string
-  default     = "us-central1"
+  default     = "us-east5"
 }
 
 variable "zone" {
   description = "GCP zone for resources"
   type        = string
-  default     = "us-central1-f"
+  default     = "us-east5-b"
 }
 
 variable "name" {
@@ -109,4 +109,22 @@ variable "allowed_ssh_ipv6" {
   type        = list(string)
   default     = []
   description = "CIDR IPv6 Addresses allowed to SSH into this site's GCP instance"
+}
+
+variable "run_snapshots" {
+  type        = bool
+  default     = false
+  description = "Enable daily snapshots of the data disk (recommended for production). Last seven days of snapshots are available. Also weekly snapshots for past year."
+}
+
+variable "overlay_source_instance" {
+  type        = string
+  default     = ""
+  description = "Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments."
+}
+
+variable "volume_names" {
+  type        = list(string)
+  default     = []
+  description = "List of docker volumes to overlay from production snapshot (e.g., ['compose_ojs-public']). Production data is mounted read-only as lower layer, staging writes go to upper layer."
 }

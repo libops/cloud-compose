@@ -5,10 +5,20 @@ users:
   shell: /bin/bash
 
 bootcmd:
+# persistent storage
 - fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-data)
 - mkdir -p /mnt/disks/data
 - mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
 - chmod a+w /mnt/disks/data
+# docker volumes
+- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-docker-volumes) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-docker-volumes)
+- mkdir -p /mnt/disks/volumes
+- mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-docker-volumes) /mnt/disks/volumes
+- chmod a+w /mnt/disks/volumes
+%{ if USE_OVERLAY ~}
+- mkdir -p /mnt/disks/prod-readonly
+- mount -o ro $(readlink -f /dev/disk/by-id/google-prod-volumes) /mnt/disks/prod-readonly
+%{ endif ~}
 
 write_files:
 ${WRITE_FILES_CONTENT}
@@ -16,4 +26,7 @@ ${DOCKER_COMPOSE_SCRIPTS}
 ${ENV_FILE_CONTENT}
 
 runcmd:
-- bash -lx /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
+- bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
+%{ for VOLUME in DOCKER_VOLUME_OVERLAYS ~}
+- bash /home/cloud-compose/overlay-init.sh "${VOLUME}" >> /home/cloud-compose/run.log 2>&1
+%{ endfor ~}

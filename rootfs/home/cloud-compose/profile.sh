@@ -6,6 +6,8 @@
 DEFAULT_MAX_RETRIES=10
 DEFAULT_SLEEP_INCREMENT=5
 
+# helper to wrap commands that go over the network in "exponential" backoff
+# e.g. docker pull and git pull
 retry_until_success() {
     local command_to_run=("$@")
     local MAX_RETRIES="${MAX_RETRIES:-$DEFAULT_MAX_RETRIES}"

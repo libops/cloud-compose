@@ -1,23 +1,16 @@
-output "zone" {
-  value = google_compute_instance.cloud-compose.zone
-}
-
-output "name" {
-  value = google_compute_instance.cloud-compose.name
-}
-
-output "instance_id" {
-  value = google_compute_instance.cloud-compose.instance_id
-}
-
-
-output "instanceGsa" {
+output "instance" {
   value = {
-    email : google_service_account.cloud-compose.email,
-    id : google_service_account.cloud-compose.id,
-    name : google_service_account.cloud-compose.name,
+    id : google_compute_instance.cloud-compose.instance_id,
+    name : google_compute_instance.cloud-compose.name,
+    disk : google_compute_disk.docker-volumes.name,
+    zone : google_compute_instance.cloud-compose.zone,
+    gsa : {
+      email : google_service_account.cloud-compose.email,
+      id : google_service_account.cloud-compose.id,
+      name : google_service_account.cloud-compose.name,
+    }
   }
-  description = "The Google Service Account the compute instance runs as"
+  description = "The Google Compute instance ID, name, zone, data disk, GSA for the instance."
 }
 
 output "serviceGsa" {

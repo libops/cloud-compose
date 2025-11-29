@@ -1,9 +1,9 @@
 [Unit]
-Description=Delay Internal Services until 10m after initial boot
+Description=Delay Internal Services until 20m after initial boot
 
 [Timer]
+# if no traffic after creation this machine will suspend after 21m30s
 OnBootSec=20min
-RuntimeMaxSec=20min
 Unit=internal-services.service
 
 [Install]
