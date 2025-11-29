@@ -4,7 +4,7 @@ resource "random_shuffle" "zone" {
 }
 
 module "production" {
-  source = "../.."
+  source = "git::https://github.com/libops/cloud-compose?ref=0.0.1"
 
   name                = "ojs-production"
   project_id          = var.project_id
@@ -18,7 +18,7 @@ module "production" {
 }
 
 module "staging" {
-  source = "../.."
+  source = "git::https://github.com/libops/cloud-compose?ref=0.0.1"
 
   name                = "ojs-staging"
   project_id          = var.project_id
