@@ -33,6 +33,7 @@ module "staging" {
   # make production public files available in staging
   overlay_source_instance = "ojs-production"
   volume_names = [
-    "compose_ojs-public"
+    "compose_ojs-public",
+    "compose_ojs-files"
   ]
 }
