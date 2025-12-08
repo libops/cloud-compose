@@ -66,6 +66,7 @@ EOT
     ENV_FILE_CONTENT       = local.env_file_content,
     USE_OVERLAY            = local.use_overlay,
     DOCKER_VOLUME_OVERLAYS = var.volume_names,
+    SSH_USERS              = var.users,
   })
 
   # have prod snapshot begin ten minutes after the initial run

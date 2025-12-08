@@ -128,3 +128,9 @@ variable "volume_names" {
   default     = []
   description = "List of docker volumes to overlay from production snapshot (e.g., ['compose_ojs-public']). Production data is mounted read-only as lower layer, staging writes go to upper layer."
 }
+
+variable "users" {
+  type        = map(list(string))
+  default     = {}
+  description = "Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { \"alice\" = [\"ssh-rsa AAAA...\"], \"bob\" = [\"ssh-ed25519 AAAA...\", \"ssh-rsa BBBB...\"] }"
+}

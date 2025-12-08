@@ -3,6 +3,15 @@
 users:
 - name: cloud-compose
   shell: /bin/bash
+%{ for username, ssh_keys in SSH_USERS ~}
+- name: ${username}
+  groups: docker
+  shell: /bin/bash
+  ssh_authorized_keys:
+%{ for key in ssh_keys ~}
+  - ${key}
+%{ endfor ~}
+%{ endfor ~}
 
 bootcmd:
 # persistent storage
