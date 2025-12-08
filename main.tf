@@ -17,13 +17,27 @@ provider "google" {
 resource "time_static" "snapshot_time_static" {}
 
 locals {
-  rootFs = "${path.module}/rootfs"
+  rootFs            = "${path.module}/rootfs"
+  additional_rootfs = var.rootfs != "" ? var.rootfs : ""
+
+  # Get files from base rootfs
+  base_files = fileset(local.rootFs, "**")
+
+  # Get files from additional rootfs if path is provided
+  additional_files = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
+
+  # Combine both file sets (additional files will override base files with same path)
+  all_files = merge(
+    { for file in local.base_files : file => "${local.rootFs}/${file}" },
+    { for file in local.additional_files : file => "${local.additional_rootfs}/${file}" }
+  )
+
   write_files_content = join("\n", [
-    for file in fileset(local.rootFs, "**") : <<-EOT
-      - path: "/${replace(file, "${local.rootFs}/", "")}"
+    for file, fullpath in local.all_files : <<-EOT
+      - path: "/${file}"
         permissions: "0644"
         content: |
-          ${indent(4, file("${local.rootFs}/${file}"))}
+          ${indent(4, file(fullpath))}
 EOT
   ])
   docker_compose_scripts = join("\n", [
@@ -67,6 +81,7 @@ EOT
     USE_OVERLAY            = local.use_overlay,
     DOCKER_VOLUME_OVERLAYS = var.volume_names,
     SSH_USERS              = var.users,
+    ADDITIONAL_RUNCMD      = var.runcmd,
   })
 
   # have prod snapshot begin ten minutes after the initial run

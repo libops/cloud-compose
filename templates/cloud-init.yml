@@ -39,3 +39,6 @@ runcmd:
 %{ for VOLUME in DOCKER_VOLUME_OVERLAYS ~}
 - bash /home/cloud-compose/overlay-init.sh "${VOLUME}" >> /home/cloud-compose/run.log 2>&1
 %{ endfor ~}
+%{ for CMD in ADDITIONAL_RUNCMD ~}
+- ${CMD}
+%{ endfor ~}

@@ -134,3 +134,16 @@ variable "users" {
   default     = {}
   description = "Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { \"alice\" = [\"ssh-rsa AAAA...\"], \"bob\" = [\"ssh-ed25519 AAAA...\", \"ssh-rsa BBBB...\"] }"
 }
+
+variable "rootfs" {
+  type        = string
+  default     = ""
+  description = "Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs'"
+}
+
+variable "runcmd" {
+  type        = list(string)
+  default     = []
+  description = "Additional commands to run during cloud-init. Commands are executed after the main initialization."
+}
+
