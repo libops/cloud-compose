@@ -249,7 +249,7 @@ data "google_compute_snapshot" "latest_prod" {
 # Restore production snapshot to a staging-specific disk for overlays
 resource "google_compute_disk" "overlay_disk" {
   count                     = local.use_overlay ? 1 : 0
-  name                      = format("%s-overlay-disk", var.name)
+  name                      = data.google_compute_snapshot.latest_prod[0].name
   project                   = var.project_id
   type                      = "hyperdisk-balanced"
   zone                      = var.zone
@@ -335,8 +335,11 @@ resource "google_compute_instance" "cloud-compose" {
     enable_vtpm                 = "true"
   }
 
+  depends_on = [google_compute_disk.overlay_disk]
   lifecycle {
-    create_before_destroy = false
+    replace_triggered_by = [
+      google_compute_disk.overlay_disk
+    ]
   }
 }
 
