@@ -7,8 +7,8 @@ pushd /home/cloud-compose
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
-if [ -d "$DOCKER_COMPOSE_DIR/secrets" ]; then
-  exit 0
+if [ ! -d "$DOCKER_COMPOSE_DIR/secrets" ]; then
+  mkdir "$DOCKER_COMPOSE_DIR/secrets"
 fi
 
 bash rotate-keys.sh \

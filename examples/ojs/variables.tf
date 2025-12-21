@@ -20,8 +20,8 @@ variable "docker_compose_repo" {
 }
 
 variable "docker_compose_init" {
-  type        = string
-  default     = ""
+  type        = list(string)
+  default     = []
   description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start"
 }
 

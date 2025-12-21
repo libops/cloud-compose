@@ -34,3 +34,21 @@ retry_until_success() {
         sleep "$SLEEP"
     done
 }
+
+# update .env variables
+# usage:
+# update_env var value
+# e.g. update_env DOCKER_COMPOSE_PROJECT foo
+# will created/override DOCKER_COMPOSE_PROJECT=foo in $(pwd)/.env
+update_env() {
+    VAR_NAME="$1"
+    VALUE="$2"
+    if [ ! -f .env ]; then
+      touch .env
+    fi
+    if grep -Eq "^${VAR_NAME}=" .env; then
+        sed -i "s/^$VAR_NAME=.*/$VAR_NAME=$VALUE/" .env
+    else
+        echo "${VAR_NAME}=${VALUE}" | tee -a .env
+    fi
+}

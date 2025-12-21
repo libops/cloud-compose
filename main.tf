@@ -19,6 +19,19 @@ resource "time_static" "snapshot_time_static" {}
 locals {
   rootFs            = "${path.module}/rootfs"
   additional_rootfs = var.rootfs != "" ? var.rootfs : ""
+  # Input example: "https://github.com/my-org/my-repo.git"
+  # This regex removes everything from the start up to the first single slash (after the protocol)
+  repo_path = replace(var.docker_compose_repo, "/^[^:]+://[^/]+/", "")
+
+  # base the docker compose project name on the repo + branch
+  clean_repo_path = replace(format("%s-%s", trim(local.repo_path, "/"), var.docker_compose_branch), "/^[^:]+://[^/]+/", "")
+  compose_project_name = lower(
+    replace(
+      replace(local.clean_repo_path, ".git", ""),
+      "/[^a-zA-Z0-9]/",
+      "-"
+    )
+  )
 
   # Get files from base rootfs
   base_files = fileset(local.rootFs, "**")
@@ -41,7 +54,7 @@ locals {
 EOT
   ])
   docker_compose_scripts = join("\n", [
-    for name, cmd in {
+    for name, cmds in {
       "init" = var.docker_compose_init
       "up"   = var.docker_compose_up
       "down" = var.docker_compose_down
@@ -53,8 +66,12 @@ EOT
 
           set -eou pipefail
 
+          source /home/cloud-compose/profile.sh
+          pushd "$${DOCKER_COMPOSE_DIR}"
+
           echo "Running docker compose ${name}"
-          ${cmd}
+          ${join("\n    ", cmds)}
+          popd
 EOT
   ])
   env_file_content = <<-EOT
@@ -67,7 +84,8 @@ EOT
         GCP_INSTANCE_NAME="${var.name}"
         GCP_REGION="${var.region}"
         GCP_ZONE="${var.zone}"
-        DOCKER_COMPOSE_DIR=/mnt/disks/data/compose
+        COMPOSE_PROJECT_NAME=${replace(local.compose_project_name, "/-+/", "-")}
+        DOCKER_COMPOSE_DIR=/mnt/disks/data${local.repo_path}/${var.docker_compose_branch}
         DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
         DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
 EOT
@@ -134,7 +152,7 @@ resource "google_compute_disk" "boot" {
   # force re-create VM when cloud-init changes
   name                      = format("%s-boot-%s", var.name, md5(data.cloudinit_config.ci.rendered))
   project                   = var.project_id
-  type                      = "hyperdisk-balanced"
+  type                      = var.disk_type
   zone                      = var.zone
   size                      = 15
   image                     = "projects/cos-cloud/global/images/${var.os}"
@@ -144,7 +162,7 @@ resource "google_compute_disk" "boot" {
 resource "google_compute_disk" "data" {
   name                      = format("%s-data-disk", var.name)
   project                   = var.project_id
-  type                      = "hyperdisk-balanced"
+  type                      = var.disk_type
   zone                      = var.zone
   size                      = 20
   image                     = "debian-13-trixie-v20251111"
@@ -154,13 +172,12 @@ resource "google_compute_disk" "data" {
 resource "google_compute_disk" "docker-volumes" {
   name                      = format("%s-docker-volumes", var.name)
   project                   = var.project_id
-  type                      = "hyperdisk-balanced"
+  type                      = var.disk_type
   zone                      = var.zone
   size                      = var.disk_size_gb
   image                     = "debian-13-trixie-v20251111"
   physical_block_size_bytes = 4096
 }
-
 
 # Daily snapshot schedule for production docker volume disk
 resource "google_compute_resource_policy" "daily_snapshot" {
@@ -192,13 +209,6 @@ resource "google_compute_resource_policy" "daily_snapshot" {
     }
   }
 }
-resource "google_compute_disk_resource_policy_attachment" "daily_snapshot" {
-  count   = var.run_snapshots ? 1 : 0
-  name    = google_compute_resource_policy.daily_snapshot[0].name
-  disk    = google_compute_disk.docker-volumes.name
-  project = var.project_id
-  zone    = var.zone
-}
 
 resource "google_compute_resource_policy" "weekly_snapshot" {
   count   = var.run_snapshots ? 1 : 0
@@ -228,10 +238,26 @@ resource "google_compute_resource_policy" "weekly_snapshot" {
   }
 }
 
+resource "google_compute_disk_resource_policy_attachment" "daily_snapshot" {
+  for_each = var.run_snapshots ? toset([
+    google_compute_disk.docker-volumes.name,
+    google_compute_disk.data.name
+  ]) : []
+
+  name    = google_compute_resource_policy.daily_snapshot[0].name
+  disk    = each.value
+  project = var.project_id
+  zone    = var.zone
+}
+
 resource "google_compute_disk_resource_policy_attachment" "weekly_snapshot" {
-  count   = var.run_snapshots ? 1 : 0
+  for_each = var.run_snapshots ? toset([
+    google_compute_disk.docker-volumes.name,
+    google_compute_disk.data.name
+  ]) : []
+
   name    = google_compute_resource_policy.weekly_snapshot[0].name
-  disk    = google_compute_disk.docker-volumes.name
+  disk    = each.value
   project = var.project_id
   zone    = var.zone
 }
@@ -251,7 +277,7 @@ resource "google_compute_disk" "overlay_disk" {
   count                     = local.use_overlay ? 1 : 0
   name                      = data.google_compute_snapshot.latest_prod[0].name
   project                   = var.project_id
-  type                      = "hyperdisk-balanced"
+  type                      = var.disk_type
   zone                      = var.zone
   snapshot                  = data.google_compute_snapshot.latest_prod[0].self_link
   physical_block_size_bytes = 4096
@@ -322,10 +348,7 @@ resource "google_compute_instance" "cloud-compose" {
   service_account {
     email = google_service_account.cloud-compose.email
     scopes = [
-      "https://www.googleapis.com/auth/logging.write",
-      "https://www.googleapis.com/auth/monitoring.write",
-      "https://www.googleapis.com/auth/devstorage.read_only",
-      "https://www.googleapis.com/auth/iam",
+      "https://www.googleapis.com/auth/cloud-platform"
     ]
   }
 
@@ -335,12 +358,18 @@ resource "google_compute_instance" "cloud-compose" {
     enable_vtpm                 = "true"
   }
 
-  depends_on = [google_compute_disk.overlay_disk]
   lifecycle {
-    replace_triggered_by = [
-      google_compute_disk.overlay_disk
-    ]
+    precondition {
+      condition = (
+        startswith(var.machine_type, "e2") ?
+        contains(["pd-ssd", "pd-standard"], var.disk_type) :
+        true
+      )
+      error_message = "When using an 'e2' machine type, 'disk_type' must be 'pd-ssd' or 'pd-standard'."
+    }
   }
+
+  depends_on = [google_compute_disk.overlay_disk]
 }
 
 # machine needs to be able to suspend itself
@@ -392,6 +421,12 @@ resource "google_service_account_iam_member" "app-keys" {
   service_account_id = google_service_account.app.id
   role               = "roles/iam.serviceAccountKeyAdmin"
   member             = "serviceAccount:${google_service_account.cloud-compose.email}"
+}
+
+resource "google_service_account_iam_member" "self_jwt_signer_policy" {
+  service_account_id = google_service_account.app.id
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = format("serviceAccount:%s", google_service_account.app.email)
 }
 
 # =============================================================================
@@ -485,4 +520,37 @@ resource "google_project_iam_member" "gce-start" {
   project = var.project_id
   role    = data.google_project_iam_custom_role.gce-start.name
   member  = "serviceAccount:${google_service_account.ppb.email}"
+}
+
+resource "google_compute_firewall" "allow_ssh_ipv4" {
+  project   = var.project_id
+  name      = format("allow-ssh-ipv4-%s", var.name)
+  network   = "default"
+  priority  = 10
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+  target_tags = [var.name]
+
+  source_ranges = length(var.allowed_ssh_ipv4) > 0 ? var.allowed_ssh_ipv4 : ["127.0.0.1/32"]
+}
+
+resource "google_compute_firewall" "allow_ssh_ipv6" {
+  project   = var.project_id
+  name      = format("allow-ssh-ipv6-%s", var.name)
+  network   = "default"
+  priority  = 10
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  target_tags = [var.name]
+
+  source_ranges = length(var.allowed_ssh_ipv6) > 0 ? var.allowed_ssh_ipv6 : ["127.0.0.1/32"]
 }

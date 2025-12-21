@@ -8,7 +8,9 @@ source /home/cloud-compose/profile.sh
 
 bash /home/cloud-compose/host-conf.sh
 bash /home/cloud-compose/host-init.sh
+bash /home/cloud-compose/rotate-keys-app.sh
 bash /home/cloud-compose/app-init.sh
+bash /home/cloud-compose/rotate-keys-internal.sh
 
 systemctl start cloud-compose
 systemctl start internal-services.timer

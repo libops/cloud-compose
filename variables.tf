@@ -25,6 +25,20 @@ variable "name" {
   description = "The site name (will be the name of the GCP instance)"
 }
 
+variable "disk_type" {
+  type        = string
+  description = "The disk type for disks attached to the machine"
+  default     = "hyperdisk-balanced"
+  validation {
+    condition = contains([
+      "hyperdisk-balanced",
+      "pd-ssd",
+      "pd-standard",
+    ], var.disk_type)
+    error_message = "Invalid 'disk_type'"
+  }
+}
+
 variable "machine_type" {
   type        = string
   default     = "n4-standard-2"
@@ -32,6 +46,9 @@ variable "machine_type" {
 
   validation {
     condition = contains([
+      "e2-micro",
+      "e2-small",
+      "e2-medium",
       "n4-standard-2",
       "n4-standard-4",
       "n4-standard-8",
@@ -60,7 +77,7 @@ variable "disk_size_gb" {
 
 variable "os" {
   type        = string
-  default     = "cos-125-19216-104-25"
+  default     = "cos-125-19216-104-74"
   description = "The host OS to install on the GCP instance"
 }
 
@@ -76,20 +93,24 @@ variable "docker_compose_branch" {
 }
 
 variable "docker_compose_init" {
-  type        = string
-  default     = ""
-  description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start"
+  type        = list(string)
+  default     = []
+  description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value"
 }
 
 variable "docker_compose_up" {
-  type        = string
-  default     = "docker compose up --remove-orphans"
+  type = list(string)
+  default = [
+    "docker compose up --remove-orphans"
+  ]
   description = "Command to start the docker compose project"
 }
 
 variable "docker_compose_down" {
-  type        = string
-  default     = "docker compose down"
+  type = list(string)
+  default = [
+    "docker compose down"
+  ]
   description = "Command to stop the docker compose project"
 }
 
@@ -146,4 +167,3 @@ variable "runcmd" {
   default     = []
   description = "Additional commands to run during cloud-init. Commands are executed after the main initialization."
 }
-

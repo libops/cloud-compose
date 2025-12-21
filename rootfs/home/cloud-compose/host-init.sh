@@ -26,5 +26,5 @@ curl -sf \
 
 if ! diff <(md5sum .env.tmp) <(md5sum .env); then
   mv .env.tmp .env
-  cp .env /mnt/disks/data/libops/
+  cp .env /mnt/disks/data/libops-internal/
 fi
