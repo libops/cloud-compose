@@ -27,4 +27,8 @@ curl -sf \
 if ! diff <(md5sum .env.tmp) <(md5sum .env); then
   mv .env.tmp .env
   cp .env /mnt/disks/data/libops-internal/
+  chown cloud-compose /mnt/disks/data/libops-internal/.env
 fi
+
+chown -R cloud-compose:cloud-compose /home/cloud-compose
+usermod -aG docker cloud-compose

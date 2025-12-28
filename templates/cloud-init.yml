@@ -5,7 +5,6 @@ users:
   shell: /bin/bash
 %{ for username, ssh_keys in SSH_USERS ~}
 - name: ${username}
-  groups: docker
   shell: /bin/bash
   ssh_authorized_keys:
 %{ for key in ssh_keys ~}
@@ -14,16 +13,21 @@ users:
 %{ endfor ~}
 
 bootcmd:
-# persistent storage
+# mount the main Data disk
 - fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-data)
 - mkdir -p /mnt/disks/data
 - mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
 - chmod a+w /mnt/disks/data
-# docker volumes
+
+# mount the specific Volumes disk
 - fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-docker-volumes) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-docker-volumes)
 - mkdir -p /mnt/disks/volumes
 - mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-docker-volumes) /mnt/disks/volumes
 - chmod a+w /mnt/disks/volumes
+
+- mkdir -p /mnt/disks/data/docker/volumes
+- mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
+
 %{ if USE_OVERLAY ~}
 - mkdir -p /mnt/disks/prod-readonly
 - mount -o ro $(readlink -f /dev/disk/by-id/google-prod-volumes) /mnt/disks/prod-readonly

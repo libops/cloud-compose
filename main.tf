@@ -456,7 +456,7 @@ EOT
     project_id   = var.project_id
     zone         = var.zone
     name         = var.name
-    usePrivateIp = "true"
+    usePrivateIp = true
   }
   allowed_ips = tolist([
     "127.0.0.1/32",
@@ -490,7 +490,7 @@ module "ppb" {
   containers = tolist([
     {
       name   = "proxy-power-button",
-      image  = "us-docker.pkg.dev/libops-images/public/ppb:main",
+      image  = "us-docker.pkg.dev/libops-images/public/ppb:main@sha256:fc550f487fc8ab651dd5fa58399f862a58b706222aef75c3834ec5ff44f7ea1b",
       cpu    = "1000m"
       memory = "1Gi",
       port   = 8080

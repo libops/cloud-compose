@@ -1,9 +1,11 @@
 [Unit]
 Description=Docker Compose Application
-StartLimitIntervalSec=120
-StartLimitBurst=3
+PartOf=docker.service
+After=docker.service
 
 [Service]
+User=cloud-compose
+Group=cloud-compose
 EnvironmentFile=/home/cloud-compose/.env
 ExecStart=/mnt/disks/data/up
 ExecStop=/mnt/disks/data/down

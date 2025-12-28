@@ -12,4 +12,6 @@ bash rotate-keys.sh \
     "$GCP_PROJECT" \
     /mnt/disks/data/libops-internal/GOOGLE_APPLICATION_CREDENTIALS
 
+chgrp cloud-compose /mnt/disks/data/libops-internal/GOOGLE_APPLICATION_CREDENTIALS
+
 popd
