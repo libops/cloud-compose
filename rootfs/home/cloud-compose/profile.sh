@@ -15,8 +15,8 @@ retry_until_success() {
     local RETRIES=0
 
     while true; do
-        timeout 300 "${command_to_run[@]}"
-        local exit_code=$?
+        exit_code=0
+        timeout 300 "${command_to_run[@]}" || exit_code=$?
 
         if [ "$exit_code" -eq 0 ]; then
             return 0
