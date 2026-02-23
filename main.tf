@@ -99,6 +99,7 @@ EOT
     USE_OVERLAY            = local.use_overlay,
     DOCKER_VOLUME_OVERLAYS = var.volume_names,
     SSH_USERS              = var.users,
+    ADDITIONAL_INITCMD     = var.initcmd,
     ADDITIONAL_RUNCMD      = var.runcmd,
   })
 

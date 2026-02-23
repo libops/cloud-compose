@@ -14,8 +14,8 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | 2.3.7 |
-| <a name="provider_google"></a> [google](#provider\_google) | 7.12.0 |
+| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | n/a |
+| <a name="provider_google"></a> [google](#provider\_google) | ~> 7.0 |
 | <a name="provider_time"></a> [time](#provider\_time) | n/a |
 
 ## Modules
@@ -35,6 +35,8 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | [google_compute_disk.overlay_disk](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_disk) | resource |
 | [google_compute_disk_resource_policy_attachment.daily_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_disk_resource_policy_attachment) | resource |
 | [google_compute_disk_resource_policy_attachment.weekly_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_disk_resource_policy_attachment) | resource |
+| [google_compute_firewall.allow_ssh_ipv4](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_firewall) | resource |
+| [google_compute_firewall.allow_ssh_ipv6](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_firewall) | resource |
 | [google_compute_instance.cloud-compose](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
 | [google_compute_resource_policy.daily_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy) | resource |
 | [google_compute_resource_policy.weekly_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy) | resource |
@@ -49,6 +51,7 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | [google_service_account_iam_member.app-keys](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
 | [google_service_account_iam_member.gsa-user](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
 | [google_service_account_iam_member.internal-services-keys](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
+| [google_service_account_iam_member.self_jwt_signer_policy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
 | [google_service_account_iam_member.token-creator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account_iam_member) | resource |
 | [time_static.snapshot_time_static](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/static) | resource |
 | [cloudinit_config.ci](https://registry.terraform.io/providers/hashicorp/cloudinit/latest/docs/data-sources/config) | data source |
@@ -68,15 +71,17 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | <a name="input_allowed_ssh_ipv4"></a> [allowed\_ssh\_ipv4](#input\_allowed\_ssh\_ipv4) | CIDR IPv4 Addresses allowed to to SSH into this site's GCP instance | `list(string)` | `[]` | no |
 | <a name="input_allowed_ssh_ipv6"></a> [allowed\_ssh\_ipv6](#input\_allowed\_ssh\_ipv6) | CIDR IPv6 Addresses allowed to SSH into this site's GCP instance | `list(string)` | `[]` | no |
 | <a name="input_disk_size_gb"></a> [disk\_size\_gb](#input\_disk\_size\_gb) | Data disk size in GB | `number` | `50` | no |
+| <a name="input_disk_type"></a> [disk\_type](#input\_disk\_type) | The disk type for disks attached to the machine | `string` | `"hyperdisk-balanced"` | no |
 | <a name="input_docker_compose_branch"></a> [docker\_compose\_branch](#input\_docker\_compose\_branch) | git branch to checkout for var.docker\_compose\_repo | `string` | `"main"` | no |
-| <a name="input_docker_compose_down"></a> [docker\_compose\_down](#input\_docker\_compose\_down) | Command to stop the docker compose project | `string` | `"docker compose down"` | no |
-| <a name="input_docker_compose_init"></a> [docker\_compose\_init](#input\_docker\_compose\_init) | After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start | `string` | `""` | no |
-| <a name="input_docker_compose_up"></a> [docker\_compose\_up](#input\_docker\_compose\_up) | Command to start the docker compose project | `string` | `"docker compose up --remove-orphans"` | no |
+| <a name="input_docker_compose_down"></a> [docker\_compose\_down](#input\_docker\_compose\_down) | Command to stop the docker compose project | `list(string)` | <pre>[<br/>  "docker compose down"<br/>]</pre> | no |
+| <a name="input_docker_compose_init"></a> [docker\_compose\_init](#input\_docker\_compose\_init) | After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value | `list(string)` | `[]` | no |
+| <a name="input_docker_compose_up"></a> [docker\_compose\_up](#input\_docker\_compose\_up) | Command to start the docker compose project | `list(string)` | <pre>[<br/>  "docker compose up --remove-orphans"<br/>]</pre> | no |
+| <a name="input_initcmd"></a> [initcmd](#input\_initcmd) | Commands to run before /home/cloud-compose/run.sh | `list(string)` | `[]` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | VM machine type (General-purpose series that support Hyperdisk Balanced | `string` | `"n4-standard-2"` | no |
-| <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-104-25"` | no |
+| <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-104-74"` | no |
 | <a name="input_overlay_source_instance"></a> [overlay\_source\_instance](#input\_overlay\_source\_instance) | Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments. | `string` | `""` | no |
 | <a name="input_region"></a> [region](#input\_region) | GCP region for resources | `string` | `"us-east5"` | no |
-| <a name="input_rootfs"></a> [rootfs](#input\_rootfs) | Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '../platform/terraform/rootfs' | `string` | `""` | no |
+| <a name="input_rootfs"></a> [rootfs](#input\_rootfs) | Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs' | `string` | `""` | no |
 | <a name="input_run_snapshots"></a> [run\_snapshots](#input\_run\_snapshots) | Enable daily snapshots of the data disk (recommended for production). Last seven days of snapshots are available. Also weekly snapshots for past year. | `bool` | `false` | no |
 | <a name="input_runcmd"></a> [runcmd](#input\_runcmd) | Additional commands to run during cloud-init. Commands are executed after the main initialization. | `list(string)` | `[]` | no |
 | <a name="input_users"></a> [users](#input\_users) | Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { "alice" = ["ssh-rsa AAAA..."], "bob" = ["ssh-ed25519 AAAA...", "ssh-rsa BBBB..."] } | `map(list(string))` | `{}` | no |

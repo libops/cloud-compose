@@ -167,3 +167,9 @@ variable "runcmd" {
   default     = []
   description = "Additional commands to run during cloud-init. Commands are executed after the main initialization."
 }
+
+variable "initcmd" {
+  type        = list(string)
+  default     = []
+  description = "Commands to run before /home/cloud-compose/run.sh"
+}
