@@ -69,6 +69,12 @@ variable "machine_type" {
   }
 }
 
+variable "ingress_port" {
+  type        = number
+  default     = 80
+  description = "TCP port on the VM that the Cloud Run ingress should connect to."
+}
+
 variable "disk_size_gb" {
   type        = number
   default     = 50

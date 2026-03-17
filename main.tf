@@ -439,7 +439,7 @@ locals {
   base_config = yamldecode(
     <<EOT
 type: google_compute_engine
-port: 80
+port: ${var.ingress_port}
 scheme: http
 ipForwardedHeader: X-Forwarded-For
 ipDepth: 0
