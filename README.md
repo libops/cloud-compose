@@ -95,4 +95,5 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | <a name="output_appGsa"></a> [appGsa](#output\_appGsa) | The Google Service Account the app can leverage to auth to other Google services |
 | <a name="output_instance"></a> [instance](#output\_instance) | The Google Compute instance ID, name, zone, data disk, GSA for the instance. |
 | <a name="output_serviceGsa"></a> [serviceGsa](#output\_serviceGsa) | The Google Service Account internal services that manage the VM runs as |
+| <a name="output_urls"></a> [urls](#output\_urls) | Cloud Run ingress URLs by region. |
 <!-- END_TF_DOCS -->
