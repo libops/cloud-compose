@@ -173,3 +173,15 @@ variable "initcmd" {
   default     = []
   description = "Commands to run before /home/cloud-compose/run.sh"
 }
+
+variable "artifact_registry_repository" {
+  type        = string
+  default     = ""
+  description = "Optional Artifact Registry repository name to grant the VM service account reader access to. Leave empty to skip creating the IAM binding."
+}
+
+variable "artifact_registry_location" {
+  type        = string
+  default     = "us"
+  description = "Artifact Registry location for var.artifact_registry_repository."
+}

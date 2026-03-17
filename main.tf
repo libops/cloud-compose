@@ -122,9 +122,10 @@ resource "google_service_account" "cloud-compose" {
 
 # docker pull app images
 resource "google_artifact_registry_repository_iam_member" "private-policy-cloud-compose" {
+  count      = var.artifact_registry_repository != "" ? 1 : 0
   project    = var.project_id
-  location   = "us"
-  repository = "private"
+  location   = var.artifact_registry_location
+  repository = var.artifact_registry_repository
   role       = "roles/artifactregistry.reader"
   member     = "serviceAccount:${google_service_account.cloud-compose.email}"
 }
