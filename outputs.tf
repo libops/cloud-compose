@@ -30,3 +30,8 @@ output "appGsa" {
   }
   description = "The Google Service Account the app can leverage to auth to other Google services"
 }
+
+output "urls" {
+  value       = module.ppb.urls
+  description = "Cloud Run ingress URLs by region."
+}
