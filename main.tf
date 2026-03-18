@@ -482,7 +482,7 @@ resource "google_service_account" "ppb" {
 }
 
 module "ppb" {
-  source = "git::https://github.com/libops/terraform-cloudrun-v2?ref=0.5.0"
+  source = "git::https://github.com/libops/terraform-cloudrun-v2?ref=0.5.1"
 
   name              = var.name
   project           = var.project_id
