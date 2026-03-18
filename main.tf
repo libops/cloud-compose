@@ -492,7 +492,7 @@ module "ppb" {
   containers = tolist([
     {
       name   = "proxy-power-button",
-      image  = "us-docker.pkg.dev/libops-images/public/ppb:main@sha256:fc550f487fc8ab651dd5fa58399f862a58b706222aef75c3834ec5ff44f7ea1b",
+      image  = "us-docker.pkg.dev/libops-images/public/ppb:0.3.3@sha256:308f0563677e23ed11333798d576f60faf4755c18b514ccc0ed5d85de0437ed0",
       cpu    = "1000m"
       memory = "1Gi",
       port   = 8080
