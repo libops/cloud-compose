@@ -35,3 +35,8 @@ output "urls" {
   value       = module.ppb.urls
   description = "Cloud Run ingress URLs by region."
 }
+
+output "backend" {
+  value       = module.ppb.backend
+  description = "Backend service ID for attaching the Cloud Run ingress to an external HTTPS load balancer."
+}
