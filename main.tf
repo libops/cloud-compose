@@ -472,7 +472,28 @@ EOT
     machineMetadata = local.machine
   }
 
-  startup_config = merge(local.base_config, local.dynamic_properties)
+  frontend_proxy_target = var.frontend == null ? {} : {
+    proxyTarget = {
+      scheme = "http"
+      host   = "localhost"
+      port   = var.frontend.port
+    }
+  }
+
+  # Sidecar container: no Cloud Run ingress port mapping (port = 0).
+  # The process still listens on var.frontend.port internally so ppb can
+  # reach it via localhost.
+  frontend_container = var.frontend == null ? [] : [
+    {
+      name   = "frontend"
+      image  = var.frontend.image
+      cpu    = var.frontend.cpu
+      memory = var.frontend.memory
+      port   = 0
+    }
+  ]
+
+  startup_config = merge(local.base_config, local.dynamic_properties, local.frontend_proxy_target)
 }
 
 resource "google_service_account" "ppb" {
@@ -489,15 +510,18 @@ module "ppb" {
   gsa               = google_service_account.ppb.name
   skipNeg           = true
   vpc_direct_egress = "PRIVATE_RANGES_ONLY"
-  containers = tolist([
-    {
-      name   = "proxy-power-button",
-      image  = "us-docker.pkg.dev/libops-images/public/ppb:0.3.3@sha256:308f0563677e23ed11333798d576f60faf4755c18b514ccc0ed5d85de0437ed0",
-      cpu    = "1000m"
-      memory = "1Gi",
-      port   = 8080
-    }
-  ])
+  containers = concat(
+    tolist([
+      {
+        name   = "proxy-power-button",
+        image  = "us-docker.pkg.dev/libops-images/public/ppb:0.4.0@sha256:6c9e745728a22690f97052f7d84c14c0e0c9bc14213a4b8b9134eb046c9f8065",
+        cpu    = "1000m"
+        memory = "1Gi",
+        port   = 8080
+      }
+    ]),
+    local.frontend_container,
+  )
   invokers = [
     "allUsers"
   ]

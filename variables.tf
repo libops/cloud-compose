@@ -191,3 +191,20 @@ variable "artifact_registry_location" {
   default     = "us"
   description = "Artifact Registry location for var.artifact_registry_repository."
 }
+
+variable "frontend" {
+  description = <<-EOT
+    Optional frontend container to deploy as a sidecar next to ppb. When set,
+    ppb continues to power on and ping the VM referenced by machineMetadata,
+    but proxies incoming requests to this container on localhost instead of
+    to the VM. Use this to serve a frontend from Cloud Run while keeping
+    backend services on the VM.
+  EOT
+  type = object({
+    image  = string
+    port   = optional(number, 8080)
+    cpu    = optional(string, "1000m")
+    memory = optional(string, "1Gi")
+  })
+  default = null
+}
