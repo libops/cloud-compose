@@ -19,7 +19,7 @@ services:
       - /mnt/disks/data:/mnt/disks/data
       - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
   cadvisor:
-    image: ghcr.io/google/cadvisor:v0.53.0@sha256:c3770bd6fc6c6a9cb2b47143e6b3cc3fdd9d20a8453dffbb7e09a145e7e0c4e4
+    image: ghcr.io/google/cadvisor:0.56.2@sha256:5534ae91cbf3428998d60428d107cfdd97272d80658534ac6e54d8ce3b0c4d72
     command:
       - -disable_metrics
       - cpu_topology,referenced_memory,disk,memory_numa,perf_event,sched,tcp,udp
@@ -38,7 +38,7 @@ services:
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
   cap:
-    image: ghcr.io/libops/cap:main@sha256:e81950f30fd31dcbbe5ce024b87335aa6be4e24553df2744769267715e404364
+    image: ghcr.io/libops/cap:main@sha256:4deac712f87db480a2c668a5638492c0ff221b9c599175f1772ac44480d1bc9e
     networks:
       - internal
     restart: unless-stopped
