@@ -81,7 +81,7 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | <a name="input_ingress_port"></a> [ingress\_port](#input\_ingress\_port) | TCP port on the VM that the Cloud Run ingress should connect to. | `number` | `80` | no |
 | <a name="input_initcmd"></a> [initcmd](#input\_initcmd) | Commands to run before /home/cloud-compose/run.sh | `list(string)` | `[]` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | VM machine type (General-purpose series that support Hyperdisk Balanced | `string` | `"n4-standard-2"` | no |
-| <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-104-74"` | no |
+| <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-220-130"` | no |
 | <a name="input_overlay_source_instance"></a> [overlay\_source\_instance](#input\_overlay\_source\_instance) | Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments. | `string` | `""` | no |
 | <a name="input_region"></a> [region](#input\_region) | GCP region for resources | `string` | `"us-east5"` | no |
 | <a name="input_rootfs"></a> [rootfs](#input\_rootfs) | Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs' | `string` | `""` | no |

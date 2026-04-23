@@ -83,7 +83,7 @@ variable "disk_size_gb" {
 
 variable "os" {
   type        = string
-  default     = "cos-125-19216-104-74"
+  default     = "cos-125-19216-220-130"
   description = "The host OS to install on the GCP instance"
 }
 
