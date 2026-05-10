@@ -25,6 +25,12 @@ variable "name" {
   description = "The site name (will be the name of the GCP instance)"
 }
 
+variable "service_account_email" {
+  description = "Existing service account email for the VM. When empty, this module creates one."
+  type        = string
+  default     = ""
+}
+
 variable "disk_type" {
   type        = string
   description = "The disk type for disks attached to the machine"
@@ -83,7 +89,7 @@ variable "disk_size_gb" {
 
 variable "os" {
   type        = string
-  default     = "cos-125-19216-220-130"
+  default     = "cos-125-19216-220-185"
   description = "The host OS to install on the GCP instance"
 }
 

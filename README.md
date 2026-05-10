@@ -8,21 +8,23 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.4 |
+| <a name="requirement_cloudinit"></a> [cloudinit](#requirement\_cloudinit) | ~> 2.3 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.0 |
+| <a name="requirement_time"></a> [time](#requirement\_time) | ~> 0.12 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | n/a |
+| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | ~> 2.3 |
 | <a name="provider_google"></a> [google](#provider\_google) | ~> 7.0 |
-| <a name="provider_time"></a> [time](#provider\_time) | n/a |
+| <a name="provider_time"></a> [time](#provider\_time) | ~> 0.12 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_ppb"></a> [ppb](#module\_ppb) | git::https://github.com/libops/terraform-cloudrun-v2 | 0.5.0 |
+| <a name="module_ppb"></a> [ppb](#module\_ppb) | git::https://github.com/libops/terraform-cloudrun-v2 | 0.5.1 |
 
 ## Resources
 
@@ -78,6 +80,7 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | <a name="input_docker_compose_down"></a> [docker\_compose\_down](#input\_docker\_compose\_down) | Command to stop the docker compose project | `list(string)` | <pre>[<br/>  "docker compose down"<br/>]</pre> | no |
 | <a name="input_docker_compose_init"></a> [docker\_compose\_init](#input\_docker\_compose\_init) | After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value | `list(string)` | `[]` | no |
 | <a name="input_docker_compose_up"></a> [docker\_compose\_up](#input\_docker\_compose\_up) | Command to start the docker compose project | `list(string)` | <pre>[<br/>  "docker compose up --remove-orphans"<br/>]</pre> | no |
+| <a name="input_frontend"></a> [frontend](#input\_frontend) | Optional frontend container to deploy as a sidecar next to ppb. When set,<br/>ppb continues to power on and ping the VM referenced by machineMetadata,<br/>but proxies incoming requests to this container on localhost instead of<br/>to the VM. Use this to serve a frontend from Cloud Run while keeping<br/>backend services on the VM. | <pre>object({<br/>    image  = string<br/>    port   = optional(number, 8080)<br/>    cpu    = optional(string, "1000m")<br/>    memory = optional(string, "1Gi")<br/>  })</pre> | `null` | no |
 | <a name="input_ingress_port"></a> [ingress\_port](#input\_ingress\_port) | TCP port on the VM that the Cloud Run ingress should connect to. | `number` | `80` | no |
 | <a name="input_initcmd"></a> [initcmd](#input\_initcmd) | Commands to run before /home/cloud-compose/run.sh | `list(string)` | `[]` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | VM machine type (General-purpose series that support Hyperdisk Balanced | `string` | `"n4-standard-2"` | no |
@@ -87,6 +90,7 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | <a name="input_rootfs"></a> [rootfs](#input\_rootfs) | Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs' | `string` | `""` | no |
 | <a name="input_run_snapshots"></a> [run\_snapshots](#input\_run\_snapshots) | Enable daily snapshots of the data disk (recommended for production). Last seven days of snapshots are available. Also weekly snapshots for past year. | `bool` | `false` | no |
 | <a name="input_runcmd"></a> [runcmd](#input\_runcmd) | Additional commands to run during cloud-init. Commands are executed after the main initialization. | `list(string)` | `[]` | no |
+| <a name="input_service_account_email"></a> [service\_account\_email](#input\_service\_account\_email) | Existing service account email for the VM. When empty, this module creates one. | `string` | `""` | no |
 | <a name="input_users"></a> [users](#input\_users) | Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { "alice" = ["ssh-rsa AAAA..."], "bob" = ["ssh-ed25519 AAAA...", "ssh-rsa BBBB..."] } | `map(list(string))` | `{}` | no |
 | <a name="input_volume_names"></a> [volume\_names](#input\_volume\_names) | List of docker volumes to overlay from production snapshot (e.g., ['compose\_ojs-public']). Production data is mounted read-only as lower layer, staging writes go to upper layer. | `list(string)` | `[]` | no |
 | <a name="input_zone"></a> [zone](#input\_zone) | GCP zone for resources | `string` | `"us-east5-b"` | no |
@@ -96,7 +100,10 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 | Name | Description |
 |------|-------------|
 | <a name="output_appGsa"></a> [appGsa](#output\_appGsa) | The Google Service Account the app can leverage to auth to other Google services |
+| <a name="output_backend"></a> [backend](#output\_backend) | Backend service ID for attaching the Cloud Run ingress to an external HTTPS load balancer. |
+| <a name="output_external_ip"></a> [external\_ip](#output\_external\_ip) | The Google Compute instance external IPv4 address. |
 | <a name="output_instance"></a> [instance](#output\_instance) | The Google Compute instance ID, name, zone, data disk, GSA for the instance. |
+| <a name="output_instance_id"></a> [instance\_id](#output\_instance\_id) | The Google Compute instance ID. |
 | <a name="output_serviceGsa"></a> [serviceGsa](#output\_serviceGsa) | The Google Service Account internal services that manage the VM runs as |
 | <a name="output_urls"></a> [urls](#output\_urls) | Cloud Run ingress URLs by region. |
 <!-- END_TF_DOCS -->

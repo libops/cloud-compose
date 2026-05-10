@@ -5,12 +5,22 @@ output "instance" {
     disk : google_compute_disk.docker-volumes.name,
     zone : google_compute_instance.cloud-compose.zone,
     gsa : {
-      email : google_service_account.cloud-compose.email,
-      id : google_service_account.cloud-compose.id,
-      name : google_service_account.cloud-compose.name,
+      email : local.vm_service_account_email,
+      id : local.vm_service_account_id,
+      name : local.vm_service_account_name,
     }
   }
   description = "The Google Compute instance ID, name, zone, data disk, GSA for the instance."
+}
+
+output "instance_id" {
+  value       = google_compute_instance.cloud-compose.instance_id
+  description = "The Google Compute instance ID."
+}
+
+output "external_ip" {
+  value       = google_compute_instance.cloud-compose.network_interface[0].access_config[0].nat_ip
+  description = "The Google Compute instance external IPv4 address."
 }
 
 output "serviceGsa" {

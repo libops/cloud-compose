@@ -2,16 +2,19 @@ terraform {
   required_version = ">= 1.2.4"
 
   required_providers {
+    cloudinit = {
+      source  = "hashicorp/cloudinit"
+      version = "~> 2.3"
+    }
     google = {
       source  = "hashicorp/google"
       version = "~> 7.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
 }
 
 resource "time_static" "snapshot_time_static" {}
@@ -106,6 +109,10 @@ EOT
   # have prod snapshot begin ten minutes after the initial run
   # so non-prod environments can have a snapshot disk to overlay
   snapshot_start_time = formatdate("h:00", time_static.snapshot_time_static.rfc3339)
+
+  vm_service_account_email = var.service_account_email != "" ? var.service_account_email : google_service_account.cloud-compose[0].email
+  vm_service_account_id    = var.service_account_email != "" ? "projects/${var.project_id}/serviceAccounts/${var.service_account_email}" : google_service_account.cloud-compose[0].id
+  vm_service_account_name  = var.service_account_email != "" ? local.vm_service_account_id : google_service_account.cloud-compose[0].name
 }
 
 data "cloudinit_config" "ci" {
@@ -116,6 +123,7 @@ data "cloudinit_config" "ci" {
 }
 
 resource "google_service_account" "cloud-compose" {
+  count      = var.service_account_email == "" ? 1 : 0
   account_id = format("vm-%s", var.name)
   project    = var.project_id
 }
@@ -127,27 +135,27 @@ resource "google_artifact_registry_repository_iam_member" "private-policy-cloud-
   location   = var.artifact_registry_location
   repository = var.artifact_registry_repository
   role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member     = "serviceAccount:${local.vm_service_account_email}"
 }
 
 # let VM run as the GSA
 resource "google_service_account_iam_member" "gsa-user" {
-  service_account_id = google_service_account.cloud-compose.id
+  service_account_id = local.vm_service_account_id
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${var.project_number}-compute@developer.gserviceaccount.com"
 }
 
 resource "google_service_account_iam_member" "token-creator" {
-  service_account_id = google_service_account.cloud-compose.id
+  service_account_id = local.vm_service_account_id
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
 # push logs to GCP
 resource "google_project_iam_member" "log" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member  = "serviceAccount:${local.vm_service_account_email}"
 }
 
 resource "google_compute_disk" "boot" {
@@ -348,7 +356,7 @@ resource "google_compute_instance" "cloud-compose" {
   }
 
   service_account {
-    email = google_service_account.cloud-compose.email
+    email = local.vm_service_account_email
     scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
     ]
@@ -393,7 +401,7 @@ resource "google_service_account" "internal-services" {
 resource "google_service_account_iam_member" "internal-services-keys" {
   service_account_id = google_service_account.internal-services.id
   role               = "roles/iam.serviceAccountKeyAdmin"
-  member             = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
 # push metrics to GCP
@@ -422,7 +430,7 @@ resource "google_service_account" "app" {
 resource "google_service_account_iam_member" "app-keys" {
   service_account_id = google_service_account.app.id
   role               = "roles/iam.serviceAccountKeyAdmin"
-  member             = "serviceAccount:${google_service_account.cloud-compose.email}"
+  member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
 resource "google_service_account_iam_member" "self_jwt_signer_policy" {
