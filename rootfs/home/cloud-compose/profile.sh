@@ -3,6 +3,8 @@
 # shellcheck disable=SC1091
 . /home/cloud-compose/.env
 
+export PATH="/home/cloud-compose/bin:$PATH"
+
 DEFAULT_MAX_RETRIES=10
 DEFAULT_SLEEP_INCREMENT=5
 

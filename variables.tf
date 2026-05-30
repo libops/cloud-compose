@@ -126,6 +126,18 @@ variable "docker_compose_down" {
   description = "Command to stop the docker compose project"
 }
 
+variable "docker_compose_rollout" {
+  type = list(string)
+  default = [
+    "if [ -x ./scripts/rollout.sh ]; then exec ./scripts/rollout.sh; fi",
+    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
+    "git fetch origin \"$TARGET_REF\" || git fetch origin",
+    "git checkout \"$TARGET_REF\" || git checkout FETCH_HEAD",
+    "systemctl restart cloud-compose"
+  ]
+  description = "Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT_REF/GIT_BRANCH from the trigger request."
+}
+
 variable "allowed_ips" {
   type        = list(string)
   default     = []
@@ -213,4 +225,60 @@ variable "frontend" {
     memory = optional(string, "1Gi")
   })
   default = null
+}
+
+variable "rollout_enabled" {
+  description = "Install and run the optional generic rollout HTTP service on the VM."
+  type        = bool
+  default     = false
+}
+
+variable "rollout_release_url" {
+  description = "HTTPS URL for the pinned rollout Linux binary."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_release_sha256" {
+  description = "Lowercase SHA256 checksum for var.rollout_release_url."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.rollout_release_sha256 == "" || can(regex("^[0-9a-f]{64}$", var.rollout_release_sha256))
+    error_message = "rollout_release_sha256 must be empty or a lowercase SHA256 hex digest."
+  }
+}
+
+variable "rollout_port" {
+  description = "TCP port exposed by the optional rollout service."
+  type        = number
+  default     = 8081
+  validation {
+    condition     = var.rollout_port > 0 && var.rollout_port <= 65535
+    error_message = "rollout_port must be between 1 and 65535."
+  }
+}
+
+variable "rollout_jwks_uri" {
+  description = "JWKS URI used by the rollout service to validate bearer JWTs."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_jwt_audience" {
+  description = "JWT audience required by the rollout service."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_custom_claims" {
+  description = "Optional JSON object of additional JWT claims required by the rollout service."
+  type        = string
+  default     = ""
+}
+
+variable "rollout_allowed_ipv4" {
+  description = "CIDR IPv4 ranges allowed to reach the rollout service port."
+  type        = list(string)
+  default     = ["10.0.0.0/8"]
 }

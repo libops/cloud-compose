@@ -4,6 +4,7 @@ output "instance" {
     name : google_compute_instance.cloud-compose.name,
     disk : google_compute_disk.docker-volumes.name,
     zone : google_compute_instance.cloud-compose.zone,
+    internal_ip : google_compute_instance.cloud-compose.network_interface[0].network_ip,
     gsa : {
       email : local.vm_service_account_email,
       id : local.vm_service_account_id,
@@ -21,6 +22,11 @@ output "instance_id" {
 output "external_ip" {
   value       = google_compute_instance.cloud-compose.network_interface[0].access_config[0].nat_ip
   description = "The Google Compute instance external IPv4 address."
+}
+
+output "internal_ip" {
+  value       = google_compute_instance.cloud-compose.network_interface[0].network_ip
+  description = "The Google Compute instance internal IPv4 address."
 }
 
 output "serviceGsa" {
@@ -49,4 +55,15 @@ output "urls" {
 output "backend" {
   value       = module.ppb.backend
   description = "Backend service ID for attaching the Cloud Run ingress to an external HTTPS load balancer."
+}
+
+output "rollout" {
+  value = {
+    enabled : var.rollout_enabled,
+    port : var.rollout_port,
+    url : var.rollout_enabled ? "http://${google_compute_instance.cloud-compose.network_interface[0].network_ip}:${var.rollout_port}" : null,
+    internal_url : var.rollout_enabled ? "http://${google_compute_instance.cloud-compose.network_interface[0].network_ip}:${var.rollout_port}" : null,
+    audience : var.rollout_jwt_audience,
+  }
+  description = "Optional rollout API endpoint details. The URL is the VPC-internal endpoint."
 }

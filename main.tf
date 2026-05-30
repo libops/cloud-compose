@@ -58,9 +58,10 @@ EOT
   ])
   docker_compose_scripts = join("\n", [
     for name, cmds in {
-      "init" = var.docker_compose_init
-      "up"   = var.docker_compose_up
-      "down" = var.docker_compose_down
+      "init"    = var.docker_compose_init
+      "up"      = var.docker_compose_up
+      "down"    = var.docker_compose_down
+      "rollout" = var.docker_compose_rollout
     } : <<-EOT
       - path: "/mnt/disks/data/${name}"
         permissions: "0755"
@@ -77,6 +78,21 @@ EOT
           popd
 EOT
   ])
+  rollout_env_lines = var.rollout_enabled ? [
+    "ROLLOUT_ENABLED=true",
+    "ROLLOUT_DOWNLOAD_URL=\"${trimspace(var.rollout_release_url)}\"",
+    "ROLLOUT_DOWNLOAD_SHA256=\"${trimspace(var.rollout_release_sha256)}\"",
+    "PORT=\"${var.rollout_port}\"",
+    "JWKS_URI=\"${trimspace(var.rollout_jwks_uri)}\"",
+    "JWT_AUD=\"${trimspace(var.rollout_jwt_audience)}\"",
+    "CUSTOM_CLAIMS='${trimspace(var.rollout_custom_claims)}'",
+    "ROLLOUT_CMD=\"/bin/bash\"",
+    "ROLLOUT_ARGS=\"/mnt/disks/data/rollout\"",
+    "ROLLOUT_LOCK_FILE=\"/mnt/disks/data/rollout.lock\"",
+    ] : [
+    "ROLLOUT_ENABLED=false",
+  ]
+  rollout_env      = join("\n", [for line in local.rollout_env_lines : "        ${line}"])
   env_file_content = <<-EOT
     - path: "/home/cloud-compose/.env"
       permissions: "0640"
@@ -91,10 +107,14 @@ EOT
         DOCKER_COMPOSE_DIR=/mnt/disks/data${local.repo_path}/${var.docker_compose_branch}
         DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
         DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
+${local.rollout_env}
 EOT
   use_overlay      = length(var.volume_names) > 0
   prod_disk_name   = var.overlay_source_instance != "" ? format("%s-data-disk", var.overlay_source_instance) : ""
   prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
+  rollout_runcmd = var.rollout_enabled ? [
+    "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
+  ] : []
   cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
     WRITE_FILES_CONTENT    = local.write_files_content,
     DOCKER_COMPOSE_SCRIPTS = local.docker_compose_scripts,
@@ -103,7 +123,7 @@ EOT
     DOCKER_VOLUME_OVERLAYS = var.volume_names,
     SSH_USERS              = var.users,
     ADDITIONAL_INITCMD     = var.initcmd,
-    ADDITIONAL_RUNCMD      = var.runcmd,
+    ADDITIONAL_RUNCMD      = concat(local.rollout_runcmd, var.runcmd),
   })
 
   # have prod snapshot begin ten minutes after the initial run
@@ -377,6 +397,22 @@ resource "google_compute_instance" "cloud-compose" {
       )
       error_message = "When using an 'e2' machine type, 'disk_type' must be 'pd-ssd' or 'pd-standard'."
     }
+    precondition {
+      condition     = !var.rollout_enabled || trimspace(var.rollout_release_url) != ""
+      error_message = "rollout_release_url is required when rollout_enabled is true."
+    }
+    precondition {
+      condition     = !var.rollout_enabled || can(regex("^[0-9a-f]{64}$", trimspace(var.rollout_release_sha256)))
+      error_message = "rollout_release_sha256 must be a lowercase SHA256 hex digest when rollout_enabled is true."
+    }
+    precondition {
+      condition     = !var.rollout_enabled || trimspace(var.rollout_jwks_uri) != ""
+      error_message = "rollout_jwks_uri is required when rollout_enabled is true."
+    }
+    precondition {
+      condition     = !var.rollout_enabled || trimspace(var.rollout_jwt_audience) != ""
+      error_message = "rollout_jwt_audience is required when rollout_enabled is true."
+    }
   }
 
   depends_on = [google_compute_disk.overlay_disk]
@@ -587,4 +623,21 @@ resource "google_compute_firewall" "allow_ssh_ipv6" {
   target_tags = [var.name]
 
   source_ranges = length(var.allowed_ssh_ipv6) > 0 ? var.allowed_ssh_ipv6 : ["127.0.0.1/32"]
+}
+
+resource "google_compute_firewall" "allow_rollout_ipv4" {
+  count     = var.rollout_enabled ? 1 : 0
+  project   = var.project_id
+  name      = format("allow-rollout-ipv4-%s", var.name)
+  network   = "default"
+  priority  = 20
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = [tostring(var.rollout_port)]
+  }
+
+  target_tags   = [var.name]
+  source_ranges = length(var.rollout_allowed_ipv4) > 0 ? var.rollout_allowed_ipv4 : ["127.0.0.1/32"]
 }
