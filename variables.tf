@@ -105,15 +105,20 @@ variable "docker_compose_branch" {
 }
 
 variable "docker_compose_init" {
-  type        = list(string)
-  default     = []
+  type = list(string)
+  default = [
+    "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${GCP_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${GCP_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
+  ]
   description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value"
 }
 
 variable "docker_compose_up" {
   type = list(string)
   default = [
-    "docker compose up --remove-orphans"
+    "sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi",
+    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" logs -f"
   ]
   description = "Command to start the docker compose project"
 }
@@ -121,7 +126,7 @@ variable "docker_compose_up" {
 variable "docker_compose_down" {
   type = list(string)
   default = [
-    "docker compose down"
+    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
   ]
   description = "Command to stop the docker compose project"
 }
@@ -129,13 +134,130 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "if [ -x ./scripts/rollout.sh ]; then exec ./scripts/rollout.sh; fi",
     "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
-    "git fetch origin \"$TARGET_REF\" || git fetch origin",
-    "git checkout \"$TARGET_REF\" || git checkout FETCH_HEAD",
-    "systemctl restart cloud-compose"
+    "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
   description = "Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT_REF/GIT_BRANCH from the trigger request."
+}
+
+variable "sitectl_packages" {
+  type        = list(string)
+  default     = ["sitectl"]
+  description = "LibOps GitHub release package names to install and keep updated on the VM. Include plugin packages such as sitectl-isle or sitectl-wp as needed."
+
+  validation {
+    condition = alltrue([
+      for package in var.sitectl_packages :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package))
+    ])
+    error_message = "sitectl_packages entries must be release package names such as sitectl, sitectl-isle, or sitectl-wp."
+  }
+}
+
+variable "sitectl_version" {
+  type        = string
+  default     = "latest"
+  description = "Sitectl release tag to install for sitectl packages, or latest to follow https://github.com/libops/sitectl/releases/latest."
+
+  validation {
+    condition     = var.sitectl_version == "latest" || can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+", var.sitectl_version))
+    error_message = "sitectl_version must be latest or a release tag such as v0.19.7."
+  }
+}
+
+variable "sitectl_context_name" {
+  type        = string
+  default     = ""
+  description = "Sitectl context name to create on the VM. Defaults to var.name."
+}
+
+variable "sitectl_plugin" {
+  type        = string
+  default     = "core"
+  description = "Sitectl plugin id to associate with the VM context."
+}
+
+variable "sitectl_environment" {
+  type        = string
+  default     = "production"
+  description = "Sitectl environment label. Production runs healthcheck only by default; non-production also runs sitectl verify."
+}
+
+variable "sitectl_healthcheck_timeout" {
+  type        = string
+  default     = "10m"
+  description = "Timeout passed to sitectl healthcheck --timeout in default lifecycle commands."
+}
+
+variable "sitectl_healthcheck_interval" {
+  type        = string
+  default     = "15s"
+  description = "Interval passed to sitectl healthcheck --interval in default lifecycle commands."
+}
+
+variable "sitectl_verify_args" {
+  type        = list(string)
+  default     = []
+  description = "Additional arguments appended to sitectl verify by the default non-production lifecycle commands."
+}
+
+variable "libops_managed_runtime_enabled" {
+  type        = bool
+  default     = true
+  description = "Install and periodically update LibOps-managed host tools and internal VM services."
+}
+
+variable "libops_internal_services_auto_update" {
+  type        = bool
+  default     = true
+  description = "Whether the managed runtime updater should pull and restart the internal LibOps compose project."
+}
+
+variable "libops_lightsout_image" {
+  type        = string
+  default     = "ghcr.io/libops/lightsout:main"
+  description = "Container image used for the internal lightsout service."
+}
+
+variable "libops_cap_image" {
+  type        = string
+  default     = "ghcr.io/libops/cap:main"
+  description = "Container image used for the internal CAP metrics service."
+}
+
+variable "libops_cadvisor_image" {
+  type        = string
+  default     = "ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d"
+  description = "Container image used for the internal cAdvisor service."
+}
+
+variable "libops_managed_artifacts" {
+  type = list(object({
+    name    = string
+    url     = string
+    sha256  = string
+    path    = string
+    mode    = optional(string, "0755")
+    owner   = optional(string, "root")
+    group   = optional(string, "root")
+    restart = optional(string, "")
+  }))
+  default     = []
+  description = "Additional LibOps-managed files or binaries to download, verify, install, and optionally restart with the managed runtime updater."
+
+  validation {
+    condition = alltrue([
+      for artifact in var.libops_managed_artifacts :
+      !can(regex("[\t\r\n]", artifact.name)) &&
+      !can(regex("[\t\r\n]", artifact.url)) &&
+      !can(regex("[\t\r\n]", artifact.sha256)) &&
+      !can(regex("[\t\r\n]", artifact.path)) &&
+      can(regex("^[0-9a-f]{64}$", artifact.sha256))
+    ])
+    error_message = "libops_managed_artifacts values must not contain tabs or newlines, and sha256 must be a lowercase SHA256 hex digest."
+  }
 }
 
 variable "allowed_ips" {

@@ -23,11 +23,10 @@ module "site" {
   rollout_allowed_ipv4   = ["10.0.0.0/8"]
 
   docker_compose_rollout = [
-    "if [ -x ./scripts/rollout.sh ]; then exec ./scripts/rollout.sh; fi",
     "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
-    "git fetch origin \"$TARGET_REF\" || git fetch origin",
-    "git checkout \"$TARGET_REF\" || git checkout FETCH_HEAD",
-    "systemctl restart cloud-compose",
+    "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi",
   ]
 }
 ```
@@ -95,5 +94,6 @@ variable before `docker_compose_rollout` runs:
 The generated rollout script runs from the checked-out compose repository after
 sourcing `/home/cloud-compose/profile.sh`. First-class LibOps app templates
 should commit `scripts/rollout.sh`; the default `docker_compose_rollout` will
-delegate to that script when it exists, otherwise it falls back to a generic git
-checkout and `cloud-compose` service restart.
+delegate to that script when it exists, otherwise it falls back to
+`sitectl deploy`. The default path always runs `sitectl healthcheck`; non-
+production environments also run `sitectl verify`.
