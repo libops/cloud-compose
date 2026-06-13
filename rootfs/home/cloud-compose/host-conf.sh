@@ -62,3 +62,7 @@ if [ ! -f "/mnt/disks/data/make" ]; then
 fi
 chmod o+x /mnt/disks/data/make
 ln -sf /mnt/disks/data/make /home/cloud-compose/bin/make
+
+bash /home/cloud-compose/libops-managed-runtime.sh install-tools
+systemctl daemon-reload
+systemctl enable libops-managed-runtime.timer

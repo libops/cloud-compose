@@ -14,4 +14,5 @@ bash /home/cloud-compose/rotate-keys-internal.sh || true
 
 systemctl start cloud-compose
 systemctl start internal-services.timer
+systemctl start libops-managed-runtime.timer
 systemctl start cron.timer

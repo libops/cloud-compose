@@ -35,6 +35,8 @@ locals {
       "-"
     )
   )
+  sitectl_context_name = trimspace(var.sitectl_context_name) != "" ? trimspace(var.sitectl_context_name) : var.name
+  sitectl_packages     = distinct(concat(["sitectl"], var.sitectl_packages))
 
   # Get files from base rootfs
   base_files = fileset(local.rootFs, "**")
@@ -73,11 +75,29 @@ EOT
           source /home/cloud-compose/profile.sh
           pushd "$${DOCKER_COMPOSE_DIR}"
 
-          echo "Running docker compose ${name}"
+          echo "Running cloud-compose ${name}"
           ${join("\n    ", cmds)}
           popd
 EOT
   ])
+  managed_runtime_artifact_lines = [
+    for artifact in var.libops_managed_artifacts : join("\t", [
+      artifact.name,
+      artifact.url,
+      artifact.sha256,
+      artifact.path,
+      try(artifact.mode, "0755"),
+      try(artifact.owner, "root"),
+      try(artifact.group, "root"),
+      try(artifact.restart, ""),
+    ])
+  ]
+  managed_runtime_artifacts_file = <<-EOT
+    - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
+      permissions: "0640"
+      content: |
+        ${indent(8, join("\n", local.managed_runtime_artifact_lines))}
+EOT
   rollout_env_lines = var.rollout_enabled ? [
     "ROLLOUT_ENABLED=true",
     "ROLLOUT_DOWNLOAD_URL=\"${trimspace(var.rollout_release_url)}\"",
@@ -107,6 +127,19 @@ EOT
         DOCKER_COMPOSE_DIR=/mnt/disks/data${local.repo_path}/${var.docker_compose_branch}
         DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
         DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
+        SITECTL_PACKAGES="${join(" ", local.sitectl_packages)}"
+        SITECTL_VERSION="${var.sitectl_version}"
+        SITECTL_CONTEXT_NAME="${local.sitectl_context_name}"
+        SITECTL_PLUGIN="${var.sitectl_plugin}"
+        SITECTL_ENVIRONMENT="${var.sitectl_environment}"
+        SITECTL_HEALTHCHECK_TIMEOUT="${var.sitectl_healthcheck_timeout}"
+        SITECTL_HEALTHCHECK_INTERVAL="${var.sitectl_healthcheck_interval}"
+        SITECTL_VERIFY_ARGS="${join(" ", var.sitectl_verify_args)}"
+        LIBOPS_MANAGED_RUNTIME_ENABLED="${var.libops_managed_runtime_enabled}"
+        LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE="${var.libops_internal_services_auto_update}"
+        LIBOPS_LIGHTSOUT_IMAGE="${var.libops_lightsout_image}"
+        LIBOPS_CAP_IMAGE="${var.libops_cap_image}"
+        LIBOPS_CADVISOR_IMAGE="${var.libops_cadvisor_image}"
 ${local.rollout_env}
 EOT
   use_overlay      = length(var.volume_names) > 0
@@ -116,14 +149,15 @@ EOT
     "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
   ] : []
   cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
-    WRITE_FILES_CONTENT    = local.write_files_content,
-    DOCKER_COMPOSE_SCRIPTS = local.docker_compose_scripts,
-    ENV_FILE_CONTENT       = local.env_file_content,
-    USE_OVERLAY            = local.use_overlay,
-    DOCKER_VOLUME_OVERLAYS = var.volume_names,
-    SSH_USERS              = var.users,
-    ADDITIONAL_INITCMD     = var.initcmd,
-    ADDITIONAL_RUNCMD      = concat(local.rollout_runcmd, var.runcmd),
+    WRITE_FILES_CONTENT            = local.write_files_content,
+    DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts,
+    ENV_FILE_CONTENT               = local.env_file_content,
+    MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file,
+    USE_OVERLAY                    = local.use_overlay,
+    DOCKER_VOLUME_OVERLAYS         = var.volume_names,
+    SSH_USERS                      = var.users,
+    ADDITIONAL_INITCMD             = var.initcmd,
+    ADDITIONAL_RUNCMD              = concat(local.rollout_runcmd, var.runcmd),
   })
 
   # have prod snapshot begin ten minutes after the initial run

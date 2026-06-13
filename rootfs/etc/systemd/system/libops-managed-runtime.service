@@ -1,0 +1,15 @@
+[Unit]
+Description=Update LibOps Managed Runtime
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/home/cloud-compose/.env
+ExecStart=/bin/bash /home/cloud-compose/libops-managed-runtime.sh update
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=libops-managed-runtime
+

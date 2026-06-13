@@ -5,6 +5,7 @@ Deploy a docker compose project to a Google Cloud Compute Instance.
 Optional VM APIs:
 
 - [Rollout API](docs/rollout.md) exposes authenticated deployment rollout triggers for the compose project.
+- [Managed Runtime](docs/managed-runtime.md) keeps `sitectl`, sitectl plugins, and LibOps-side support services up to date on the VM.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -20,9 +21,9 @@ Optional VM APIs:
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | ~> 2.3 |
-| <a name="provider_google"></a> [google](#provider\_google) | ~> 7.0 |
-| <a name="provider_time"></a> [time](#provider\_time) | ~> 0.14 |
+| <a name="provider_cloudinit"></a> [cloudinit](#provider\_cloudinit) | 2.4.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.34.0 |
+| <a name="provider_time"></a> [time](#provider\_time) | 0.14.0 |
 
 ## Modules
 
@@ -82,13 +83,19 @@ Optional VM APIs:
 | <a name="input_disk_size_gb"></a> [disk\_size\_gb](#input\_disk\_size\_gb) | Data disk size in GB | `number` | `50` | no |
 | <a name="input_disk_type"></a> [disk\_type](#input\_disk\_type) | The disk type for disks attached to the machine | `string` | `"hyperdisk-balanced"` | no |
 | <a name="input_docker_compose_branch"></a> [docker\_compose\_branch](#input\_docker\_compose\_branch) | git branch to checkout for var.docker\_compose\_repo | `string` | `"main"` | no |
-| <a name="input_docker_compose_down"></a> [docker\_compose\_down](#input\_docker\_compose\_down) | Command to stop the docker compose project | `list(string)` | <pre>[<br/>  "docker compose down"<br/>]</pre> | no |
-| <a name="input_docker_compose_init"></a> [docker\_compose\_init](#input\_docker\_compose\_init) | After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value | `list(string)` | `[]` | no |
-| <a name="input_docker_compose_rollout"></a> [docker\_compose\_rollout](#input\_docker\_compose\_rollout) | Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT\_REF/GIT\_BRANCH from the trigger request. | `list(string)` | <pre>[<br/>  "if [ -x ./scripts/rollout.sh ]; then exec ./scripts/rollout.sh; fi",<br/>  "TARGET_REF=\"${GIT_REF:-${GIT_BRANCH:-${DOCKER_COMPOSE_BRANCH:-main}}}\"",<br/>  "git fetch origin \"$TARGET_REF\" || git fetch origin",<br/>  "git checkout \"$TARGET_REF\" || git checkout FETCH_HEAD",<br/>  "systemctl restart cloud-compose"<br/>]</pre> | no |
-| <a name="input_docker_compose_up"></a> [docker\_compose\_up](#input\_docker\_compose\_up) | Command to start the docker compose project | `list(string)` | <pre>[<br/>  "docker compose up --remove-orphans"<br/>]</pre> | no |
+| <a name="input_docker_compose_down"></a> [docker\_compose\_down](#input\_docker\_compose\_down) | Command to stop the docker compose project | `list(string)` | <pre>[<br/>  "sitectl compose --context \"${SITECTL_CONTEXT_NAME}\" down"<br/>]</pre> | no |
+| <a name="input_docker_compose_init"></a> [docker\_compose\_init](#input\_docker\_compose\_init) | After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value | `list(string)` | <pre>[<br/>  "sitectl config set-context \"${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"${DOCKER_COMPOSE_DIR}\" --site \"${GCP_INSTANCE_NAME}\" --plugin \"${SITECTL_PLUGIN}\" --environment \"${SITECTL_ENVIRONMENT}\" --project-name \"${GCP_INSTANCE_NAME}\" --compose-project-name \"${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"<br/>]</pre> | no |
+| <a name="input_docker_compose_rollout"></a> [docker\_compose\_rollout](#input\_docker\_compose\_rollout) | Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT\_REF/GIT\_BRANCH from the trigger request. | `list(string)` | <pre>[<br/>  "TARGET_REF=\"${GIT_REF:-${GIT_BRANCH:-${DOCKER_COMPOSE_BRANCH:-main}}}\"",<br/>  "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",<br/>  "sitectl healthcheck --context \"${SITECTL_CONTEXT_NAME}\" --persist --timeout \"${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"${SITECTL_HEALTHCHECK_INTERVAL}\"",<br/>  "if [ \"${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"${SITECTL_CONTEXT_NAME}\" ${SITECTL_VERIFY_ARGS:-}; fi"<br/>]</pre> | no |
+| <a name="input_docker_compose_up"></a> [docker\_compose\_up](#input\_docker\_compose\_up) | Command to start the docker compose project | `list(string)` | <pre>[<br/>  "sitectl deploy --context \"${SITECTL_CONTEXT_NAME}\" --skip-git",<br/>  "sitectl healthcheck --context \"${SITECTL_CONTEXT_NAME}\" --persist --timeout \"${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"${SITECTL_HEALTHCHECK_INTERVAL}\"",<br/>  "if [ \"${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"${SITECTL_CONTEXT_NAME}\" ${SITECTL_VERIFY_ARGS:-}; fi",<br/>  "sitectl compose --context \"${SITECTL_CONTEXT_NAME}\" logs -f"<br/>]</pre> | no |
 | <a name="input_frontend"></a> [frontend](#input\_frontend) | Optional frontend container to deploy as a sidecar next to ppb. When set,<br/>ppb continues to power on and ping the VM referenced by machineMetadata,<br/>but proxies incoming requests to this container on localhost instead of<br/>to the VM. Use this to serve a frontend from Cloud Run while keeping<br/>backend services on the VM. | <pre>object({<br/>    image  = string<br/>    port   = optional(number, 8080)<br/>    cpu    = optional(string, "1000m")<br/>    memory = optional(string, "1Gi")<br/>  })</pre> | `null` | no |
 | <a name="input_ingress_port"></a> [ingress\_port](#input\_ingress\_port) | TCP port on the VM that the Cloud Run ingress should connect to. | `number` | `80` | no |
 | <a name="input_initcmd"></a> [initcmd](#input\_initcmd) | Commands to run before /home/cloud-compose/run.sh | `list(string)` | `[]` | no |
+| <a name="input_libops_cadvisor_image"></a> [libops\_cadvisor\_image](#input\_libops\_cadvisor\_image) | Container image used for the internal cAdvisor service. | `string` | `"ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d"` | no |
+| <a name="input_libops_cap_image"></a> [libops\_cap\_image](#input\_libops\_cap\_image) | Container image used for the internal CAP metrics service. | `string` | `"ghcr.io/libops/cap:main"` | no |
+| <a name="input_libops_internal_services_auto_update"></a> [libops\_internal\_services\_auto\_update](#input\_libops\_internal\_services\_auto\_update) | Whether the managed runtime updater should pull and restart the internal LibOps compose project. | `bool` | `true` | no |
+| <a name="input_libops_lightsout_image"></a> [libops\_lightsout\_image](#input\_libops\_lightsout\_image) | Container image used for the internal lightsout service. | `string` | `"ghcr.io/libops/lightsout:main"` | no |
+| <a name="input_libops_managed_artifacts"></a> [libops\_managed\_artifacts](#input\_libops\_managed\_artifacts) | Additional LibOps-managed files or binaries to download, verify, install, and optionally restart with the managed runtime updater. | <pre>list(object({<br/>    name    = string<br/>    url     = string<br/>    sha256  = string<br/>    path    = string<br/>    mode    = optional(string, "0755")<br/>    owner   = optional(string, "root")<br/>    group   = optional(string, "root")<br/>    restart = optional(string, "")<br/>  }))</pre> | `[]` | no |
+| <a name="input_libops_managed_runtime_enabled"></a> [libops\_managed\_runtime\_enabled](#input\_libops\_managed\_runtime\_enabled) | Install and periodically update LibOps-managed host tools and internal VM services. | `bool` | `true` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | VM machine type (General-purpose series that support Hyperdisk Balanced | `string` | `"n4-standard-2"` | no |
 | <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-220-185"` | no |
 | <a name="input_overlay_source_instance"></a> [overlay\_source\_instance](#input\_overlay\_source\_instance) | Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments. | `string` | `""` | no |
@@ -105,6 +112,14 @@ Optional VM APIs:
 | <a name="input_run_snapshots"></a> [run\_snapshots](#input\_run\_snapshots) | Enable daily snapshots of the data disk (recommended for production). Last seven days of snapshots are available. Also weekly snapshots for past year. | `bool` | `false` | no |
 | <a name="input_runcmd"></a> [runcmd](#input\_runcmd) | Additional commands to run during cloud-init. Commands are executed after the main initialization. | `list(string)` | `[]` | no |
 | <a name="input_service_account_email"></a> [service\_account\_email](#input\_service\_account\_email) | Existing service account email for the VM. When empty, this module creates one. | `string` | `""` | no |
+| <a name="input_sitectl_context_name"></a> [sitectl\_context\_name](#input\_sitectl\_context\_name) | Sitectl context name to create on the VM. Defaults to var.name. | `string` | `""` | no |
+| <a name="input_sitectl_environment"></a> [sitectl\_environment](#input\_sitectl\_environment) | Sitectl environment label. Production runs healthcheck only by default; non-production also runs sitectl verify. | `string` | `"production"` | no |
+| <a name="input_sitectl_healthcheck_interval"></a> [sitectl\_healthcheck\_interval](#input\_sitectl\_healthcheck\_interval) | Interval passed to sitectl healthcheck --interval in default lifecycle commands. | `string` | `"15s"` | no |
+| <a name="input_sitectl_healthcheck_timeout"></a> [sitectl\_healthcheck\_timeout](#input\_sitectl\_healthcheck\_timeout) | Timeout passed to sitectl healthcheck --timeout in default lifecycle commands. | `string` | `"10m"` | no |
+| <a name="input_sitectl_packages"></a> [sitectl\_packages](#input\_sitectl\_packages) | LibOps GitHub release package names to install and keep updated on the VM. Include plugin packages such as sitectl-isle or sitectl-wp as needed. | `list(string)` | <pre>[<br/>  "sitectl"<br/>]</pre> | no |
+| <a name="input_sitectl_plugin"></a> [sitectl\_plugin](#input\_sitectl\_plugin) | Sitectl plugin id to associate with the VM context. | `string` | `"core"` | no |
+| <a name="input_sitectl_verify_args"></a> [sitectl\_verify\_args](#input\_sitectl\_verify\_args) | Additional arguments appended to sitectl verify by the default non-production lifecycle commands. | `list(string)` | `[]` | no |
+| <a name="input_sitectl_version"></a> [sitectl\_version](#input\_sitectl\_version) | Sitectl release tag to install for sitectl packages, or latest to follow https://github.com/libops/sitectl/releases/latest. | `string` | `"latest"` | no |
 | <a name="input_users"></a> [users](#input\_users) | Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { "alice" = ["ssh-rsa AAAA..."], "bob" = ["ssh-ed25519 AAAA...", "ssh-rsa BBBB..."] } | `map(list(string))` | `{}` | no |
 | <a name="input_volume_names"></a> [volume\_names](#input\_volume\_names) | List of docker volumes to overlay from production snapshot (e.g., ['compose\_ojs-public']). Production data is mounted read-only as lower layer, staging writes go to upper layer. | `list(string)` | `[]` | no |
 | <a name="input_zone"></a> [zone](#input\_zone) | GCP zone for resources | `string` | `"us-east5-b"` | no |
