@@ -185,6 +185,12 @@ variable "sitectl_environment" {
   description = "Sitectl environment label. Production runs healthcheck only by default; non-production also runs sitectl verify."
 }
 
+variable "production" {
+  type        = bool
+  default     = false
+  description = "Whether this VM is the production environment. Production VMs reserve one matching machine so stop/start and recreate operations keep capacity."
+}
+
 variable "sitectl_healthcheck_timeout" {
   type        = string
   default     = "10m"

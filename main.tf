@@ -132,6 +132,7 @@ EOT
         SITECTL_CONTEXT_NAME="${local.sitectl_context_name}"
         SITECTL_PLUGIN="${var.sitectl_plugin}"
         SITECTL_ENVIRONMENT="${var.sitectl_environment}"
+        PRODUCTION="${var.production}"
         SITECTL_HEALTHCHECK_TIMEOUT="${var.sitectl_healthcheck_timeout}"
         SITECTL_HEALTHCHECK_INTERVAL="${var.sitectl_healthcheck_interval}"
         SITECTL_VERIFY_ARGS="${join(" ", var.sitectl_verify_args)}"
@@ -241,6 +242,21 @@ resource "google_compute_disk" "docker-volumes" {
   size                      = var.disk_size_gb
   image                     = "debian-13-trixie-v20251111"
   physical_block_size_bytes = 4096
+}
+
+resource "google_compute_reservation" "production" {
+  count   = var.production ? 1 : 0
+  name    = format("%s-production", var.name)
+  project = var.project_id
+  zone    = var.zone
+
+  specific_reservation {
+    count = 1
+    instance_properties {
+      machine_type = var.machine_type
+    }
+  }
+  specific_reservation_required = true
 }
 
 # Daily snapshot schedule for production docker volume disk
@@ -398,7 +414,15 @@ resource "google_compute_instance" "cloud-compose" {
   }
 
   reservation_affinity {
-    type = "ANY_RESERVATION"
+    type = var.production ? "SPECIFIC_RESERVATION" : "ANY_RESERVATION"
+
+    dynamic "specific_reservation" {
+      for_each = var.production ? [google_compute_reservation.production[0].name] : []
+      content {
+        key    = "compute.googleapis.com/reservation-name"
+        values = [specific_reservation.value]
+      }
+    }
   }
 
   scheduling {

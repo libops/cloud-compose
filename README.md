@@ -46,6 +46,7 @@ Optional VM APIs:
 | [google_compute_firewall.allow_ssh_ipv4](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_firewall) | resource |
 | [google_compute_firewall.allow_ssh_ipv6](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_firewall) | resource |
 | [google_compute_instance.cloud-compose](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
+| [google_compute_reservation.production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_reservation) | resource |
 | [google_compute_resource_policy.daily_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy) | resource |
 | [google_compute_resource_policy.weekly_snapshot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy) | resource |
 | [google_project_iam_member.gce-start](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
@@ -99,6 +100,7 @@ Optional VM APIs:
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | VM machine type (General-purpose series that support Hyperdisk Balanced | `string` | `"n4-standard-2"` | no |
 | <a name="input_os"></a> [os](#input\_os) | The host OS to install on the GCP instance | `string` | `"cos-125-19216-220-185"` | no |
 | <a name="input_overlay_source_instance"></a> [overlay\_source\_instance](#input\_overlay\_source\_instance) | Name of production instance to get latest snapshot from (e.g., 'ojs-production'). Terraform will automatically use the most recent snapshot from this instance's data disk. Leave empty for production environments. | `string` | `""` | no |
+| <a name="input_production"></a> [production](#input\_production) | Whether this VM is the production environment. Production VMs reserve one matching machine so stop/start and recreate operations keep capacity. | `bool` | `false` | no |
 | <a name="input_region"></a> [region](#input\_region) | GCP region for resources | `string` | `"us-east5"` | no |
 | <a name="input_rollout_allowed_ipv4"></a> [rollout\_allowed\_ipv4](#input\_rollout\_allowed\_ipv4) | CIDR IPv4 ranges allowed to reach the rollout service port. | `list(string)` | <pre>[<br/>  "10.0.0.0/8"<br/>]</pre> | no |
 | <a name="input_rollout_custom_claims"></a> [rollout\_custom\_claims](#input\_rollout\_custom\_claims) | Optional JSON object of additional JWT claims required by the rollout service. | `string` | `""` | no |

@@ -13,6 +13,7 @@ module "production" {
   docker_compose_init = var.docker_compose_init
   region              = var.region
   zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
+  production          = true
   run_snapshots       = true
   allowed_ips         = var.allowed_ips
 }
@@ -27,6 +28,7 @@ module "staging" {
   docker_compose_init = var.docker_compose_init
   region              = var.region
   zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
+  sitectl_environment = "staging"
   disk_size_gb        = 20
   allowed_ips         = var.allowed_ips
 
