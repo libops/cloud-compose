@@ -133,7 +133,7 @@ positive_integer_env() {
 }
 
 boot_timeout_seconds() {
-  positive_integer_env CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT 3600
+  positive_integer_env CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT 1200
 }
 
 destroy_timeout_seconds() {
@@ -634,6 +634,9 @@ run_target() (
 
   root="$(target_root "$target")"
   target_env "$target"
+  if [[ -z "${CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT:-}" ]] && [[ "$(target_template "$target")" == "isle" ]]; then
+    export CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1800
+  fi
 
   workdir="$(target_workdir "$target")"
   key_path="$workdir/id_ed25519"
