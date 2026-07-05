@@ -76,7 +76,7 @@ locals {
     })
     sitectl = merge(local.input_sitectl, {
       packages = (
-        local.template_name != "" && local.input_sitectl.packages == ["sitectl"]
+        local.template_name != "" && length(local.input_sitectl.packages) == 1 && local.input_sitectl.packages[0] == "sitectl"
         ? local.template.packages
         : local.input_sitectl.packages
       )
