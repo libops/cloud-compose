@@ -39,37 +39,49 @@ the auth method through `vault_agent_additional_config` or a rootfs overlay.
 ## DigitalOcean
 
 Use `DIGITALOCEAN_TOKEN` or an explicit DigitalOcean provider configuration in
-the calling stack.
+the calling stack. Prefer the root module contract so the app template selects
+the compose repo, `sitectl` plugin, and plugin package defaults:
 
 ```hcl
 module "wp" {
-  source = "./modules/digitalocean"
+  source = "../.."
 
-  name                   = "cc-wp"
-  region                 = "tor1"
-  ssh_keys               = var.digitalocean_ssh_keys
-  cloud_compose_ssh_keys = var.operator_ssh_keys
-  docker_compose_repo    = "https://github.com/libops/wp.git"
-  sitectl_packages       = ["sitectl", "sitectl-wp"]
-  sitectl_plugin         = "wp"
+  name           = "cc-wp"
+  cloud_provider = "digitalocean"
+  template       = "wp"
+  digitalocean = {
+    region = "tor1"
+    ssh = {
+      cloud_compose_keys = var.operator_ssh_keys
+    }
+  }
 }
 ```
 
 ## Linode
 
 Use `LINODE_TOKEN` or an explicit Linode provider configuration in the calling
-stack.
+stack. Linode metadata is tighter than DigitalOcean, so CI and examples can pass
+`rootfs_archive_url` when the embedded cloud-init payload would be too large:
 
 ```hcl
 module "drupal" {
-  source = "./modules/linode"
+  source = "../.."
 
-  name                   = "cc-drupal"
-  region                 = "us-east"
-  authorized_keys        = var.operator_ssh_keys
-  cloud_compose_ssh_keys = var.operator_ssh_keys
-  docker_compose_repo    = "https://github.com/libops/drupal.git"
-  sitectl_packages       = ["sitectl", "sitectl-drupal"]
-  sitectl_plugin         = "drupal"
+  name           = "cc-drupal"
+  cloud_provider = "linode"
+  template       = "drupal"
+  linode = {
+    region = "us-east"
+    instance = {
+      authorized_keys = var.operator_ssh_keys
+    }
+    ssh = {
+      cloud_compose_keys = var.operator_ssh_keys
+    }
+  }
+  runtime = {
+    rootfs_archive_url = "https://github.com/libops/cloud-compose/archive/main.tar.gz"
+  }
 }
 ```

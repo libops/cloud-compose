@@ -2,12 +2,12 @@ terraform {
   required_version = ">= 1.2.4"
 }
 
-module "ojs" {
+module "archivesspace" {
   source = "../app"
 
   name           = var.name
   cloud_provider = var.cloud_provider
-  template       = "ojs"
+  template       = "archivesspace"
   gcp            = var.gcp
   digitalocean   = var.digitalocean
   linode         = var.linode
@@ -15,13 +15,13 @@ module "ojs" {
 }
 
 output "instance" {
-  value = module.ojs.instance
+  value = module.archivesspace.instance
 }
 
 output "external_ip" {
-  value = module.ojs.external_ip
+  value = module.archivesspace.external_ip
 }
 
 output "primary_compose_project" {
-  value = module.ojs.primary_compose_project
+  value = module.archivesspace.primary_compose_project
 }

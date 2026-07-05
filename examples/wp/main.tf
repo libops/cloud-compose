@@ -3,27 +3,25 @@ terraform {
 }
 
 module "wp" {
-  source = "../.."
+  source = "../app"
 
-  name = var.name
-  gcp = {
-    project_id     = var.project_id
-    project_number = var.project_number
-  }
-  runtime = {
-    compose = {
-      repo         = var.docker_compose_repo
-      branch       = var.docker_compose_branch
-      ingress_port = var.ingress_port
-    }
-    sitectl = {
-      packages = ["sitectl", "sitectl-wp"]
-      plugin   = "wp"
-    }
-    vault = {
-      addr          = var.vault_addr
-      role          = var.vault_role
-      agent_enabled = var.vault_agent_enabled
-    }
-  }
+  name           = var.name
+  cloud_provider = var.cloud_provider
+  template       = "wp"
+  gcp            = var.gcp
+  digitalocean   = var.digitalocean
+  linode         = var.linode
+  runtime        = var.runtime
+}
+
+output "instance" {
+  value = module.wp.instance
+}
+
+output "external_ip" {
+  value = module.wp.external_ip
+}
+
+output "primary_compose_project" {
+  value = module.wp.primary_compose_project
 }

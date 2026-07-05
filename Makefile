@@ -1,4 +1,4 @@
-.PHONY: lint lint-check terraform-fmt terraform-fmt-check terraform-validate terraform-lint-check shell-lint terraform-docs smoke-test-clouds smoke-test-digitalocean-isle smoke-test-linode-wp smoke-test-gcp-wp destroy-smoke-digitalocean-isle destroy-smoke-linode-wp destroy-smoke-gcp-wp docs docs-docker-build docs-build docs-serve docs-preview docs-clean
+.PHONY: lint lint-check terraform-fmt terraform-fmt-check terraform-validate terraform-lint-check shell-lint terraform-docs smoke-test-clouds smoke-test smoke-test-digitalocean-isle smoke-test-linode-wp smoke-test-gcp-wp destroy-smoke destroy-smoke-digitalocean-isle destroy-smoke-linode-wp destroy-smoke-gcp-wp docs docs-docker-build docs-build docs-serve docs-preview docs-clean
 
 DOCS_IMAGE ?= cloud-compose-docs
 DOCS_PORT ?= 8888
@@ -31,23 +31,33 @@ terraform-docs:
 smoke-test-clouds:
 	ci/cloud-smoke.sh all
 
+smoke-test:
+	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
+	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
+	ci/cloud-smoke.sh $(PROVIDER)-$(TEMPLATE)
+
 smoke-test-digitalocean-isle:
-	ci/cloud-smoke.sh digitalocean-isle
+	$(MAKE) smoke-test PROVIDER=digitalocean TEMPLATE=isle
 
 smoke-test-linode-wp:
-	ci/cloud-smoke.sh linode-wp
+	$(MAKE) smoke-test PROVIDER=linode TEMPLATE=wp
 
 smoke-test-gcp-wp:
-	ci/cloud-smoke.sh gcp-wp
+	$(MAKE) smoke-test PROVIDER=gcp TEMPLATE=wp
+
+destroy-smoke:
+	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
+	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
+	ci/cloud-smoke.sh destroy-$(PROVIDER)-$(TEMPLATE)
 
 destroy-smoke-digitalocean-isle:
-	ci/cloud-smoke.sh destroy-digitalocean-isle
+	$(MAKE) destroy-smoke PROVIDER=digitalocean TEMPLATE=isle
 
 destroy-smoke-linode-wp:
-	ci/cloud-smoke.sh destroy-linode-wp
+	$(MAKE) destroy-smoke PROVIDER=linode TEMPLATE=wp
 
 destroy-smoke-gcp-wp:
-	ci/cloud-smoke.sh destroy-gcp-wp
+	$(MAKE) destroy-smoke PROVIDER=gcp TEMPLATE=wp
 
 docs: docs-build
 

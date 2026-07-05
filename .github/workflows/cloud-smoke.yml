@@ -41,19 +41,16 @@ jobs:
       matrix:
         include:
           - name: DigitalOcean ISLE
-            make_target: smoke-test-digitalocean-isle
-            smoke_target: digitalocean-isle
             provider: digitalocean
+            template: isle
           - name: Linode WordPress
-            make_target: smoke-test-linode-wp
-            smoke_target: linode-wp
             provider: linode
+            template: wp
           - name: GCP WordPress
-            make_target: smoke-test-gcp-wp
-            smoke_target: gcp-wp
             provider: gcp
+            template: wp
     concurrency:
-      group: cloud-compose-smoke-${{ matrix.make_target }}
+      group: cloud-compose-smoke-${{ matrix.provider }}-${{ matrix.template }}
       cancel-in-progress: false
     env:
       CLOUD_COMPOSE_SMOKE_AUTO_APPROVE: "true"
@@ -101,11 +98,11 @@ jobs:
         run: ci/install-sitectl-apt.sh
 
       - name: Run smoke test
-        run: make ${{ matrix.make_target }}
+        run: make smoke-test PROVIDER=${{ matrix.provider }} TEMPLATE=${{ matrix.template }}
 
       - name: Destroy smoke resources
         if: always() && (matrix.provider != 'gcp' || (env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != ''))
-        run: ci/cloud-smoke.sh destroy-${{ matrix.smoke_target }}
+        run: ci/cloud-smoke.sh destroy-${{ matrix.provider }}-${{ matrix.template }}
 
       - name: Skip GCP destroy
         if: always() && matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')
@@ -121,19 +118,16 @@ jobs:
       matrix:
         include:
           - name: DigitalOcean ISLE
-            sweep_target: sweep-digitalocean-isle
-            concurrency_target: smoke-test-digitalocean-isle
             provider: digitalocean
+            template: isle
           - name: Linode WordPress
-            sweep_target: sweep-linode-wp
-            concurrency_target: smoke-test-linode-wp
             provider: linode
+            template: wp
           - name: GCP WordPress
-            sweep_target: sweep-gcp-wp
-            concurrency_target: smoke-test-gcp-wp
             provider: gcp
+            template: wp
     concurrency:
-      group: cloud-compose-smoke-${{ matrix.concurrency_target }}
+      group: cloud-compose-smoke-${{ matrix.provider }}-${{ matrix.template }}
       cancel-in-progress: false
     env:
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
@@ -161,7 +155,7 @@ jobs:
 
       - name: Sweep smoke resources
         if: matrix.provider != 'gcp' || (env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != '')
-        run: ci/cloud-smoke.sh ${{ matrix.sweep_target }}
+        run: ci/cloud-smoke.sh sweep-${{ matrix.provider }}-${{ matrix.template }}
 
       - name: Skip GCP cleanup
         if: matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')

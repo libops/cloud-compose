@@ -3,11 +3,33 @@ variable "name" {
   description = "Deployment name."
 }
 
+variable "cloud_provider" {
+  type        = string
+  default     = "gcp"
+  description = "Cloud provider to deploy to. Supported values are gcp, digitalocean, and linode."
+
+  validation {
+    condition     = contains(["gcp", "digitalocean", "linode"], lower(trimspace(var.cloud_provider)))
+    error_message = "cloud_provider must be gcp, digitalocean, or linode."
+  }
+}
+
+variable "template" {
+  type        = string
+  default     = ""
+  description = "Optional compose template preset. Supported values are archivesspace, ojs, isle, drupal, wp, omeka-s, and omeka-classic. Explicit runtime settings override preset defaults."
+
+  validation {
+    condition     = contains(["", "archivesspace", "ojs", "isle", "drupal", "wp", "omeka-s", "omeka-classic"], lower(trimspace(var.template)))
+    error_message = "template must be empty, archivesspace, ojs, isle, drupal, wp, omeka-s, or omeka-classic."
+  }
+}
+
 variable "gcp" {
   description = "Google Cloud infrastructure settings."
   type = object({
-    project_id     = string
-    project_number = string
+    project_id     = optional(string, "")
+    project_number = optional(string, "")
     region         = optional(string, "us-east5")
     zone           = optional(string, "us-east5-b")
 
@@ -77,6 +99,7 @@ variable "gcp" {
       allowed_ipv4   = optional(list(string), ["10.0.0.0/8"])
     }), {})
   })
+  default = {}
 
   validation {
     condition = contains([
@@ -117,11 +140,86 @@ variable "gcp" {
   }
 }
 
+variable "digitalocean" {
+  description = "DigitalOcean infrastructure settings."
+  type = object({
+    region = optional(string, "tor1")
+    tags   = optional(list(string), ["cloud-compose"])
+
+    droplet = optional(object({
+      size       = optional(string, "s-2vcpu-4gb")
+      image      = optional(string, "ubuntu-24-04-x64")
+      ssh_keys   = optional(list(string), [])
+      vpc_uuid   = optional(string, null)
+      monitoring = optional(bool, true)
+      ipv6       = optional(bool, true)
+      backups    = optional(bool, false)
+    }), {})
+
+    ssh = optional(object({
+      cloud_compose_keys = optional(list(string), [])
+      users              = optional(map(list(string)), {})
+    }), {})
+
+    volumes = optional(object({
+      data_size_gb           = optional(number, 50)
+      docker_volumes_size_gb = optional(number, 100)
+    }), {})
+
+    firewall = optional(object({
+      enabled              = optional(bool, true)
+      ssh_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
+      web_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
+    }), {})
+  })
+  default = {}
+}
+
+variable "linode" {
+  description = "Linode infrastructure settings."
+  type = object({
+    region = optional(string, "us-east")
+    tags   = optional(list(string), ["cloud-compose"])
+
+    instance = optional(object({
+      type             = optional(string, "g6-standard-2")
+      image            = optional(string, "linode/ubuntu22.04")
+      authorized_keys  = optional(list(string), [])
+      authorized_users = optional(list(string), [])
+      root_pass        = optional(string, null)
+      private_ip       = optional(bool, true)
+      backups_enabled  = optional(bool, false)
+      watchdog_enabled = optional(bool, true)
+    }), {})
+
+    ssh = optional(object({
+      cloud_compose_keys = optional(list(string), [])
+      users              = optional(map(list(string)), {})
+    }), {})
+
+    volumes = optional(object({
+      data_size_gb           = optional(number, 50)
+      docker_volumes_size_gb = optional(number, 100)
+    }), {})
+
+    firewall = optional(object({
+      enabled         = optional(bool, true)
+      ssh_source_ipv4 = optional(list(string), ["0.0.0.0/0"])
+      ssh_source_ipv6 = optional(list(string), ["::/0"])
+      web_source_ipv4 = optional(list(string), ["0.0.0.0/0"])
+      web_source_ipv6 = optional(list(string), ["::/0"])
+    }), {})
+  })
+  default = {}
+}
+
 variable "runtime" {
   description = "Provider-neutral compose/runtime settings."
   type = object({
-    rootfs = optional(string, "")
-    users  = optional(map(list(string)), {})
+    rootfs                = optional(string, "")
+    rootfs_archive_url    = optional(string, "")
+    rootfs_archive_sha256 = optional(string, "")
+    users                 = optional(map(list(string)), {})
 
     compose = optional(object({
       primary      = optional(string, "")
@@ -236,6 +334,8 @@ variable "runtime" {
         command     = optional(string, "")
       })), [])
     }), {})
+
+    extra_env = optional(map(string), {})
   })
   default = {}
 

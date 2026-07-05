@@ -8,21 +8,20 @@ usage() {
   cat <<'EOF'
 Usage:
   ci/cloud-smoke.sh all
+  ci/cloud-smoke.sh <provider>-<template>
+  ci/cloud-smoke.sh destroy-<provider>-<template>
+  ci/cloud-smoke.sh sweep
+  ci/cloud-smoke.sh sweep-<provider>-<template>
+
+Examples:
   ci/cloud-smoke.sh digitalocean-isle
   ci/cloud-smoke.sh linode-wp
   ci/cloud-smoke.sh gcp-wp
-  ci/cloud-smoke.sh destroy-digitalocean-isle
-  ci/cloud-smoke.sh destroy-linode-wp
-  ci/cloud-smoke.sh destroy-gcp-wp
-  ci/cloud-smoke.sh sweep
-  ci/cloud-smoke.sh sweep-digitalocean-isle
-  ci/cloud-smoke.sh sweep-linode-wp
-  ci/cloud-smoke.sh sweep-gcp-wp
 
 Required environment:
-  DIGITALOCEAN_TOKEN  DigitalOcean API token for digitalocean-isle.
-  LINODE_TOKEN        Linode API token for linode-wp.
-  GCLOUD_PROJECT      Google Cloud project for gcp-wp.
+  DIGITALOCEAN_TOKEN  DigitalOcean API token for digitalocean targets.
+  LINODE_TOKEN        Linode API token for linode targets.
+  GCLOUD_PROJECT      Google Cloud project for gcp targets.
 
 Optional environment:
   CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true   Pass -auto-approve outside GitHub Actions.
@@ -34,9 +33,10 @@ Optional environment:
   CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS=true
                                       Remove prior smoke resources for the same target before apply.
   CLOUD_COMPOSE_SMOKE_RUN_ID          Optional run id used to target provider cleanup.
+  CLOUD_COMPOSE_SMOKE_TARGETS         Space-separated targets used by "all" and "sweep".
   DIGITALOCEAN_API_TOKEN                  Backward-compatible alias for DIGITALOCEAN_TOKEN.
-  GCLOUD_REGION=us-east5              Google Cloud region for gcp-wp.
-  GCLOUD_ZONE=us-east5-b              Google Cloud zone for gcp-wp.
+  GCLOUD_REGION=us-east5              Google Cloud region for gcp targets.
+  GCLOUD_ZONE=us-east5-b              Google Cloud zone for gcp targets.
 EOF
 }
 
@@ -54,11 +54,22 @@ require_env() {
   fi
 }
 
-target_root() {
+default_targets() {
+  printf '%s\n' "${CLOUD_COMPOSE_SMOKE_TARGETS:-digitalocean-isle linode-wp gcp-wp}"
+}
+
+valid_template() {
   case "$1" in
-    digitalocean-isle) printf '%s/tests/smoke/digitalocean-isle\n' "$repo_root" ;;
-    linode-wp) printf '%s/tests/smoke/linode-wp\n' "$repo_root" ;;
-    gcp-wp) printf '%s/tests/smoke/gcp-wp\n' "$repo_root" ;;
+    archivesspace | ojs | isle | drupal | wp | omeka-s | omeka-classic) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+target_provider() {
+  case "$1" in
+    digitalocean-*) printf 'digitalocean\n' ;;
+    linode-*) printf 'linode\n' ;;
+    gcp-*) printf 'gcp\n' ;;
     *)
       echo "Unknown smoke target: $1" >&2
       usage >&2
@@ -67,18 +78,36 @@ target_root() {
   esac
 }
 
+target_template() {
+  local target="$1" provider template
+
+  provider="$(target_provider "$target")"
+  template="${target#"$provider"-}"
+  if ! valid_template "$template"; then
+    echo "Unknown smoke template in target: $target" >&2
+    usage >&2
+    exit 2
+  fi
+  printf '%s\n' "$template"
+}
+
+target_root() {
+  target_template "$1" >/dev/null
+  printf '%s/tests/smoke/app\n' "$repo_root"
+}
+
 target_env() {
-  case "$1" in
-    digitalocean-isle)
+  case "$(target_provider "$1")" in
+    digitalocean)
       if [[ -z "${DIGITALOCEAN_TOKEN:-}" && -n "${DIGITALOCEAN_API_TOKEN:-}" ]]; then
         export DIGITALOCEAN_TOKEN="$DIGITALOCEAN_API_TOKEN"
       fi
       require_env DIGITALOCEAN_TOKEN
       ;;
-    linode-wp)
+    linode)
       require_env LINODE_TOKEN
       ;;
-    gcp-wp)
+    gcp)
       require_env GCLOUD_PROJECT
       export GOOGLE_PROJECT="${GOOGLE_PROJECT:-$GCLOUD_PROJECT}"
       export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-$GCLOUD_PROJECT}"
@@ -180,46 +209,84 @@ smoke_run_tag() {
   printf 'gha-run-%s\n' "$run_id"
 }
 
+template_slug() {
+  case "$1" in
+    archivesspace) printf 'as\n' ;;
+    ojs) printf 'ojs\n' ;;
+    isle) printf 'isle\n' ;;
+    drupal) printf 'dr\n' ;;
+    wp) printf 'wp\n' ;;
+    omeka-s) printf 'os\n' ;;
+    omeka-classic) printf 'oc\n' ;;
+    *)
+      echo "Unknown smoke template: $1" >&2
+      exit 2
+      ;;
+  esac
+}
+
+provider_slug() {
+  case "$1" in
+    digitalocean) printf 'do\n' ;;
+    gcp) printf 'g\n' ;;
+    linode) printf 'ln\n' ;;
+    *)
+      echo "Unknown smoke provider: $1" >&2
+      exit 2
+      ;;
+  esac
+}
+
+target_name_prefix() {
+  local target="$1" provider template
+
+  provider="$(target_provider "$target")"
+  template="$(target_template "$target")"
+  printf 'cc-%s-%s\n' "$(provider_slug "$provider")" "$(template_slug "$template")"
+}
+
 provider_tag_cleanup() {
-  local target="$1" run_id="${2:-}" run_tag run_fragment
+  local target="$1" run_id="${2:-}" run_tag run_fragment provider name_prefix
 
   run_tag="$(smoke_run_tag "$run_id")"
   run_fragment=""
   if [[ -n "$run_id" ]]; then
     run_fragment="-$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-16)-"
   fi
+  provider="$(target_provider "$target")"
+  name_prefix="$(target_name_prefix "$target")"
 
-  case "$target" in
-    digitalocean-isle)
+  case "$provider" in
+    digitalocean)
       api_get digitalocean "/firewalls?per_page=200" |
-        jq -r --arg run_fragment "$run_fragment" '.firewalls[]? | select(.name | startswith("cc-do-isle-")) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id' |
+        jq -r --arg name_prefix "${name_prefix}-" --arg run_fragment "$run_fragment" '.firewalls[]? | select(.name | startswith($name_prefix)) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id' |
         delete_ids digitalocean "/firewalls"
       api_get digitalocean "/droplets?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg run_tag "$run_tag" '.droplets[]? | select((.tags // []) | index("digitalocean-isle")) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" '.droplets[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
         delete_ids digitalocean "/droplets"
       sleep 10
       api_get digitalocean "/volumes?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg run_tag "$run_tag" '.volumes[]? | select((.tags // []) | index("digitalocean-isle")) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" '.volumes[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
         delete_ids digitalocean "/volumes"
       ;;
-    linode-wp)
+    linode)
       api_get linode "/networking/firewalls?page_size=500" |
-        jq -r --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("linode-wp")) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
         delete_ids linode "/networking/firewalls"
       api_get linode "/linode/instances?page_size=500" |
-        jq -r --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("linode-wp")) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
         delete_ids linode "/linode/instances"
       sleep 10
       api_get linode "/volumes?page_size=500" |
-        jq -r --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("linode-wp")) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
         delete_ids linode "/volumes"
       ;;
-    gcp-wp)
+    gcp)
       local project name_filter
       project="$GCLOUD_PROJECT"
-      name_filter='^cc-gwp-'
+      name_filter="^${name_prefix}-"
       if [[ -n "$run_id" ]]; then
-        name_filter="^cc-gwp-$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-8)-"
+        name_filter="^${name_prefix}-$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-8)-"
       fi
 
       gcloud compute instances list \
@@ -313,7 +380,10 @@ target_workdir() {
 }
 
 target_var_args() {
-  local root="$1" key_path="$2" public_key
+  local root="$1" key_path="$2" target="$3" public_key provider template
+
+  provider="$(target_provider "$target")"
+  template="$(target_template "$target")"
 
   if [[ -f "${key_path}.pub" ]]; then
     public_key="$(cat "${key_path}.pub")"
@@ -322,6 +392,12 @@ target_var_args() {
   fi
 
   printf '%s\0%s\0' "-var" "ssh_public_key=${public_key}"
+  if grep -q 'variable "cloud_provider"' "$root/variables.tf"; then
+    printf '%s\0%s\0' "-var" "cloud_provider=${provider}"
+  fi
+  if grep -q 'variable "template"' "$root/variables.tf"; then
+    printf '%s\0%s\0' "-var" "template=${template}"
+  fi
   if grep -q 'variable "cloud_compose_source_ref"' "$root/variables.tf"; then
     printf '%s\0%s\0' "-var" "cloud_compose_source_ref=${CLOUD_COMPOSE_SOURCE_REF:-${GITHUB_SHA:-main}}"
   fi
@@ -563,7 +639,7 @@ run_target() (
   chmod 0700 "$home_dir/.ssh"
 
   ensure_key "$key_path"
-  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path")
+  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target")
 
   auto_args=()
   if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
@@ -571,6 +647,7 @@ run_target() (
   fi
 
   cleanup_started=false
+  # shellcheck disable=SC2317
   cleanup() {
     local status=$?
     local destroy_status destroy_timeout cleanup_status
@@ -653,7 +730,7 @@ destroy_target() (
 
   workdir="$(target_workdir "$target")"
   key_path="$workdir/id_ed25519"
-  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path")
+  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target")
 
   auto_args=()
   if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
@@ -694,6 +771,8 @@ destroy_target() (
 )
 
 main() {
+  local target provider
+
   if [[ "$#" -ne 1 ]]; then
     usage >&2
     exit 2
@@ -701,57 +780,52 @@ main() {
 
   case "$1" in
     sweep)
-      require_cmd jq
-      require_cmd curl
-      target_env digitalocean-isle
-      provider_tag_cleanup digitalocean-isle "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
-      target_env linode-wp
-      provider_tag_cleanup linode-wp "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
-      require_cmd gcloud
-      target_env gcp-wp
-      provider_tag_cleanup gcp-wp "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      for target in $(default_targets); do
+        provider="$(target_provider "$target")"
+        require_cmd jq
+        case "$provider" in
+          digitalocean | linode)
+            require_cmd curl
+            ;;
+          gcp)
+            require_cmd gcloud
+            ;;
+        esac
+        target_env "$target"
+        provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      done
       exit 0
       ;;
-    sweep-digitalocean-isle)
+    sweep-*)
+      target="${1#sweep-}"
+      provider="$(target_provider "$target")"
       require_cmd jq
-      require_cmd curl
-      target_env digitalocean-isle
-      provider_tag_cleanup digitalocean-isle "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      case "$provider" in
+        digitalocean | linode)
+          require_cmd curl
+          ;;
+        gcp)
+          require_cmd gcloud
+          ;;
+      esac
+      target_env "$target"
+      provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
       exit 0
       ;;
-    sweep-linode-wp)
+    destroy-*)
+      target="${1#destroy-}"
+      provider="$(target_provider "$target")"
       require_cmd jq
-      require_cmd curl
-      target_env linode-wp
-      provider_tag_cleanup linode-wp "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
-      exit 0
-      ;;
-    sweep-gcp-wp)
-      require_cmd jq
-      require_cmd gcloud
-      target_env gcp-wp
-      provider_tag_cleanup gcp-wp "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
-      exit 0
-      ;;
-    destroy-digitalocean-isle)
-      require_cmd jq
-      require_cmd curl
       require_cmd terraform
-      destroy_target digitalocean-isle
-      exit 0
-      ;;
-    destroy-linode-wp)
-      require_cmd jq
-      require_cmd curl
-      require_cmd terraform
-      destroy_target linode-wp
-      exit 0
-      ;;
-    destroy-gcp-wp)
-      require_cmd jq
-      require_cmd gcloud
-      require_cmd terraform
-      destroy_target gcp-wp
+      case "$provider" in
+        digitalocean | linode)
+          require_cmd curl
+          ;;
+        gcp)
+          require_cmd gcloud
+          ;;
+      esac
+      destroy_target "$target"
       exit 0
       ;;
   esac
@@ -766,11 +840,12 @@ main() {
 
   case "$1" in
     all)
-      run_target digitalocean-isle
-      run_target linode-wp
-      run_target gcp-wp
+      for target in $(default_targets); do
+        run_target "$target"
+      done
       ;;
-    digitalocean-isle|linode-wp|gcp-wp)
+    digitalocean-* | linode-* | gcp-*)
+      target_template "$1" >/dev/null
       run_target "$1"
       ;;
     *)

@@ -2,12 +2,12 @@ terraform {
   required_version = ">= 1.2.4"
 }
 
-module "ojs" {
+module "omeka_classic" {
   source = "../app"
 
   name           = var.name
   cloud_provider = var.cloud_provider
-  template       = "ojs"
+  template       = "omeka-classic"
   gcp            = var.gcp
   digitalocean   = var.digitalocean
   linode         = var.linode
@@ -15,13 +15,13 @@ module "ojs" {
 }
 
 output "instance" {
-  value = module.ojs.instance
+  value = module.omeka_classic.instance
 }
 
 output "external_ip" {
-  value = module.ojs.external_ip
+  value = module.omeka_classic.external_ip
 }
 
 output "primary_compose_project" {
-  value = module.ojs.primary_compose_project
+  value = module.omeka_classic.primary_compose_project
 }

@@ -1,38 +1,35 @@
-variable "project_id" {
-  description = "The GCP project ID"
+variable "name" {
   type        = string
+  default     = "ojs-example"
+  description = "Deployment name."
 }
 
-variable "project_number" {
+variable "cloud_provider" {
   type        = string
-  description = "The GCP project number"
+  default     = "digitalocean"
+  description = "Cloud provider to deploy to: gcp, digitalocean, or linode."
 }
 
-variable "region" {
-  description = "GCP region for resources"
-  type        = string
-  default     = "us-central1"
+variable "gcp" {
+  type        = any
+  default     = {}
+  description = "GCP provider settings passed to the app example."
 }
 
-variable "docker_compose_repo" {
-  type        = string
-  description = "git repo to checkout that contains a docker compose project"
+variable "digitalocean" {
+  type        = any
+  default     = {}
+  description = "DigitalOcean provider settings passed to the app example."
 }
 
-variable "docker_compose_branch" {
-  type        = string
-  default     = "main"
-  description = "git branch to checkout for var.docker_compose_repo"
+variable "linode" {
+  type        = any
+  default     = {}
+  description = "Linode provider settings passed to the app example."
 }
 
-variable "docker_compose_init" {
-  type        = list(string)
-  default     = []
-  description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start"
-}
-
-variable "allowed_ips" {
-  type        = list(string)
-  default     = []
-  description = "CIDR IP Addresses allowed to turn on this site's GCP instance"
+variable "runtime" {
+  type        = any
+  default     = {}
+  description = "Provider-neutral runtime settings passed to the app example."
 }

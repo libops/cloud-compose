@@ -21,19 +21,16 @@ jobs:
       matrix:
         include:
           - name: DigitalOcean ISLE
-            sweep_target: sweep-digitalocean-isle
-            concurrency_target: smoke-test-digitalocean-isle
             provider: digitalocean
+            template: isle
           - name: Linode WordPress
-            sweep_target: sweep-linode-wp
-            concurrency_target: smoke-test-linode-wp
             provider: linode
+            template: wp
           - name: GCP WordPress
-            sweep_target: sweep-gcp-wp
-            concurrency_target: smoke-test-gcp-wp
             provider: gcp
+            template: wp
     concurrency:
-      group: cloud-compose-smoke-${{ matrix.concurrency_target }}
+      group: cloud-compose-smoke-${{ matrix.provider }}-${{ matrix.template }}
       cancel-in-progress: false
     env:
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -61,7 +58,7 @@ jobs:
 
       - name: Sweep smoke resources
         if: matrix.provider != 'gcp' || (env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != '')
-        run: ci/cloud-smoke.sh ${{ matrix.sweep_target }}
+        run: ci/cloud-smoke.sh sweep-${{ matrix.provider }}-${{ matrix.template }}
 
       - name: Skip GCP cleanup
         if: matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')

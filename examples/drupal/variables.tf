@@ -1,42 +1,35 @@
 variable "name" {
-  type    = string
-  default = "drupal-example"
+  type        = string
+  default     = "drupal-example"
+  description = "Deployment name."
 }
 
-variable "project_id" {
-  type = string
+variable "cloud_provider" {
+  type        = string
+  default     = "digitalocean"
+  description = "Cloud provider to deploy to: gcp, digitalocean, or linode."
 }
 
-variable "project_number" {
-  type = string
+variable "gcp" {
+  type        = any
+  default     = {}
+  description = "GCP provider settings passed to the app example."
 }
 
-variable "docker_compose_repo" {
-  type    = string
-  default = "https://github.com/libops/drupal.git"
+variable "digitalocean" {
+  type        = any
+  default     = {}
+  description = "DigitalOcean provider settings passed to the app example."
 }
 
-variable "docker_compose_branch" {
-  type    = string
-  default = "main"
+variable "linode" {
+  type        = any
+  default     = {}
+  description = "Linode provider settings passed to the app example."
 }
 
-variable "ingress_port" {
-  type    = number
-  default = 8080
-}
-
-variable "vault_addr" {
-  type    = string
-  default = ""
-}
-
-variable "vault_role" {
-  type    = string
-  default = ""
-}
-
-variable "vault_agent_enabled" {
-  type    = bool
-  default = false
+variable "runtime" {
+  type        = any
+  default     = {}
+  description = "Provider-neutral runtime settings passed to the app example."
 }

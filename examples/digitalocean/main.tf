@@ -3,9 +3,11 @@ terraform {
 }
 
 module "wp" {
-  source = "../../modules/digitalocean"
+  source = "../.."
 
-  name = var.name
+  name           = var.name
+  cloud_provider = "digitalocean"
+  template       = "wp"
   digitalocean = {
     region = var.region
     droplet = {
@@ -18,13 +20,8 @@ module "wp" {
   }
   runtime = {
     compose = {
-      repo         = var.docker_compose_repo
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port
-    }
-    sitectl = {
-      packages = ["sitectl", "sitectl-wp"]
-      plugin   = "wp"
     }
   }
 }

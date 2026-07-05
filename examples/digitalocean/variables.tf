@@ -30,8 +30,8 @@ variable "cloud_compose_ssh_keys" {
 
 variable "docker_compose_repo" {
   type        = string
-  default     = "https://github.com/libops/wp.git"
-  description = "Compose project repository."
+  default     = ""
+  description = "Optional compose project repository override. Empty uses the selected template default."
 }
 
 variable "docker_compose_branch" {

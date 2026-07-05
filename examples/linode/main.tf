@@ -3,9 +3,11 @@ terraform {
 }
 
 module "drupal" {
-  source = "../../modules/linode"
+  source = "../.."
 
-  name = var.name
+  name           = var.name
+  cloud_provider = "linode"
+  template       = "drupal"
   linode = {
     region = var.region
     instance = {
@@ -21,13 +23,8 @@ module "drupal" {
   runtime = {
     rootfs_archive_url = "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz"
     compose = {
-      repo         = var.docker_compose_repo
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port
-    }
-    sitectl = {
-      packages = ["sitectl", "sitectl-drupal"]
-      plugin   = "drupal"
     }
   }
 }

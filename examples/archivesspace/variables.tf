@@ -1,6 +1,6 @@
 variable "name" {
   type        = string
-  default     = "isle-example"
+  default     = "archivesspace-example"
   description = "Deployment name."
 }
 

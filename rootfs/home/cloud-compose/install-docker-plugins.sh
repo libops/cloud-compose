@@ -36,6 +36,7 @@ install_docker_cli_plugin() {
         return 0
     fi
 
+    echo "Installing Docker CLI plugin ${name}"
     mkdir -p "$(dirname "$path")"
     retry_until_success curl -fsSL "$url" -o "$path"
     chmod a+x "$path"

@@ -1,6 +1,6 @@
 variable "name" {
   type        = string
-  default     = "isle-example"
+  default     = "omeka-classic-example"
   description = "Deployment name."
 }
 

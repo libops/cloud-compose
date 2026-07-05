@@ -5,24 +5,48 @@ compose app shapes.
 
 ## Single app examples
 
-- `examples/ojs` deploys OJS production and staging environments.
-- `examples/wp` deploys a WordPress compose project with `sitectl-wp`.
-- `examples/drupal` deploys a Drupal compose project with `sitectl-drupal`.
-- `examples/isle` deploys an ISLE compose project with `sitectl-isle`.
+- `examples/app` deploys any supported template by setting `template`.
+- `examples/archivesspace` deploys ArchivesSpace.
+- `examples/ojs` deploys OJS.
+- `examples/isle` deploys ISLE.
+- `examples/drupal` deploys Drupal.
+- `examples/wp` deploys WordPress.
+- `examples/omeka-s` deploys Omeka S.
+- `examples/omeka-classic` deploys Omeka Classic.
 - `examples/digitalocean` deploys WordPress on DigitalOcean.
 - `examples/linode` deploys Drupal on Linode.
 
-Each single-app example passes a provider object and a runtime object:
+The root module knows the default compose repo, `sitectl` plugin, and package
+set for each template. A minimal caller supplies the provider and template:
+
+```hcl
+module "app" {
+  source = "../.."
+
+  name           = "cc-wp"
+  cloud_provider = "digitalocean"
+  template       = "wp"
+  digitalocean = {
+    ssh = {
+      cloud_compose_keys = var.operator_ssh_keys
+    }
+  }
+}
+```
+
+Use `runtime` only for overrides such as branch, ingress, Vault Agent, or
+healthcheck settings:
 
 ```hcl
 runtime = {
   compose = {
-    repo   = "https://github.com/libops/wp.git"
     branch = "main"
-  }
-  sitectl = {
-    packages = ["sitectl", "sitectl-wp"]
-    plugin   = "wp"
+    ingress = {
+      letsencrypt    = true
+      bot_mitigation = true
+      domain         = "example.org"
+      acme_email     = "ops@example.org"
+    }
   }
 }
 ```
@@ -32,7 +56,6 @@ runtime = {
 `examples/binpack` shows how several compose projects can share one VM:
 
 ```hcl
-compose_projects = {
 runtime = {
   compose = {
     primary = "wp"
