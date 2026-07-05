@@ -70,7 +70,7 @@ locals {
   tags         = distinct(concat(var.tags, ["cloud-compose-smoke", local.target], local.run_tag != "" ? [local.run_tag] : []))
 
   ssh_keys            = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
-  healthcheck_timeout = trimspace(var.healthcheck_timeout) != "" ? var.healthcheck_timeout : contains(["isle"], local.template) ? "30m" : "20m"
+  healthcheck_timeout = trimspace(var.healthcheck_timeout) != "" ? var.healthcheck_timeout : "20m"
 
   runtime = {
     rootfs_archive_url = local.cloud_provider == "linode" ? "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz" : ""

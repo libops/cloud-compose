@@ -27,7 +27,7 @@ Optional environment:
   CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true   Pass -auto-approve outside GitHub Actions.
   CLOUD_COMPOSE_SMOKE_KEEP=true           Keep resources for debugging instead of destroying them.
   CLOUD_COMPOSE_SMOKE_WORKDIR=.smoke      Directory for generated keys, Terraform data, and sitectl config.
-  CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=3600   Seconds to wait for SSH and cloud-init.
+  CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1200   Seconds to wait for SSH and cloud-init.
   CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT=1800
                                       Seconds allowed for Terraform destroy during cleanup.
   CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS=true
@@ -653,9 +653,6 @@ run_target() (
 
   root="$(target_root "$target")"
   target_env "$target"
-  if [[ -z "${CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT:-}" ]] && [[ "$(target_template "$target")" == "isle" ]]; then
-    export CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1800
-  fi
 
   workdir="$(target_workdir "$target")"
   key_path="$workdir/id_ed25519"
