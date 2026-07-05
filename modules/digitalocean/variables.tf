@@ -114,7 +114,7 @@ variable "runtime" {
       context_name         = optional(string, "")
       plugin               = optional(string, "core")
       environment          = optional(string, "production")
-      healthcheck_timeout  = optional(string, "10m")
+      healthcheck_timeout  = optional(string, "20m")
       healthcheck_interval = optional(string, "15s")
       verify_args          = optional(list(string), [])
     }), {})
