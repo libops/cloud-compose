@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
 # shellcheck disable=SC1091
+set -a
 . /home/cloud-compose/.env
+set +a
 
 export PATH="/home/cloud-compose/bin:$PATH"
+export DOCKER_CONFIG="${DOCKER_CONFIG:-/mnt/disks/data/docker-config}"
 
 DEFAULT_MAX_RETRIES=10
 DEFAULT_SLEEP_INCREMENT=5

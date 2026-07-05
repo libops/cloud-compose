@@ -19,6 +19,12 @@ variable "docker_compose_repo" {
   description = "git repo to checkout that contains a docker compose project"
 }
 
+variable "docker_compose_branch" {
+  type        = string
+  default     = "main"
+  description = "git branch to checkout for var.docker_compose_repo"
+}
+
 variable "docker_compose_init" {
   type        = list(string)
   default     = []

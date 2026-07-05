@@ -6,22 +6,22 @@ set -eou pipefail
 source /home/cloud-compose/profile.sh
 export HOME
 
-git config --global --add safe.directory "$DOCKER_COMPOSE_DIR"
+# shellcheck disable=SC1091
+source /home/cloud-compose/compose-apps.sh
 
-if [ ! -d "$DOCKER_COMPOSE_DIR" ]; then
-  echo "Directory '$DOCKER_COMPOSE_DIR' not found. Cloning repository."
-  mkdir -p "$DOCKER_COMPOSE_DIR"
-  pushd "$DOCKER_COMPOSE_DIR"
-  retry_until_success git clone -b "$DOCKER_COMPOSE_BRANCH" "$DOCKER_COMPOSE_REPO" .
-  chown -R cloud-compose:cloud-compose .
-else
-  pushd "$DOCKER_COMPOSE_DIR"
-  retry_until_success git pull origin "$DOCKER_COMPOSE_BRANCH"
-fi
+while read -r app; do
+  if [ -z "$app" ]; then
+    continue
+  fi
 
-# set COMPOSE_PROJECT_NAME from value set in cloud-compose
-# sourced from /home/cloud-compose/profile.sh which loads /home/cloud-compose/.env
-update_env COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
-update_env SITE_NAME "$GCP_INSTANCE_NAME"
-retry_until_success /mnt/disks/data/init
-popd
+  clone_or_update_compose_app "$app"
+  source_compose_app_env "$app"
+
+  pushd "$DOCKER_COMPOSE_DIR" >/dev/null
+  update_env COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
+  update_env SITE_NAME "${CLOUD_COMPOSE_INSTANCE_NAME:-${GCP_INSTANCE_NAME:-$app}}"
+  update_env COMPOSE_BIND_PORT "$COMPOSE_BIND_PORT"
+  run_compose_app_lifecycle "$app" init
+  configure_sitectl_app_features "$app"
+  popd >/dev/null
+done < <(compose_app_names)

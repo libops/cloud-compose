@@ -3,4 +3,29 @@
   extends: [
     'github>libops/renovate-config:default.json5',
   ],
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'Update Docker Compose and Buildx Terraform defaults',
+      managerFilePatterns: [
+        '/(^|/)variables\\.tf$/',
+      ],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+\\w+_version\\s*=\\s*optional\\(string,\\s*"(?<currentValue>[^"]+)"\\)',
+        '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+default\\s*=\\s*"(?<currentValue>[^"]+)"',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
+    },
+    {
+      customType: 'regex',
+      description: 'Update Docker Compose and Buildx shell fallback defaults',
+      managerFilePatterns: [
+        '/(^|/)install-docker-plugins\\.sh$/',
+      ],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+[A-Z_]+="\\$\\{[A-Z_]+:-(?<currentValue>[^}]+)\\}"',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
+    },
+  ],
 }

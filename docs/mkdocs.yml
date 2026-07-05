@@ -1,0 +1,69 @@
+site_name: cloud-compose
+site_description: Run Docker Compose projects on cloud VMs with sitectl
+repo_url: https://github.com/libops/cloud-compose
+site_url: !ENV [ SITE_URL, "https://libops.github.io/cloud-compose/" ]
+docs_dir: .
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.footer
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - content.action.edit
+    - content.action.view
+    - content.code.copy
+    - content.code.select
+    - search.highlight
+  palette:
+    primary: indigo
+    accent: blue
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.magiclink:
+      normalize_issue_symbols: true
+      repo_url_shorthand: true
+      user: libops
+      repo: cloud-compose
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format ""
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_css:
+  - css/custom.css
+
+extra_javascript:
+  - js/mermaid-init.mjs
+
+nav:
+  - Home: index.md
+  - Runtime contracts: runtime-contracts.md
+  - Managed runtime: managed-runtime.md
+  - Rollout API: rollout.md
+  - DigitalOcean and Linode: non-gcp-providers.md
+  - Examples: examples.md

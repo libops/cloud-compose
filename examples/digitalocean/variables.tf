@@ -1,0 +1,47 @@
+variable "name" {
+  type        = string
+  default     = "cc-wp"
+  description = "Deployment name."
+}
+
+variable "region" {
+  type        = string
+  default     = "tor1"
+  description = "DigitalOcean region slug."
+}
+
+variable "size" {
+  type        = string
+  default     = "s-2vcpu-4gb"
+  description = "DigitalOcean Droplet size slug."
+}
+
+variable "ssh_keys" {
+  type        = list(string)
+  default     = []
+  description = "DigitalOcean SSH key IDs or fingerprints for the root account."
+}
+
+variable "cloud_compose_ssh_keys" {
+  type        = list(string)
+  default     = []
+  description = "SSH public keys for the cloud-compose user."
+}
+
+variable "docker_compose_repo" {
+  type        = string
+  default     = "https://github.com/libops/wp.git"
+  description = "Compose project repository."
+}
+
+variable "docker_compose_branch" {
+  type        = string
+  default     = "main"
+  description = "Compose project branch."
+}
+
+variable "ingress_port" {
+  type        = number
+  default     = 80
+  description = "Host port exposed by the compose project."
+}

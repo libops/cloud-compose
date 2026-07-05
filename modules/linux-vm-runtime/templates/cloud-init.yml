@@ -1,0 +1,91 @@
+#cloud-config
+
+groups:
+- docker
+
+users:
+- name: cloud-compose
+  shell: /bin/bash
+  groups:
+  - docker
+  sudo:
+  - ALL=(ALL) NOPASSWD:ALL
+%{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
+  ssh_authorized_keys:
+%{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
+  - ${key}
+%{ endfor ~}
+%{ endif ~}
+%{ for username, ssh_keys in SSH_USERS ~}
+- name: ${username}
+  shell: /bin/bash
+  ssh_authorized_keys:
+%{ for key in ssh_keys ~}
+  - ${key}
+%{ endfor ~}
+%{ endfor ~}
+
+write_files:
+${WRITE_FILES_CONTENT}
+${DOCKER_COMPOSE_SCRIPTS}
+${COMPOSE_PROJECTS_FILE}
+${ENV_FILE_CONTENT}
+${VAULT_AGENT_FILES}
+${MANAGED_RUNTIME_ARTIFACTS_FILE}
+
+runcmd:
+- |
+  set -eu
+  ensure_cloud_compose_user() {
+    if ! getent group docker >/dev/null 2>&1; then
+      groupadd docker
+    fi
+    if ! id -u cloud-compose >/dev/null 2>&1; then
+      useradd --create-home --shell /bin/bash --groups docker cloud-compose
+    else
+      usermod --append --groups docker cloud-compose
+    fi
+    install -d -m 0700 -o cloud-compose -g cloud-compose /home/cloud-compose/.ssh
+    cat >/home/cloud-compose/.ssh/authorized_keys <<'EOF'
+%{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
+  ${key}
+%{ endfor ~}
+  EOF
+    chown cloud-compose:cloud-compose /home/cloud-compose/.ssh/authorized_keys
+    chmod 0600 /home/cloud-compose/.ssh/authorized_keys
+    install -d -m 0755 /etc/sudoers.d
+    printf 'cloud-compose ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/90-cloud-compose
+    chmod 0440 /etc/sudoers.d/90-cloud-compose
+  }
+
+  mount_cloud_compose_disk() {
+    device_path="$1"
+    mount_path="$2"
+    device="$(readlink -f "$device_path" 2>/dev/null || true)"
+    until [ -n "$device" ] && [ -b "$device" ]; do
+      echo "Waiting for $device_path"
+      sleep 2
+      device="$(readlink -f "$device_path" 2>/dev/null || true)"
+    done
+    mkdir -p "$mount_path"
+    if ! blkid "$device" >/dev/null 2>&1; then
+      mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$device"
+    fi
+    if ! mountpoint -q "$mount_path"; then
+      mount -o defaults,nofail "$device" "$mount_path"
+    fi
+    chmod a+w "$mount_path"
+  }
+
+  ensure_cloud_compose_user
+  mount_cloud_compose_disk '${DATA_DEVICE}' /mnt/disks/data
+  mount_cloud_compose_disk '${VOLUMES_DEVICE}' /mnt/disks/volumes
+  mkdir -p /mnt/disks/data/docker/volumes
+  if ! mountpoint -q /mnt/disks/data/docker/volumes; then
+    mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
+  fi
+${ROOTFS_ARCHIVE_COMMAND}
+  chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
+  chmod 0775 /mnt/disks/data /mnt/disks/volumes
+  install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
+- bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1

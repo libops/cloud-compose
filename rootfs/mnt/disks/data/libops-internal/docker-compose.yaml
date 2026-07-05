@@ -2,6 +2,8 @@ networks:
   internal:
 services:
   lightsout:
+    profiles:
+      - lightsout
     image: ${LIBOPS_LIGHTSOUT_IMAGE:-ghcr.io/libops/lightsout:main}
     ports:
       - "8808:8808"

@@ -4,13 +4,13 @@ PartOf=docker.service
 After=docker.service
 
 [Service]
+Type=oneshot
+RemainAfterExit=yes
 User=cloud-compose
 Group=cloud-compose
 EnvironmentFile=/home/cloud-compose/.env
-ExecStart=/mnt/disks/data/up
-ExecStop=/mnt/disks/data/down
-Restart=on-failure
-RestartSec=30s
+ExecStart=/bin/bash /home/cloud-compose/up
+ExecStop=/bin/bash /home/cloud-compose/down
 
 [Install]
 WantedBy=multi-user.target

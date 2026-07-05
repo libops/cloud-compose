@@ -1,8 +1,21 @@
 #cloud-config
 
+groups:
+- docker
+
 users:
 - name: cloud-compose
   shell: /bin/bash
+  groups:
+  - docker
+  sudo:
+  - ALL=(ALL) NOPASSWD:ALL
+%{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
+  ssh_authorized_keys:
+%{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
+  - ${key}
+%{ endfor ~}
+%{ endif ~}
 %{ for username, ssh_keys in SSH_USERS ~}
 - name: ${username}
   shell: /bin/bash
@@ -14,15 +27,15 @@ users:
 
 bootcmd:
 # mount the main Data disk
-- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-data)
+- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard $(readlink -f /dev/disk/by-id/google-data)
 - mkdir -p /mnt/disks/data
-- mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
+- mount -o defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
 - chmod a+w /mnt/disks/data
 
 # mount the specific Volumes disk
-- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-docker-volumes) || mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard $(readlink -f /dev/disk/by-id/google-docker-volumes)
+- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-docker-volumes) || mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard $(readlink -f /dev/disk/by-id/google-docker-volumes)
 - mkdir -p /mnt/disks/volumes
-- mount -o discard,defaults $(readlink -f /dev/disk/by-id/google-docker-volumes) /mnt/disks/volumes
+- mount -o defaults $(readlink -f /dev/disk/by-id/google-docker-volumes) /mnt/disks/volumes
 - chmod a+w /mnt/disks/volumes
 
 - mkdir -p /mnt/disks/data/docker/volumes
@@ -36,13 +49,18 @@ bootcmd:
 write_files:
 ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
+${COMPOSE_PROJECTS_FILE}
 ${ENV_FILE_CONTENT}
+${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
 %{ for CMD in ADDITIONAL_INITCMD ~}
 - ${CMD}
 %{ endfor ~}
+- chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
+- chmod 0775 /mnt/disks/data /mnt/disks/volumes
+- install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
 - bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
 %{ for VOLUME in DOCKER_VOLUME_OVERLAYS ~}
 - bash /home/cloud-compose/overlay-init.sh "${VOLUME}" >> /home/cloud-compose/run.log 2>&1

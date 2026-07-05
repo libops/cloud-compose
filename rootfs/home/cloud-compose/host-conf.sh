@@ -5,63 +5,47 @@ set -eou pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
-# block metadata server from docker and non-root
-/sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP
-/sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP
+if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
+  # block metadata server from docker and non-root
+  /sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP || true
+  /sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP || true
+fi
+
+if systemctl list-unit-files fluent-bit.service >/dev/null 2>&1; then
+  systemctl restart fluent-bit || true
+fi
+
+bash /home/cloud-compose/install-dependencies.sh
+
+if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
+  # Docker build containers cannot use GCE metadata DNS after we block metadata
+  # access from docker0, so give Docker explicit external resolvers.
+  install -d /etc/docker
+  cat >/etc/docker/daemon.json <<'EOF'
+{
+  "data-root": "/mnt/disks/data/docker",
+  "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
+}
+EOF
+fi
 
 # restart services we've overwritten files for
-systemctl restart fluent-bit
 systemctl restart docker
 
-# wait until our data-root /etc/docker/daemon.json setting are applied
-until test -d /mnt/disks/data/docker/overlay2; do
-  echo "Waiting for docker overlay2 dir"
-  sleep 1
+# wait until our data-root /etc/docker/daemon.json setting is applied
+deadline=$((SECONDS + 120))
+while [ "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)" != "/mnt/disks/data/docker" ]; do
+  if (( SECONDS >= deadline )); then
+    echo "Docker did not switch to /mnt/disks/data/docker" >&2
+    docker info || true
+    systemctl status docker --no-pager || true
+    cat /etc/docker/daemon.json || true
+    findmnt /mnt/disks/data || true
+    exit 1
+  fi
+  echo "Waiting for docker data-root"
+  sleep 2
 done
-
-mkdir -p /home/cloud-compose/.docker/cli-plugins /home/cloud-compose/bin
-
-# since COS is read only FS, install host tools in the home directory
-# and symlink to our data disk which can have executables.
-# A custom COS image could eventually bake these in, but it is unnecessary
-# for this handful of simple creation-time installs.
-if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-compose" ]; then
-    retry_until_success curl -sSL \
-        https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-x86_64 \
-        -o /mnt/disks/data/docker-compose
-    chmod o+x /mnt/disks/data/docker-compose
-    ln -sf /mnt/disks/data/docker-compose /home/cloud-compose/.docker/cli-plugins/docker-compose
-fi
-
-if [ ! -f "/home/cloud-compose/.docker/cli-plugins/docker-buildx" ]; then
-    retry_until_success curl -sSL \
-        https://github.com/docker/buildx/releases/download/v0.30.1/buildx-v0.30.1.linux-amd64 \
-        -o /mnt/disks/data/docker-buildx
-    chmod o+x /mnt/disks/data/docker-buildx
-    ln -sf /mnt/disks/data/docker-buildx /home/cloud-compose/.docker/cli-plugins/docker-buildx
-fi
-
-if [ ! -f "/mnt/disks/data/make" ]; then
-    # shellcheck disable=SC2016
-    retry_until_success /usr/bin/docker run --rm \
-        -v /mnt/disks/data:/out \
-        alpine:3.22 \
-        /bin/sh -euxc '
-            MAKE_VERSION="4.4.1"
-            MAKE_SHA256="dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3"
-
-            apk add --no-cache build-base curl make tar
-            curl -fsSL "https://ftp.gnu.org/gnu/make/make-${MAKE_VERSION}.tar.gz" -o /tmp/make.tar.gz
-            echo "${MAKE_SHA256}  /tmp/make.tar.gz" | sha256sum -c -
-            tar -xzf /tmp/make.tar.gz -C /tmp
-            cd "/tmp/make-${MAKE_VERSION}"
-            LDFLAGS="-static" ./configure --disable-nls
-            make -j2
-            cp make /out/make
-        '
-fi
-chmod o+x /mnt/disks/data/make
-ln -sf /mnt/disks/data/make /home/cloud-compose/bin/make
 
 bash /home/cloud-compose/libops-managed-runtime.sh install-tools
 systemctl daemon-reload

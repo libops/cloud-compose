@@ -4,38 +4,70 @@ resource "random_shuffle" "zone" {
 }
 
 module "production" {
-  source = "git::https://github.com/libops/cloud-compose?ref=0.4.0"
+  source = "../.."
 
-  name                = "ojs-production"
-  project_id          = var.project_id
-  project_number      = var.project_number
-  docker_compose_repo = var.docker_compose_repo
-  docker_compose_init = var.docker_compose_init
-  region              = var.region
-  zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
-  production          = true
-  run_snapshots       = true
-  allowed_ips         = var.allowed_ips
+  name = "ojs-production"
+  gcp = {
+    project_id     = var.project_id
+    project_number = var.project_number
+    region         = var.region
+    zone           = format("%s-%s", var.region, random_shuffle.zone.result[0])
+    instance = {
+      production = true
+    }
+    snapshots = {
+      enabled = true
+    }
+    network = {
+      power_button_allowed_ips = var.allowed_ips
+    }
+  }
+  runtime = {
+    compose = {
+      repo   = var.docker_compose_repo
+      branch = var.docker_compose_branch
+      init   = var.docker_compose_init
+    }
+    sitectl = {
+      packages = ["sitectl", "sitectl-ojs"]
+      plugin   = "ojs"
+    }
+  }
 }
 
 module "staging" {
-  source = "git::https://github.com/libops/cloud-compose?ref=0.4.0"
+  source = "../.."
 
-  name                = "ojs-staging"
-  project_id          = var.project_id
-  project_number      = var.project_number
-  docker_compose_repo = var.docker_compose_repo
-  docker_compose_init = var.docker_compose_init
-  region              = var.region
-  zone                = format("%s-%s", var.region, random_shuffle.zone.result[0])
-  sitectl_environment = "staging"
-  disk_size_gb        = 20
-  allowed_ips         = var.allowed_ips
-
-  # make production public files available in staging
-  overlay_source_instance = "ojs-production"
-  volume_names = [
-    "compose_ojs-public",
-    "compose_ojs-files"
-  ]
+  name = "ojs-staging"
+  gcp = {
+    project_id     = var.project_id
+    project_number = var.project_number
+    region         = var.region
+    zone           = format("%s-%s", var.region, random_shuffle.zone.result[0])
+    disks = {
+      docker_volumes_size_gb = 20
+    }
+    network = {
+      power_button_allowed_ips = var.allowed_ips
+    }
+    overlay = {
+      source_instance = "ojs-production"
+      volume_names = [
+        "compose_ojs-public",
+        "compose_ojs-files"
+      ]
+    }
+  }
+  runtime = {
+    compose = {
+      repo   = var.docker_compose_repo
+      branch = var.docker_compose_branch
+      init   = var.docker_compose_init
+    }
+    sitectl = {
+      packages    = ["sitectl", "sitectl-ojs"]
+      plugin      = "ojs"
+      environment = "staging"
+    }
+  }
 }

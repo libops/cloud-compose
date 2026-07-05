@@ -1,701 +1,116 @@
 terraform {
   required_version = ">= 1.2.4"
-
-  required_providers {
-    cloudinit = {
-      source  = "hashicorp/cloudinit"
-      version = "~> 2.3"
-    }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 7.0"
-    }
-    time = {
-      source  = "hashicorp/time"
-      version = "~> 0.14"
-    }
-  }
 }
-
-resource "time_static" "snapshot_time_static" {}
 
 locals {
-  rootFs            = "${path.module}/rootfs"
-  additional_rootfs = var.rootfs != "" ? var.rootfs : ""
-  # Input example: "https://github.com/my-org/my-repo.git"
-  # This regex removes everything from the start up to the first single slash (after the protocol)
-  repo_path = replace(var.docker_compose_repo, "/^[^:]+://[^/]+/", "")
+  compose = var.runtime.compose
+  sitectl = var.runtime.sitectl
+  docker  = var.runtime.docker
+  managed = var.runtime.managed_runtime
+  vault   = var.runtime.vault
 
-  # base the docker compose project name on the repo + branch
-  clean_repo_path = replace(format("%s-%s", trim(local.repo_path, "/"), var.docker_compose_branch), "/^[^:]+://[^/]+/", "")
-  compose_project_name = lower(
-    replace(
-      replace(local.clean_repo_path, ".git", ""),
-      "/[^a-zA-Z0-9]/",
-      "-"
-    )
-  )
-  sitectl_context_name = trimspace(var.sitectl_context_name) != "" ? trimspace(var.sitectl_context_name) : var.name
-  sitectl_packages     = distinct(concat(["sitectl"], var.sitectl_packages))
-
-  # Get files from base rootfs
-  base_files = fileset(local.rootFs, "**")
-
-  # Get files from additional rootfs if path is provided
-  additional_files = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
-
-  # Combine both file sets (additional files will override base files with same path)
-  all_files = merge(
-    { for file in local.base_files : file => "${local.rootFs}/${file}" },
-    { for file in local.additional_files : file => "${local.additional_rootfs}/${file}" }
-  )
-
-  write_files_content = join("\n", [
-    for file, fullpath in local.all_files : <<-EOT
-      - path: "/${file}"
-        permissions: "0644"
-        content: |
-          ${indent(4, file(fullpath))}
-EOT
-  ])
-  docker_compose_scripts = join("\n", [
-    for name, cmds in {
-      "init"    = var.docker_compose_init
-      "up"      = var.docker_compose_up
-      "down"    = var.docker_compose_down
-      "rollout" = var.docker_compose_rollout
-    } : <<-EOT
-      - path: "/mnt/disks/data/${name}"
-        permissions: "0755"
-        content: |
-          #!/usr/bin/env bash
-
-          set -eou pipefail
-
-          source /home/cloud-compose/profile.sh
-          pushd "$${DOCKER_COMPOSE_DIR}"
-
-          echo "Running cloud-compose ${name}"
-          ${join("\n    ", cmds)}
-          popd
-EOT
-  ])
-  managed_runtime_artifact_lines = [
-    for artifact in var.libops_managed_artifacts : join("\t", [
-      artifact.name,
-      artifact.url,
-      artifact.sha256,
-      artifact.path,
-      try(artifact.mode, "0755"),
-      try(artifact.owner, "root"),
-      try(artifact.group, "root"),
-      try(artifact.restart, ""),
-    ])
-  ]
-  managed_runtime_artifacts_file = <<-EOT
-    - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
-      permissions: "0640"
-      content: |
-        ${indent(8, join("\n", local.managed_runtime_artifact_lines))}
-EOT
-  rollout_env_lines = var.rollout_enabled ? [
-    "ROLLOUT_ENABLED=true",
-    "ROLLOUT_DOWNLOAD_URL=\"${trimspace(var.rollout_release_url)}\"",
-    "ROLLOUT_DOWNLOAD_SHA256=\"${trimspace(var.rollout_release_sha256)}\"",
-    "PORT=\"${var.rollout_port}\"",
-    "JWKS_URI=\"${trimspace(var.rollout_jwks_uri)}\"",
-    "JWT_AUD=\"${trimspace(var.rollout_jwt_audience)}\"",
-    "CUSTOM_CLAIMS='${trimspace(var.rollout_custom_claims)}'",
-    "ROLLOUT_CMD=\"/bin/bash\"",
-    "ROLLOUT_ARGS=\"/mnt/disks/data/rollout\"",
-    "ROLLOUT_LOCK_FILE=\"/mnt/disks/data/rollout.lock\"",
-    ] : [
-    "ROLLOUT_ENABLED=false",
-  ]
-  rollout_env      = join("\n", [for line in local.rollout_env_lines : "        ${line}"])
-  env_file_content = <<-EOT
-    - path: "/home/cloud-compose/.env"
-      permissions: "0640"
-      content: |
-        HOME=/home/cloud-compose
-        GCP_PROJECT="${var.project_id}"
-        GCP_PROJECT_NUMBER="${var.project_number}"
-        GCP_INSTANCE_NAME="${var.name}"
-        GCP_REGION="${var.region}"
-        GCP_ZONE="${var.zone}"
-        COMPOSE_PROJECT_NAME=${replace(local.compose_project_name, "/-+/", "-")}
-        DOCKER_COMPOSE_DIR=/mnt/disks/data${local.repo_path}/${var.docker_compose_branch}
-        DOCKER_COMPOSE_REPO="${var.docker_compose_repo}"
-        DOCKER_COMPOSE_BRANCH="${var.docker_compose_branch}"
-        SITECTL_PACKAGES="${join(" ", local.sitectl_packages)}"
-        SITECTL_VERSION="${var.sitectl_version}"
-        SITECTL_CONTEXT_NAME="${local.sitectl_context_name}"
-        SITECTL_PLUGIN="${var.sitectl_plugin}"
-        SITECTL_ENVIRONMENT="${var.sitectl_environment}"
-        PRODUCTION="${var.production}"
-        SITECTL_HEALTHCHECK_TIMEOUT="${var.sitectl_healthcheck_timeout}"
-        SITECTL_HEALTHCHECK_INTERVAL="${var.sitectl_healthcheck_interval}"
-        SITECTL_VERIFY_ARGS="${join(" ", var.sitectl_verify_args)}"
-        LIBOPS_MANAGED_RUNTIME_ENABLED="${var.libops_managed_runtime_enabled}"
-        LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE="${var.libops_internal_services_auto_update}"
-        LIBOPS_LIGHTSOUT_IMAGE="${var.libops_lightsout_image}"
-        LIBOPS_CAP_IMAGE="${var.libops_cap_image}"
-        LIBOPS_CADVISOR_IMAGE="${var.libops_cadvisor_image}"
-${local.rollout_env}
-EOT
-  use_overlay      = length(var.volume_names) > 0
-  prod_disk_name   = var.overlay_source_instance != "" ? format("%s-data-disk", var.overlay_source_instance) : ""
-  prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
-  rollout_runcmd = var.rollout_enabled ? [
-    "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
-  ] : []
-  cloud_init_yaml = templatefile("${path.module}/templates/cloud-init.yml", {
-    WRITE_FILES_CONTENT            = local.write_files_content,
-    DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts,
-    ENV_FILE_CONTENT               = local.env_file_content,
-    MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file,
-    USE_OVERLAY                    = local.use_overlay,
-    DOCKER_VOLUME_OVERLAYS         = var.volume_names,
-    SSH_USERS                      = var.users,
-    ADDITIONAL_INITCMD             = var.initcmd,
-    ADDITIONAL_RUNCMD              = concat(local.rollout_runcmd, var.runcmd),
-  })
-
-  # have prod snapshot begin ten minutes after the initial run
-  # so non-prod environments can have a snapshot disk to overlay
-  snapshot_start_time = formatdate("h:00", time_static.snapshot_time_static.rfc3339)
-
-  vm_service_account_email = var.service_account_email != "" ? var.service_account_email : google_service_account.cloud-compose[0].email
-  vm_service_account_id    = var.service_account_email != "" ? "projects/${var.project_id}/serviceAccounts/${var.service_account_email}" : google_service_account.cloud-compose[0].id
-  vm_service_account_name  = var.service_account_email != "" ? local.vm_service_account_id : google_service_account.cloud-compose[0].name
+  gcp_instance          = var.gcp.instance
+  gcp_disks             = var.gcp.disks
+  gcp_identity          = var.gcp.identity
+  gcp_network           = var.gcp.network
+  gcp_snapshots         = var.gcp.snapshots
+  gcp_overlay           = var.gcp.overlay
+  gcp_artifact_registry = var.gcp.artifact_registry
+  gcp_cloud_init        = var.gcp.cloud_init
+  gcp_power_management  = var.gcp.power_management
+  gcp_rollout           = var.gcp.rollout
 }
 
-data "cloudinit_config" "ci" {
-  part {
-    content_type = "text/cloud-config"
-    content      = local.cloud_init_yaml
-  }
-}
-
-resource "google_service_account" "cloud-compose" {
-  count      = var.service_account_email == "" ? 1 : 0
-  account_id = format("vm-%s", var.name)
-  project    = var.project_id
-}
-
-# docker pull app images
-resource "google_artifact_registry_repository_iam_member" "private-policy-cloud-compose" {
-  count      = var.artifact_registry_repository != "" ? 1 : 0
-  project    = var.project_id
-  location   = var.artifact_registry_location
-  repository = var.artifact_registry_repository
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${local.vm_service_account_email}"
-}
-
-# let VM run as the GSA
-resource "google_service_account_iam_member" "gsa-user" {
-  service_account_id = local.vm_service_account_id
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${var.project_number}-compute@developer.gserviceaccount.com"
-}
-
-resource "google_service_account_iam_member" "token-creator" {
-  service_account_id = local.vm_service_account_id
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${local.vm_service_account_email}"
-}
-
-# push logs to GCP
-resource "google_project_iam_member" "log" {
-  project = var.project_id
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${local.vm_service_account_email}"
-}
-
-resource "google_compute_disk" "boot" {
-  # force re-create VM when cloud-init changes
-  name                      = format("%s-boot-%s", var.name, md5(data.cloudinit_config.ci.rendered))
-  project                   = var.project_id
-  type                      = var.disk_type
-  zone                      = var.zone
-  size                      = 15
-  image                     = "projects/cos-cloud/global/images/${var.os}"
-  physical_block_size_bytes = 4096
-}
-
-resource "google_compute_disk" "data" {
-  name                      = format("%s-data-disk", var.name)
-  project                   = var.project_id
-  type                      = var.disk_type
-  zone                      = var.zone
-  size                      = 20
-  image                     = "debian-13-trixie-v20251111"
-  physical_block_size_bytes = 4096
-}
-
-resource "google_compute_disk" "docker-volumes" {
-  name                      = format("%s-docker-volumes", var.name)
-  project                   = var.project_id
-  type                      = var.disk_type
-  zone                      = var.zone
-  size                      = var.disk_size_gb
-  image                     = "debian-13-trixie-v20251111"
-  physical_block_size_bytes = 4096
-}
-
-resource "google_compute_reservation" "production" {
-  count   = var.production ? 1 : 0
-  name    = format("%s-production", var.name)
-  project = var.project_id
-  zone    = var.zone
-
-  specific_reservation {
-    count = 1
-    instance_properties {
-      machine_type = var.machine_type
-    }
-  }
-  specific_reservation_required = true
-}
-
-# Daily snapshot schedule for production docker volume disk
-resource "google_compute_resource_policy" "daily_snapshot" {
-  count   = var.run_snapshots ? 1 : 0
-  name    = format("%s-daily-snapshot", var.name)
-  project = var.project_id
-  region  = var.region
-
-  snapshot_schedule_policy {
-    schedule {
-      daily_schedule {
-        days_in_cycle = 1
-        start_time    = local.snapshot_start_time
-      }
-    }
-
-    retention_policy {
-      max_retention_days    = 7
-      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
-    }
-
-    snapshot_properties {
-      labels = {
-        managed_by = "terraform"
-        instance   = var.name
-      }
-      storage_locations = [var.region]
-      guest_flush       = false
-    }
-  }
-}
-
-resource "google_compute_resource_policy" "weekly_snapshot" {
-  count   = var.run_snapshots ? 1 : 0
-  name    = format("%s-weekly-snapshot", var.name)
-  project = var.project_id
-  region  = var.region
-
-  snapshot_schedule_policy {
-    schedule {
-      weekly_schedule {
-        day_of_weeks {
-          day        = "SUNDAY"
-          start_time = "01:00"
-        }
-      }
-    }
-
-    retention_policy {
-      max_retention_days    = 365
-      on_source_disk_delete = "KEEP_AUTO_SNAPSHOTS"
-    }
-
-    snapshot_properties {
-      storage_locations = [var.region]
-      guest_flush       = false
-    }
-  }
-}
-
-resource "google_compute_disk_resource_policy_attachment" "daily_snapshot" {
-  for_each = var.run_snapshots ? toset([
-    google_compute_disk.docker-volumes.name,
-    google_compute_disk.data.name
-  ]) : []
-
-  name    = google_compute_resource_policy.daily_snapshot[0].name
-  disk    = each.value
-  project = var.project_id
-  zone    = var.zone
-}
-
-resource "google_compute_disk_resource_policy_attachment" "weekly_snapshot" {
-  for_each = var.run_snapshots ? toset([
-    google_compute_disk.docker-volumes.name,
-    google_compute_disk.data.name
-  ]) : []
-
-  name    = google_compute_resource_policy.weekly_snapshot[0].name
-  disk    = each.value
-  project = var.project_id
-  zone    = var.zone
-}
-
-# Get the latest snapshot from production instance's data disk
-data "google_compute_snapshot" "latest_prod" {
-  count   = local.use_overlay ? 1 : 0
-  project = var.project_id
-
-  # Filter to snapshots of the production data disk, get most recent
-  most_recent = true
-  filter      = "sourceDisk eq ${local.prod_disk_url}"
-}
-
-# Restore production snapshot to a staging-specific disk for overlays
-resource "google_compute_disk" "overlay_disk" {
-  count                     = local.use_overlay ? 1 : 0
-  name                      = data.google_compute_snapshot.latest_prod[0].name
-  project                   = var.project_id
-  type                      = var.disk_type
-  zone                      = var.zone
-  snapshot                  = data.google_compute_snapshot.latest_prod[0].self_link
-  physical_block_size_bytes = 4096
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "google_compute_instance" "cloud-compose" {
-  name                      = var.name
-  project                   = var.project_id
-  machine_type              = var.machine_type
-  zone                      = var.zone
-  allow_stopping_for_update = true
-  tags                      = ["cloud-compose", var.name]
-  can_ip_forward            = "false"
-
-  boot_disk {
-    auto_delete = "true"
-    device_name = "boot"
-    source      = google_compute_disk.boot.self_link
-  }
-  attached_disk {
-    device_name = "data"
-    source      = google_compute_disk.data.self_link
-  }
-  attached_disk {
-    device_name = "docker-volumes"
-    source      = google_compute_disk.docker-volumes.self_link
-  }
-
-  dynamic "attached_disk" {
-    for_each = local.use_overlay ? [1] : []
-    content {
-      device_name = "prod-volumes"
-      source      = google_compute_disk.overlay_disk[0].self_link
-      # hyperdisk needs to be attached rw
-      # even though we're setting this as lowerdir read only
-      mode = "READ_WRITE"
-    }
-  }
-
-  metadata = {
-    google-logging-enabled       = "true"
-    google-logging-use-fluentbit = "true"
-    google-monitoring-enabled    = "true"
-    user-data                    = data.cloudinit_config.ci.part[0].content
-  }
-
-  network_interface {
-    network = "default"
-    access_config {}
-  }
-
-  reservation_affinity {
-    type = var.production ? "SPECIFIC_RESERVATION" : "ANY_RESERVATION"
-
-    dynamic "specific_reservation" {
-      for_each = var.production ? [google_compute_reservation.production[0].name] : []
-      content {
-        key    = "compute.googleapis.com/reservation-name"
-        values = [specific_reservation.value]
-      }
-    }
-  }
-
-  scheduling {
-    automatic_restart   = "true"
-    min_node_cpus       = "0"
-    on_host_maintenance = "MIGRATE"
-    preemptible         = "false"
-    provisioning_model  = "STANDARD"
-  }
-
-  service_account {
-    email = local.vm_service_account_email
-    scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
-  }
-
-  shielded_instance_config {
-    enable_integrity_monitoring = "true"
-    enable_secure_boot          = "true"
-    enable_vtpm                 = "true"
-  }
-
-  lifecycle {
-    precondition {
-      condition = (
-        startswith(var.machine_type, "e2") ?
-        contains(["pd-ssd", "pd-standard"], var.disk_type) :
-        true
-      )
-      error_message = "When using an 'e2' machine type, 'disk_type' must be 'pd-ssd' or 'pd-standard'."
-    }
-    precondition {
-      condition     = !var.rollout_enabled || trimspace(var.rollout_release_url) != ""
-      error_message = "rollout_release_url is required when rollout_enabled is true."
-    }
-    precondition {
-      condition     = !var.rollout_enabled || can(regex("^[0-9a-f]{64}$", trimspace(var.rollout_release_sha256)))
-      error_message = "rollout_release_sha256 must be a lowercase SHA256 hex digest when rollout_enabled is true."
-    }
-    precondition {
-      condition     = !var.rollout_enabled || trimspace(var.rollout_jwks_uri) != ""
-      error_message = "rollout_jwks_uri is required when rollout_enabled is true."
-    }
-    precondition {
-      condition     = !var.rollout_enabled || trimspace(var.rollout_jwt_audience) != ""
-      error_message = "rollout_jwt_audience is required when rollout_enabled is true."
-    }
-  }
-
-  depends_on = [google_compute_disk.overlay_disk]
-}
-
-# machine needs to be able to suspend itself
-data "google_project_iam_custom_role" "gce-suspend" {
-  project = var.project_id
-  role_id = "suspendVM"
-}
-
-
-# =============================================================================
-# LIBOPS ADMIN SERVICES IDENTITY
-# =============================================================================
-
-resource "google_service_account" "internal-services" {
-  account_id = format("internal-%s", var.name)
-  project    = var.project_id
-}
-
-resource "google_service_account_iam_member" "internal-services-keys" {
-  service_account_id = google_service_account.internal-services.id
-  role               = "roles/iam.serviceAccountKeyAdmin"
-  member             = "serviceAccount:${local.vm_service_account_email}"
-}
-
-# push metrics to GCP
-resource "google_project_iam_member" "stackdriver" {
-  project = var.project_id
-  role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.internal-services.email}"
-}
-
-# suspend the GCP instance
-resource "google_project_iam_member" "gce-suspend" {
-  project = var.project_id
-  role    = data.google_project_iam_custom_role.gce-suspend.name
-  member  = "serviceAccount:${google_service_account.internal-services.email}"
-}
-
-# =============================================================================
-# DOCKER COMPOSE APP IDENTITY
-# =============================================================================
-
-resource "google_service_account" "app" {
-  account_id = var.name
-  project    = var.project_id
-}
-
-resource "google_service_account_iam_member" "app-keys" {
-  service_account_id = google_service_account.app.id
-  role               = "roles/iam.serviceAccountKeyAdmin"
-  member             = "serviceAccount:${local.vm_service_account_email}"
-}
-
-resource "google_service_account_iam_member" "self_jwt_signer_policy" {
-  service_account_id = google_service_account.app.id
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = format("serviceAccount:%s", google_service_account.app.email)
-}
-
-# =============================================================================
-# CLOUD RUN INGRESS
-# =============================================================================
-
-locals {
-  base_config = yamldecode(
-    <<EOT
-type: google_compute_engine
-port: ${var.ingress_port}
-scheme: http
-ipForwardedHeader: X-Forwarded-For
-ipDepth: 0
-powerOnCooldown: 30
-proxyTimeouts:
-  dialTimeout: 120
-  keepAlive: 120
-  idleConnTimeout: 90
-  tlsHandshakeTimeout: 10
-  expectContinueTimeout: 1
-  maxIdleConns: 100
-EOT
-  )
-
-  machine = {
-    project_id   = var.project_id
-    zone         = var.zone
-    name         = var.name
-    usePrivateIp = true
-  }
-  allowed_ips = tolist([
-    "127.0.0.1/32",
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-  ])
-
-  dynamic_properties = {
-    allowedIps      = concat(local.allowed_ips, var.allowed_ips)
-    machineMetadata = local.machine
-  }
-
-  frontend_proxy_target = var.frontend == null ? {} : {
-    proxyTarget = {
-      scheme = "http"
-      host   = "localhost"
-      port   = var.frontend.port
-    }
-  }
-
-  # Sidecar container: no Cloud Run ingress port mapping (port = 0).
-  # The process still listens on var.frontend.port internally so ppb can
-  # reach it via localhost.
-  frontend_container = var.frontend == null ? [] : [
-    {
-      name   = "frontend"
-      image  = var.frontend.image
-      cpu    = var.frontend.cpu
-      memory = var.frontend.memory
-      port   = 0
-    }
-  ]
-
-  startup_config = merge(local.base_config, local.dynamic_properties, local.frontend_proxy_target)
-}
-
-resource "google_service_account" "ppb" {
-  project     = var.project_id
-  account_id  = format("ppb-%s", var.name)
-  description = "Service account for Cloud Run Ingress"
-}
-
-module "ppb" {
-  source = "git::https://github.com/libops/terraform-cloudrun-v2?ref=0.5.3"
-
-  name              = var.name
-  project           = var.project_id
-  gsa               = google_service_account.ppb.name
-  skipNeg           = true
-  vpc_direct_egress = "PRIVATE_RANGES_ONLY"
-  containers = concat(
-    tolist([
-      {
-        name   = "proxy-power-button",
-        image  = "us-docker.pkg.dev/libops-images/public/ppb:0.4.2@sha256:e073702aab35db2661dc5f16bbdeaa32bfc79223212d5ba5f2892776cd94205e",
-        cpu    = "1000m"
-        memory = "1Gi",
-        port   = 8080
-      }
-    ]),
-    local.frontend_container,
-  )
-  invokers = [
-    "allUsers"
-  ]
-  min_instances = 0
-  max_instances = 5
-  regions       = [var.region]
-  addl_env_vars = tolist([
-    {
-      name  = "PPB_YAML"
-      value = yamlencode(local.startup_config)
-    }
-  ])
-}
-
-# cloud run ingress needs to be able to turn on a machine
-data "google_project_iam_custom_role" "gce-start" {
-  project = var.project_id
-  role_id = "startVM"
-}
-
-resource "google_project_iam_member" "gce-start" {
-  project = var.project_id
-  role    = data.google_project_iam_custom_role.gce-start.name
-  member  = "serviceAccount:${google_service_account.ppb.email}"
-}
-
-resource "google_compute_firewall" "allow_ssh_ipv4" {
-  project   = var.project_id
-  name      = format("allow-ssh-ipv4-%s", var.name)
-  network   = "default"
-  priority  = 10
-  direction = "INGRESS"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-  target_tags = [var.name]
-
-  source_ranges = length(var.allowed_ssh_ipv4) > 0 ? var.allowed_ssh_ipv4 : ["127.0.0.1/32"]
-}
-
-resource "google_compute_firewall" "allow_ssh_ipv6" {
-  project   = var.project_id
-  name      = format("allow-ssh-ipv6-%s", var.name)
-  network   = "default"
-  priority  = 10
-  direction = "INGRESS"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-
-  target_tags = [var.name]
-
-  source_ranges = length(var.allowed_ssh_ipv6) > 0 ? var.allowed_ssh_ipv6 : ["127.0.0.1/32"]
-}
-
-resource "google_compute_firewall" "allow_rollout_ipv4" {
-  count     = var.rollout_enabled ? 1 : 0
-  project   = var.project_id
-  name      = format("allow-rollout-ipv4-%s", var.name)
-  network   = "default"
-  priority  = 20
-  direction = "INGRESS"
-
-  allow {
-    protocol = "tcp"
-    ports    = [tostring(var.rollout_port)]
-  }
-
-  target_tags   = [var.name]
-  source_ranges = length(var.rollout_allowed_ipv4) > 0 ? var.rollout_allowed_ipv4 : ["127.0.0.1/32"]
+module "gcp" {
+  source = "./modules/gcp"
+
+  name           = var.name
+  project_id     = var.gcp.project_id
+  project_number = var.gcp.project_number
+  region         = var.gcp.region
+  zone           = var.gcp.zone
+
+  service_account_email     = local.gcp_identity.vm_service_account_email
+  app_service_account_email = local.gcp_identity.app_service_account_email
+
+  machine_type = local.gcp_instance.machine_type
+  os           = local.gcp_instance.os
+  production   = local.gcp_instance.production
+
+  disk_type    = local.gcp_disks.type
+  disk_size_gb = local.gcp_disks.docker_volumes_size_gb
+
+  ingress_port            = local.compose.ingress_port
+  primary_compose_project = local.compose.primary
+  sitectl_ingress         = local.compose.ingress
+  docker_compose_repo     = local.compose.repo
+  docker_compose_branch   = local.compose.branch
+  compose_projects        = local.compose.projects
+  docker_compose_init     = local.compose.init
+  docker_compose_up       = local.compose.up
+  docker_compose_down     = local.compose.down
+  docker_compose_rollout  = local.compose.rollout
+
+  sitectl_packages             = local.sitectl.packages
+  sitectl_version              = local.sitectl.version
+  sitectl_context_name         = local.sitectl.context_name
+  sitectl_plugin               = local.sitectl.plugin
+  sitectl_environment          = local.sitectl.environment
+  sitectl_healthcheck_timeout  = local.sitectl.healthcheck_timeout
+  sitectl_healthcheck_interval = local.sitectl.healthcheck_interval
+  sitectl_verify_args          = local.sitectl.verify_args
+
+  docker_compose_version = local.docker.compose_version
+  docker_buildx_version  = local.docker.buildx_version
+
+  libops_managed_runtime_enabled       = local.managed.enabled
+  libops_internal_services_enabled     = local.managed.internal_services_enabled
+  libops_internal_services_auto_update = local.managed.internal_services_auto_update
+  libops_lightsout_image               = local.managed.lightsout_image
+  libops_cap_image                     = local.managed.cap_image
+  libops_cadvisor_image                = local.managed.cadvisor_image
+  libops_managed_artifacts             = local.managed.artifacts
+
+  allowed_ips      = local.gcp_network.power_button_allowed_ips
+  allowed_ssh_ipv4 = local.gcp_network.ssh_ipv4
+  allowed_ssh_ipv6 = local.gcp_network.ssh_ipv6
+
+  create_network        = local.gcp_network.create
+  network_name          = local.gcp_network.name
+  subnetwork_name       = local.gcp_network.subnetwork
+  network_ip_cidr_range = local.gcp_network.ip_cidr_range
+
+  run_snapshots           = local.gcp_snapshots.enabled
+  overlay_source_instance = local.gcp_overlay.source_instance
+  volume_names            = local.gcp_overlay.volume_names
+
+  users   = var.runtime.users
+  rootfs  = var.runtime.rootfs
+  runcmd  = local.gcp_cloud_init.runcmd
+  initcmd = local.gcp_cloud_init.initcmd
+
+  artifact_registry_repository = local.gcp_artifact_registry.repository
+  artifact_registry_location   = local.gcp_artifact_registry.location
+
+  power_management_enabled = local.gcp_power_management.enabled
+  frontend                 = local.gcp_power_management.frontend
+
+  rollout_enabled        = local.gcp_rollout.enabled
+  rollout_release_url    = local.gcp_rollout.release_url
+  rollout_release_sha256 = local.gcp_rollout.release_sha256
+  rollout_port           = local.gcp_rollout.port
+  rollout_jwks_uri       = local.gcp_rollout.jwks_uri
+  rollout_jwt_audience   = local.gcp_rollout.jwt_audience
+  rollout_custom_claims  = local.gcp_rollout.custom_claims
+  rollout_allowed_ipv4   = local.gcp_rollout.allowed_ipv4
+
+  vault_addr                    = local.vault.addr
+  vault_namespace               = local.vault.namespace
+  vault_role                    = local.vault.role
+  vault_agent_enabled           = local.vault.agent_enabled
+  vault_auth_method             = local.vault.auth_method
+  vault_gcp_auth_mount_path     = local.vault.gcp_auth_mount_path
+  vault_agent_token_path        = local.vault.agent_token_path
+  vault_agent_templates         = local.vault.agent_templates
+  vault_agent_additional_config = local.vault.agent_additional_config
 }
