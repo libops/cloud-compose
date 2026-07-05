@@ -24,9 +24,10 @@ terraform {
 provider "digitalocean" {}
 
 provider "google" {
-  project = local.project_id
-  region  = var.gcp_region
-  zone    = var.gcp_zone
+  access_token = local.cloud_provider == "gcp" ? null : "unused"
+  project      = local.cloud_provider == "gcp" ? local.project_id : "unused"
+  region       = var.gcp_region
+  zone         = var.gcp_zone
 }
 
 provider "linode" {}
