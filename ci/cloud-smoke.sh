@@ -566,7 +566,11 @@ echo \"--- docker ps ---\"
 sudo docker ps -a
 echo \"--- docker compose ps ---\"
 if [ -d ${quoted_project_dir} ]; then
-  runuser -u cloud-compose -- env HOME=/home/cloud-compose PROJECT_DIR=${quoted_project_dir} bash -lc \"source /home/cloud-compose/profile.sh && cd \\\"\$PROJECT_DIR\\\" && docker compose ps\"
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u cloud-compose -- env HOME=/home/cloud-compose PROJECT_DIR=${quoted_project_dir} bash -lc \"source /home/cloud-compose/profile.sh && cd \\\"\$PROJECT_DIR\\\" && docker compose ps\"
+  else
+    sudo -u cloud-compose env HOME=/home/cloud-compose PROJECT_DIR=${quoted_project_dir} bash -lc \"source /home/cloud-compose/profile.sh && cd \\\"\$PROJECT_DIR\\\" && docker compose ps\"
+  fi
 else
   echo \"Project directory ${project_dir} is not present yet\"
 fi

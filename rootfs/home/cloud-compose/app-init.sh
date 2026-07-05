@@ -18,6 +18,7 @@ while read -r app; do
   source_compose_app_env "$app"
 
   pushd "$DOCKER_COMPOSE_DIR" >/dev/null
+  scaffold_compose_app_defaults "$app"
   update_env COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
   update_env SITE_NAME "${CLOUD_COMPOSE_INSTANCE_NAME:-${GCP_INSTANCE_NAME:-$app}}"
   update_env COMPOSE_BIND_PORT "$COMPOSE_BIND_PORT"
