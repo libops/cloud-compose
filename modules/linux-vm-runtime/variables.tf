@@ -226,7 +226,7 @@ variable "sitectl_verify_args" {
 variable "docker_compose_version" {
   type = string
   # renovate: datasource=github-releases depName=docker-compose packageName=docker/compose versioning=semver
-  default     = "v5.2.0"
+  default     = "v5.3.0"
   description = "Docker Compose release tag installed as the Docker CLI plugin."
 }
 

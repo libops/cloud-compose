@@ -121,7 +121,7 @@ variable "runtime" {
 
     docker = optional(object({
       # renovate: datasource=github-releases depName=docker-compose packageName=docker/compose versioning=semver
-      compose_version = optional(string, "v5.2.0")
+      compose_version = optional(string, "v5.3.0")
       # renovate: datasource=github-releases depName=docker-buildx packageName=docker/buildx versioning=semver
       buildx_version = optional(string, "v0.35.0")
     }), {})
