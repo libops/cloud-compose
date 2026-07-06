@@ -1,10 +1,10 @@
 # DigitalOcean And Linode
 
-DigitalOcean and Linode use provider-specific Terraform modules that share the
-same Linux runtime contract as the GCP module:
+DigitalOcean and Linode use provider-specific Terraform entrypoint modules that
+share the same Linux runtime contract as the GCP module:
 
-- `modules/digitalocean`
-- `modules/linode`
+- `providers/do`
+- `providers/linode`
 
 Both modules:
 
@@ -39,16 +39,16 @@ the auth method through `vault_agent_additional_config` or a rootfs overlay.
 ## DigitalOcean
 
 Use `DIGITALOCEAN_TOKEN` or an explicit DigitalOcean provider configuration in
-the calling stack. Prefer the root module contract so the app template selects
-the compose repo, `sitectl` plugin, and plugin package defaults:
+the calling stack. Prefer the provider-specific entrypoint so Terraform only
+loads the DigitalOcean provider while the app template still selects the compose
+repo, `sitectl` plugin, and plugin package defaults:
 
 ```hcl
 module "wp" {
-  source = "../.."
+  source = "github.com/libops/cloud-compose//providers/do"
 
-  name           = "cc-wp"
-  cloud_provider = "digitalocean"
-  template       = "wp"
+  name     = "cc-wp"
+  template = "wp"
   digitalocean = {
     region = "tor1"
     ssh = {
@@ -66,11 +66,10 @@ stack. Linode metadata is tighter than DigitalOcean, so CI and examples can pass
 
 ```hcl
 module "drupal" {
-  source = "../.."
+  source = "github.com/libops/cloud-compose//providers/linode"
 
-  name           = "cc-drupal"
-  cloud_provider = "linode"
-  template       = "drupal"
+  name     = "cc-drupal"
+  template = "drupal"
   linode = {
     region = "us-east"
     instance = {

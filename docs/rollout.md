@@ -9,7 +9,7 @@ commands configured in `docker_compose_rollout`.
 
 ```hcl
 module "site" {
-  source = "github.com/libops/cloud-compose"
+  source = "github.com/libops/cloud-compose//providers/gcp"
 
   # existing cloud-compose inputs...
 

@@ -5,13 +5,10 @@ terraform {
 module "isle" {
   source = "../app"
 
-  name           = var.name
-  cloud_provider = var.cloud_provider
-  template       = "isle"
-  gcp            = var.gcp
-  digitalocean   = var.digitalocean
-  linode         = var.linode
-  runtime        = var.runtime
+  name         = var.name
+  template     = "isle"
+  digitalocean = var.digitalocean
+  runtime      = var.runtime
 }
 
 output "instance" {

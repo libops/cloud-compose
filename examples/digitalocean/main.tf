@@ -3,11 +3,10 @@ terraform {
 }
 
 module "wp" {
-  source = "../.."
+  source = "../../providers/do"
 
-  name           = var.name
-  cloud_provider = "digitalocean"
-  template       = "wp"
+  name     = var.name
+  template = "wp"
   digitalocean = {
     region = var.region
     droplet = {
@@ -20,6 +19,7 @@ module "wp" {
   }
   runtime = {
     compose = {
+      repo         = var.docker_compose_repo
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port
     }

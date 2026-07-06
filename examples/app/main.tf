@@ -3,15 +3,12 @@ terraform {
 }
 
 module "app" {
-  source = "../.."
+  source = "../../providers/do"
 
-  name           = var.name
-  cloud_provider = var.cloud_provider
-  template       = var.template
-  gcp            = var.gcp
-  digitalocean   = var.digitalocean
-  linode         = var.linode
-  runtime        = var.runtime
+  name         = var.name
+  template     = var.template
+  digitalocean = var.digitalocean
+  runtime      = var.runtime
 }
 
 output "instance" {

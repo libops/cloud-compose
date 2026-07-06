@@ -1,0 +1,75 @@
+terraform {
+  required_version = ">= 1.2.4"
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
+    }
+  }
+}
+
+resource "random_id" "suffix" {
+  byte_length = local.cloud_provider == "gcp" ? 2 : 3
+}
+
+locals {
+  cloud_provider = lower(trimspace(var.cloud_provider))
+  template       = lower(trimspace(var.template))
+
+  provider_prefixes = {
+    digitalocean = "do"
+    gcp          = "g"
+    linode       = "ln"
+  }
+  template_slugs = {
+    archivesspace   = "as"
+    ojs             = "ojs"
+    isle            = "isle"
+    drupal          = "dr"
+    wp              = "wp"
+    "omeka-s"       = "os"
+    "omeka-classic" = "oc"
+  }
+
+  smoke_run_id        = substr(replace(lower(var.smoke_run_id), "/[^a-z0-9-]/", "-"), 0, local.cloud_provider == "gcp" ? 8 : 16)
+  name_limit          = local.cloud_provider == "gcp" ? 21 : 46
+  target              = "${local.cloud_provider}-${local.template}"
+  name_prefix         = "cc-${local.provider_prefixes[local.cloud_provider]}-${local.template_slugs[local.template]}"
+  name                = substr(join("-", compact([local.name_prefix, local.smoke_run_id, random_id.suffix.hex])), 0, local.name_limit)
+  run_tag             = local.smoke_run_id != "" ? "gha-run-${local.smoke_run_id}" : ""
+  tags                = distinct(concat(var.tags, ["cloud-compose-smoke", local.target], local.run_tag != "" ? [local.run_tag] : []))
+  ssh_keys            = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
+  healthcheck_timeout = trimspace(var.healthcheck_timeout) != "" ? var.healthcheck_timeout : "20m"
+
+  runtime_base = {
+    rootfs_archive_url = var.rootfs_archive_url
+    compose = {
+      branch       = var.docker_compose_branch
+      ingress_port = var.ingress_port
+      up = [
+        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
+        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\""
+      ]
+    }
+    sitectl = {
+      environment          = "smoke"
+      healthcheck_timeout  = local.healthcheck_timeout
+      healthcheck_interval = var.healthcheck_interval
+    }
+    managed_runtime = {
+      enabled                       = true
+      internal_services_enabled     = false
+      internal_services_auto_update = false
+    }
+    vault = {
+      auth_method = "consumer-managed"
+    }
+  }
+
+  gcp_runtime = merge(local.runtime_base, {
+    users = {
+      cloud-compose = local.ssh_keys
+    }
+  })
+}

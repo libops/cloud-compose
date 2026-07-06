@@ -16,16 +16,16 @@ compose app shapes.
 - `examples/digitalocean` deploys WordPress on DigitalOcean.
 - `examples/linode` deploys Drupal on Linode.
 
-The root module knows the default compose repo, `sitectl` plugin, and package
-set for each template. A minimal caller supplies the provider and template:
+Provider-specific entrypoints know the default compose repo, `sitectl` plugin,
+and package set for each template. A minimal caller selects the provider by
+module path and supplies the template:
 
 ```hcl
 module "app" {
-  source = "../.."
+  source = "github.com/libops/cloud-compose//providers/do"
 
-  name           = "cc-wp"
-  cloud_provider = "digitalocean"
-  template       = "wp"
+  name     = "cc-wp"
+  template = "wp"
   digitalocean = {
     ssh = {
       cloud_compose_keys = var.operator_ssh_keys

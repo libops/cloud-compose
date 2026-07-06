@@ -5,13 +5,10 @@ terraform {
 module "omeka_s" {
   source = "../app"
 
-  name           = var.name
-  cloud_provider = var.cloud_provider
-  template       = "omeka-s"
-  gcp            = var.gcp
-  digitalocean   = var.digitalocean
-  linode         = var.linode
-  runtime        = var.runtime
+  name         = var.name
+  template     = "omeka-s"
+  digitalocean = var.digitalocean
+  runtime      = var.runtime
 }
 
 output "instance" {

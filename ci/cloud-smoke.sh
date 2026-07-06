@@ -93,7 +93,11 @@ target_template() {
 
 target_root() {
   target_template "$1" >/dev/null
-  printf '%s/tests/smoke/app\n' "$repo_root"
+  case "$(target_provider "$1")" in
+    digitalocean) printf '%s/tests/smoke/do\n' "$repo_root" ;;
+    gcp) printf '%s/tests/smoke/gcp\n' "$repo_root" ;;
+    linode) printf '%s/tests/smoke/linode\n' "$repo_root" ;;
+  esac
 }
 
 target_env() {
