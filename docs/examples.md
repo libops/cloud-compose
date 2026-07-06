@@ -51,6 +51,9 @@ runtime = {
 }
 ```
 
+The same template defaults are stored in `templates/apps.json` and are reused by
+the Ansible role and Salt formula for existing Debian/Ubuntu hosts.
+
 ## Bin packing
 
 `examples/binpack` shows how several compose projects can share one VM:

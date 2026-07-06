@@ -1,12 +1,14 @@
-# DigitalOcean And Linode
+# Provider Entrypoints And On-Prem
 
-DigitalOcean and Linode use provider-specific Terraform entrypoint modules that
-share the same Linux runtime contract as the GCP module:
+Provider-specific Terraform entrypoint modules keep downstream consumers from
+loading unused cloud providers. Use these paths instead of the root module when
+the caller already knows the target cloud:
 
+- `providers/gcp`
 - `providers/do`
 - `providers/linode`
 
-Both modules:
+DigitalOcean and Linode share the same Linux runtime contract as the GCP module:
 
 - mount a persistent app/data disk at `/mnt/disks/data`
 - mount a persistent Docker-volume disk at `/mnt/disks/volumes`
@@ -35,6 +37,53 @@ DigitalOcean and Linode do not currently have a cloud-compose workload identity
 contract equivalent to GCP IAM for Vault Agent. Their modules default
 `vault_auth_method` to `consumer-managed`. When `vault_agent_enabled=true`, pass
 the auth method through `vault_agent_additional_config` or a rootfs overlay.
+
+## Existing Debian/Ubuntu Hosts
+
+Use the Ansible role or Salt formula when Terraform should not create the VM,
+disk, firewall, or DNS. These adapters install the packaged cloud-compose rootfs,
+write `.env`, write `compose-projects.json`, reload systemd, and optionally run
+the bootstrap.
+
+- Ansible role: `ansible/roles/cloud_compose`
+- Ansible playbook example: `ansible/playbooks/site.yml`
+- Salt formula: `salt/cloud-compose`
+- Shared template registry: `templates/apps.json`
+
+The packaged runtime currently assumes fixed host paths:
+
+- `/home/cloud-compose`
+- `/mnt/disks/data`
+- `/mnt/disks/volumes`
+
+For one app per host, set `cloud_compose_template` in Ansible or
+`cloud_compose.template` in Salt. For multiple apps on one host, pass the same
+`runtime.compose.projects` shape used by Terraform.
+
+Ansible example:
+
+```yaml
+cloud_compose_name: isle-prod
+cloud_compose_template: isle
+cloud_compose_runtime:
+  compose:
+    ingress:
+      domain: isle.example.edu
+      acme_email: admin@example.edu
+```
+
+Salt pillar example:
+
+```yaml
+cloud_compose:
+  name: isle-prod
+  template: isle
+  runtime:
+    compose:
+      ingress:
+        domain: isle.example.edu
+        acme_email: admin@example.edu
+```
 
 ## DigitalOcean
 

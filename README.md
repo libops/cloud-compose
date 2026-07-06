@@ -1,7 +1,13 @@
 # cloud-compose
 
-Deploy Docker Compose projects to cloud VMs. The root module targets Google
-Cloud; provider modules under `modules/` cover DigitalOcean and Linode.
+Deploy Docker Compose projects to VMs. Provider-specific Terraform entrypoints
+under `providers/` cover GCP, DigitalOcean, and Linode without loading unused
+cloud providers. Existing Debian/Ubuntu hosts can consume the same runtime
+contract through the Ansible role or Salt formula.
+
+Template defaults live in `templates/apps.json` and are shared by Terraform,
+Ansible, and Salt. The default deployment shape is one app per VM or host; pass
+`runtime.compose.projects` when several apps should share the same machine.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
