@@ -10,15 +10,35 @@ the Terraform provider modules and the Ansible role.
 The packaged runtime currently uses fixed host paths: `/home/cloud-compose`,
 `/mnt/disks/data`, and `/mnt/disks/volumes`.
 
-Your Salt `file_roots` must expose the repository root so these paths resolve:
+The normal on-prem shape is one app per machine. Use pillar targeting to give
+each minion its own `cloud_compose` values, then apply the same
+`cloud-compose` state to every app host.
+
+Your Salt `file_roots` must expose both the formula and repository root so the
+formula and packaged rootfs resolve. Your `pillar_roots` should point at your
+environment-specific pillar tree:
 
 ```yaml
 file_roots:
   base:
+    - /srv/cloud-compose/salt
     - /srv/cloud-compose
+pillar_roots:
+  base:
+    - /srv/cloud-compose/salt/pillar.example
 ```
 
-Example pillar:
+Example pillar top:
+
+```yaml
+base:
+  'isle-prod.example.edu':
+    - cloud-compose.isle-prod
+  'wp-prod.example.edu':
+    - cloud-compose.wp-prod
+```
+
+Example per-host pillar:
 
 ```yaml
 cloud_compose:
@@ -36,5 +56,6 @@ cloud_compose:
 Apply:
 
 ```bash
-salt 'isle.example.edu' state.apply cloud-compose
+salt 'isle-prod.example.edu' state.apply cloud-compose
+salt 'wp-prod.example.edu' state.apply cloud-compose
 ```

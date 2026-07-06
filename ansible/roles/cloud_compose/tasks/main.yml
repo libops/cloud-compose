@@ -188,6 +188,12 @@
       - make
     state: present
     update_cache: true
+  when: cloud_compose_install_packages | bool
+
+- name: Ensure Docker group exists
+  ansible.builtin.group:
+    name: docker
+    state: present
 
 - name: Ensure cloud-compose group exists
   ansible.builtin.group:
@@ -221,6 +227,39 @@
     dest: /
     mode: preserve
 
+- name: Find cloud-compose shell scripts
+  ansible.builtin.find:
+    paths: "{{ cloud_compose_home }}"
+    patterns: "*.sh"
+    recurse: true
+    file_type: file
+  register: cloud_compose_shell_scripts
+
+- name: Make cloud-compose shell scripts executable
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0755"
+  loop: "{{ cloud_compose_shell_scripts.files }}"
+
+- name: Write cloud-compose lifecycle dispatchers
+  ansible.builtin.copy:
+    dest: "{{ cloud_compose_home }}/{{ item }}"
+    owner: "{{ cloud_compose_user }}"
+    group: "{{ cloud_compose_group }}"
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+
+      set -eou pipefail
+
+      source /home/cloud-compose/profile.sh
+      exec bash /home/cloud-compose/compose-dispatch.sh "{{ item }}"
+  loop:
+    - init
+    - up
+    - down
+    - rollout
+
 - name: Write cloud-compose environment
   ansible.builtin.template:
     src: env.j2
@@ -248,6 +287,7 @@
 - name: Reload systemd units
   ansible.builtin.systemd:
     daemon_reload: true
+  when: cloud_compose_reload_systemd | bool
 
 - name: Clear cloud-compose bootstrap marker
   ansible.builtin.file:

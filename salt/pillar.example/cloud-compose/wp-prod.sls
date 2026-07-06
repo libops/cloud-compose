@@ -1,12 +1,11 @@
 cloud_compose:
-  name: isle-prod
+  name: wp-prod
   provider: onprem
-  template: isle
-
+  template: wp
   runtime:
     compose:
       ingress:
-        domain: isle.example.edu
+        domain: wp.example.edu
         acme_email: admin@example.edu
     sitectl:
       environment: production

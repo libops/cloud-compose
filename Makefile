@@ -1,4 +1,8 @@
-.PHONY: lint lint-check terraform-fmt terraform-fmt-check terraform-validate terraform-lint-check shell-lint terraform-docs smoke-test-clouds smoke-test smoke-test-digitalocean-isle smoke-test-linode-wp smoke-test-gcp-wp destroy-smoke destroy-smoke-digitalocean-isle destroy-smoke-linode-wp destroy-smoke-gcp-wp docs docs-docker-build docs-build docs-serve docs-preview docs-clean
+.PHONY: lint lint-check shell-lint config-management-smoke
+.PHONY: terraform-fmt terraform-fmt-check terraform-validate terraform-lint-check terraform-docs
+.PHONY: smoke-test-clouds smoke-test smoke-test-digitalocean-isle smoke-test-linode-wp smoke-test-gcp-wp
+.PHONY: destroy-smoke destroy-smoke-digitalocean-isle destroy-smoke-linode-wp destroy-smoke-gcp-wp
+.PHONY: docs docs-docker-build docs-build docs-serve docs-preview docs-clean
 
 DOCS_IMAGE ?= cloud-compose-docs
 DOCS_PORT ?= 8888
@@ -24,6 +28,9 @@ shell-lint:
 		-path "./.terraform" -prune -o \
 		-path "./docs/site" -prune -o \
 		-type f -name "*.sh" -print0 | xargs -0 shellcheck
+
+config-management-smoke:
+	ci/config-management-smoke.sh
 
 terraform-docs:
 	terraform-docs markdown table --sort-by required --output-file README.md .

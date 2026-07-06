@@ -30,9 +30,21 @@ jobs:
       - name: Run Terraform lint
         run: make terraform-lint-check
 
+  config-management-lint:
+    name: Ansible and Salt lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run Ansible and Salt smoke checks
+        run: make config-management-smoke
+
   smoke:
     name: ${{ matrix.name }}
-    needs: terraform-lint
+    needs:
+      - terraform-lint
+      - config-management-lint
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     if: github.event.pull_request.head.repo.full_name == github.repository

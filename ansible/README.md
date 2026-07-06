@@ -7,8 +7,12 @@ The role consumes the same `templates/apps.json` template defaults used by the
 Terraform provider modules.
 
 The packaged runtime currently uses fixed host paths: `/home/cloud-compose`,
-`/mnt/disks/data`, and `/mnt/disks/volumes`. For multiple apps on one host, pass
-the same `cloud_compose_runtime.compose.projects` shape used by Terraform.
+`/mnt/disks/data`, and `/mnt/disks/volumes`.
+
+The normal on-prem shape is one app per machine. Put each machine in the
+`cloud_compose` inventory group and set that host's template/runtime variables.
+For multiple apps on one host, pass the same
+`cloud_compose_runtime.compose.projects` shape used by Terraform.
 
 Example inventory:
 
@@ -17,7 +21,7 @@ all:
   children:
     cloud_compose:
       hosts:
-        isle.example.edu:
+        isle-prod.example.edu:
           ansible_user: debian
           cloud_compose_name: isle-prod
           cloud_compose_template: isle
@@ -28,10 +32,19 @@ all:
                 acme_email: admin@example.edu
             sitectl:
               environment: production
+        wp-prod.example.edu:
+          ansible_user: debian
+          cloud_compose_name: wp-prod
+          cloud_compose_template: wp
+          cloud_compose_runtime:
+            compose:
+              ingress:
+                domain: wp.example.edu
+                acme_email: admin@example.edu
 ```
 
 Run:
 
 ```bash
-ansible-playbook -i ansible/inventory.example.yml ansible/playbooks/site.yml
+ansible-playbook ansible/playbooks/site.yml
 ```

@@ -56,33 +56,34 @@ The packaged runtime currently assumes fixed host paths:
 - `/mnt/disks/data`
 - `/mnt/disks/volumes`
 
-For one app per host, set `cloud_compose_template` in Ansible or
-`cloud_compose.template` in Salt. For multiple apps on one host, pass the same
-`runtime.compose.projects` shape used by Terraform.
+For one app per host, assign each app host its own Ansible inventory variables
+or Salt pillar. For multiple apps on one host, pass the same
+`runtime.compose.projects` shape used by Terraform, but that is an explicit
+bin-packing choice rather than the default on-prem layout.
 
-Ansible example:
+Ansible inventory example:
 
 ```yaml
-cloud_compose_name: isle-prod
-cloud_compose_template: isle
-cloud_compose_runtime:
-  compose:
-    ingress:
-      domain: isle.example.edu
-      acme_email: admin@example.edu
+all:
+  children:
+    cloud_compose:
+      hosts:
+        isle-prod.example.edu:
+          cloud_compose_name: isle-prod
+          cloud_compose_template: isle
+        wp-prod.example.edu:
+          cloud_compose_name: wp-prod
+          cloud_compose_template: wp
 ```
 
-Salt pillar example:
+Salt pillar top example:
 
 ```yaml
-cloud_compose:
-  name: isle-prod
-  template: isle
-  runtime:
-    compose:
-      ingress:
-        domain: isle.example.edu
-        acme_email: admin@example.edu
+base:
+  'isle-prod.example.edu':
+    - cloud-compose.isle-prod
+  'wp-prod.example.edu':
+    - cloud-compose.wp-prod
 ```
 
 ## DigitalOcean

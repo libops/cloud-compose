@@ -21,6 +21,8 @@ cloud_compose_internal_services_enabled: false
 cloud_compose_internal_services_auto_update: false
 cloud_compose_managed_artifacts: []
 
+cloud_compose_install_packages: true
+cloud_compose_reload_systemd: true
 cloud_compose_run_bootstrap: true
 cloud_compose_force_bootstrap: false
 

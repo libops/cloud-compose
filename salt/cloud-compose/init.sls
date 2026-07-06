@@ -13,6 +13,8 @@
 {% set docker = runtime.get('docker', {}) %}
 {% set managed = runtime.get('managed_runtime', {}) %}
 {% set vault = runtime.get('vault', {}) %}
+{% set install_packages = cc.get('install_packages', True) %}
+{% set reload_systemd = cc.get('reload_systemd', True) %}
 {% set template_name = cc.get('template', '') | lower | trim %}
 {% set template = app_registry.default %}
 {% if template_name and template_name in app_registry.templates %}
@@ -180,6 +182,7 @@ cloud-compose-requires-repo:
     - name: Set cloud_compose.template, cloud_compose.runtime.compose.repo, or cloud_compose.runtime.compose.projects.
 {% endif %}
 
+{% if install_packages %}
 cloud-compose-packages:
   pkg.installed:
     - pkgs:
@@ -196,6 +199,11 @@ cloud-compose-docker:
     - enable: True
     - require:
       - pkg: cloud-compose-packages
+{% endif %}
+
+cloud-compose-docker-group:
+  group.present:
+    - name: docker
 
 cloud-compose-group:
   group.present:
@@ -212,7 +220,10 @@ cloud-compose-user:
       - docker
     - require:
       - group: cloud-compose-group
+      - group: cloud-compose-docker-group
+{% if install_packages %}
       - pkg: cloud-compose-packages
+{% endif %}
 
 cloud-compose-data-dirs:
   file.directory:
@@ -235,6 +246,31 @@ cloud-compose-rootfs:
     - include_empty: True
     - require:
       - user: cloud-compose-user
+
+cloud-compose-rootfs-script-modes:
+  cmd.run:
+    - name: find /home/cloud-compose -type f -name '*.sh' -exec chmod 0755 {} +
+    - unless: test -z "$(find /home/cloud-compose -type f -name '*.sh' ! -perm -u=x -print -quit)"
+    - require:
+      - file: cloud-compose-rootfs
+
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+cloud-compose-lifecycle-{{ lifecycle }}:
+  file.managed:
+    - name: {{ (home ~ '/' ~ lifecycle) | json }}
+    - user: {{ user | json }}
+    - group: {{ group | json }}
+    - mode: '0755'
+    - contents: |
+        #!/usr/bin/env bash
+
+        set -eou pipefail
+
+        source /home/cloud-compose/profile.sh
+        exec bash /home/cloud-compose/compose-dispatch.sh "{{ lifecycle }}"
+    - require:
+      - file: cloud-compose-rootfs
+{% endfor %}
 
 cloud-compose-env:
   file.managed:
@@ -275,11 +311,13 @@ cloud-compose-managed-runtime-artifacts:
     - require:
       - file: cloud-compose-rootfs
 
+{% if reload_systemd %}
 cloud-compose-systemd-reload:
   module.run:
     - name: service.systemctl_reload
     - onchanges:
       - file: cloud-compose-rootfs
+{% endif %}
 
 {% if cc.get('force_bootstrap', False) %}
 cloud-compose-clear-bootstrap-marker:
@@ -293,7 +331,9 @@ cloud-compose-bootstrap:
     - name: bash {{ (home ~ '/run.sh') | json }}
     - creates: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
     - require:
+{% if install_packages %}
       - service: cloud-compose-docker
+{% endif %}
       - file: cloud-compose-env
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts

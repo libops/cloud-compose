@@ -2,7 +2,7 @@ all:
   children:
     cloud_compose:
       hosts:
-        isle.example.edu:
+        isle-prod.example.edu:
           ansible_user: debian
           cloud_compose_name: isle-prod
           cloud_compose_template: isle
@@ -10,6 +10,28 @@ all:
             compose:
               ingress:
                 domain: isle.example.edu
+                acme_email: admin@example.edu
+            sitectl:
+              environment: production
+        wp-prod.example.edu:
+          ansible_user: debian
+          cloud_compose_name: wp-prod
+          cloud_compose_template: wp
+          cloud_compose_runtime:
+            compose:
+              ingress:
+                domain: wp.example.edu
+                acme_email: admin@example.edu
+            sitectl:
+              environment: production
+        drupal-prod.example.edu:
+          ansible_user: debian
+          cloud_compose_name: drupal-prod
+          cloud_compose_template: drupal
+          cloud_compose_runtime:
+            compose:
+              ingress:
+                domain: drupal.example.edu
                 acme_email: admin@example.edu
             sitectl:
               environment: production
