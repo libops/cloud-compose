@@ -1,0 +1,3 @@
+{% for artifact in _cc_managed_artifacts %}
+{{ artifact.name }}	{{ artifact.url }}	{{ artifact.sha256 }}	{{ artifact.path }}	{{ artifact.mode | default('0755') }}	{{ artifact.owner | default('root') }}	{{ artifact.group | default('root') }}	{{ artifact.restart | default('') }}
+{% endfor %}
