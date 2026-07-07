@@ -13,7 +13,7 @@ Ansible, and Salt. The default deployment shape is one app per VM or host; pass
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.4 |
 
 ## Providers
@@ -23,7 +23,7 @@ No providers.
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_digitalocean"></a> [digitalocean](#module\_digitalocean) | ./modules/digitalocean | n/a |
 | <a name="module_gcp"></a> [gcp](#module\_gcp) | ./modules/gcp | n/a |
 | <a name="module_linode"></a> [linode](#module\_linode) | ./modules/linode | n/a |
@@ -35,7 +35,7 @@ No resources.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_name"></a> [name](#input\_name) | Deployment name. | `string` | n/a | yes |
 | <a name="input_cloud_provider"></a> [cloud\_provider](#input\_cloud\_provider) | Cloud provider to deploy to. Supported values are gcp, digitalocean, and linode. | `string` | `"gcp"` | no |
 | <a name="input_digitalocean"></a> [digitalocean](#input\_digitalocean) | DigitalOcean infrastructure settings. | <pre>object({<br/>    region = optional(string, "tor1")<br/>    tags   = optional(list(string), ["cloud-compose"])<br/><br/>    droplet = optional(object({<br/>      size       = optional(string, "s-2vcpu-4gb")<br/>      image      = optional(string, "ubuntu-24-04-x64")<br/>      ssh_keys   = optional(list(string), [])<br/>      vpc_uuid   = optional(string, null)<br/>      monitoring = optional(bool, true)<br/>      ipv6       = optional(bool, true)<br/>      backups    = optional(bool, false)<br/>    }), {})<br/><br/>    ssh = optional(object({<br/>      cloud_compose_keys = optional(list(string), [])<br/>      users              = optional(map(list(string)), {})<br/>    }), {})<br/><br/>    volumes = optional(object({<br/>      data_size_gb           = optional(number, 50)<br/>      docker_volumes_size_gb = optional(number, 100)<br/>    }), {})<br/><br/>    firewall = optional(object({<br/>      enabled              = optional(bool, true)<br/>      ssh_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])<br/>      web_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])<br/>    }), {})<br/>  })</pre> | `{}` | no |
@@ -47,7 +47,7 @@ No resources.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_appGsa"></a> [appGsa](#output\_appGsa) | The Google Service Account the app can use for app-scoped auth. |
 | <a name="output_backend"></a> [backend](#output\_backend) | Backend service ID for attaching Cloud Run ingress to an external HTTPS load balancer. |
 | <a name="output_cloud_provider"></a> [cloud\_provider](#output\_cloud\_provider) | Selected cloud provider. |
