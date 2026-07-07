@@ -86,6 +86,15 @@ base:
     - cloud-compose.wp-prod
 ```
 
+CI verifies the local adapters with `make config-management-smoke`. The cloud
+smoke path provisions a raw Linode VM, then deploys Drupal through Ansible or
+Salt without using the cloud-compose Terraform module:
+
+```bash
+LINODE_TOKEN=... make config-management-cloud-smoke METHOD=ansible
+LINODE_TOKEN=... make config-management-cloud-smoke METHOD=salt
+```
+
 ## DigitalOcean
 
 Use `DIGITALOCEAN_TOKEN` or an explicit DigitalOcean provider configuration in

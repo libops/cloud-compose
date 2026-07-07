@@ -40,11 +40,52 @@ jobs:
       - name: Run Ansible and Salt smoke checks
         run: make config-management-smoke
 
+  config-management-cloud-smoke:
+    name: Linode ${{ matrix.method }} Drupal
+    needs:
+      - terraform-lint
+      - config-management-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        method:
+          - ansible
+          - salt
+    concurrency:
+      group: cloud-compose-config-management-${{ matrix.method }}-drupal
+      cancel-in-progress: false
+    env:
+      CLOUD_COMPOSE_SMOKE_AUTO_APPROVE: "true"
+      CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT: "1800"
+      CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS: "true"
+      CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
+      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Run Linode config-management smoke test
+        run: make config-management-cloud-smoke METHOD=${{ matrix.method }}
+
+      - name: Destroy Linode config-management smoke resources
+        if: always()
+        run: ci/config-management-cloud-smoke.sh destroy-${{ matrix.method }}-drupal
+
   smoke:
     name: ${{ matrix.name }}
     needs:
       - terraform-lint
       - config-management-lint
+      - config-management-cloud-smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     if: github.event.pull_request.head.repo.full_name == github.repository
@@ -119,6 +160,30 @@ jobs:
       - name: Skip GCP destroy
         if: always() && matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')
         run: echo "Skipping GCP destroy because GCP smoke secrets are not configured and no GCP resources were applied."
+
+  config-management-cleanup:
+    name: Destroy Linode ${{ matrix.method }} Drupal config-management
+    needs: config-management-cloud-smoke
+    if: always() && (failure() || cancelled()) && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        method:
+          - ansible
+          - salt
+    concurrency:
+      group: cloud-compose-config-management-${{ matrix.method }}-drupal
+      cancel-in-progress: false
+    env:
+      CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
+      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Sweep Linode config-management smoke resources
+        run: ci/config-management-cloud-smoke.sh sweep-${{ matrix.method }}-drupal
 
   cleanup:
     name: Destroy ${{ matrix.name }}

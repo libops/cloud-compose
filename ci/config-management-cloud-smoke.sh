@@ -1,0 +1,508 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ci/config-management-cloud-smoke.sh all
+  ci/config-management-cloud-smoke.sh ansible-drupal
+  ci/config-management-cloud-smoke.sh salt-drupal
+  ci/config-management-cloud-smoke.sh destroy-ansible-drupal
+  ci/config-management-cloud-smoke.sh destroy-salt-drupal
+  ci/config-management-cloud-smoke.sh sweep
+  ci/config-management-cloud-smoke.sh sweep-ansible-drupal
+  ci/config-management-cloud-smoke.sh sweep-salt-drupal
+
+Required environment:
+  LINODE_TOKEN
+
+Optional environment:
+  CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true
+  CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1200
+  CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT=1800
+  CLOUD_COMPOSE_SMOKE_KEEP=true
+  CLOUD_COMPOSE_SMOKE_RUN_ID
+  CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS=true
+  CLOUD_COMPOSE_SMOKE_WORKDIR=.cloud-compose-smoke
+  CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE=python:3.11-slim
+EOF
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
+require_env() {
+  if [[ -z "${!1:-}" ]]; then
+    echo "$1 is required" >&2
+    exit 1
+  fi
+}
+
+valid_target() {
+  case "$1" in
+    ansible-drupal | salt-drupal) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+target_method() {
+  local target="$1"
+  valid_target "$target" || {
+    echo "Unknown config-management smoke target: $target" >&2
+    usage >&2
+    exit 2
+  }
+  printf '%s\n' "${target%%-*}"
+}
+
+target_template() {
+  local target="$1"
+  target_method "$target" >/dev/null
+  printf '%s\n' "${target#*-}"
+}
+
+default_targets() {
+  printf '%s\n' "${CLOUD_COMPOSE_CONFIG_MANAGEMENT_CLOUD_TARGETS:-ansible-drupal salt-drupal}"
+}
+
+positive_integer_env() {
+  local name="$1" default="$2" value
+
+  value="${!name:-$default}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || [[ "$value" -eq 0 ]]; then
+    echo "${name} must be a positive integer number of seconds" >&2
+    exit 2
+  fi
+  printf '%s\n' "$value"
+}
+
+boot_timeout_seconds() {
+  positive_integer_env CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT 1200
+}
+
+destroy_timeout_seconds() {
+  positive_integer_env CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT 1800
+}
+
+smoke_run_id() {
+  printf '%s\n' "${CLOUD_COMPOSE_SMOKE_RUN_ID:-${GITHUB_RUN_ID:-}}"
+}
+
+smoke_run_tag() {
+  local run_id="$1"
+
+  if [[ -z "$run_id" ]]; then
+    return 0
+  fi
+  run_id="$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-16)"
+  printf 'gha-run-%s\n' "$run_id"
+}
+
+target_tag() {
+  local target="$1"
+  printf 'config-management-%s-%s\n' "$(target_method "$target")" "$(target_template "$target")"
+}
+
+target_workdir() {
+  local target="$1"
+  printf '%s/config-management-linode-%s\n' "${CLOUD_COMPOSE_SMOKE_WORKDIR:-$repo_root/.cloud-compose-smoke}" "$target"
+}
+
+ensure_key() {
+  local key_path="$1"
+
+  if [[ -f "$key_path" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$key_path")"
+  ssh-keygen -t ed25519 -N "" -C "cloud-compose-config-management-smoke" -f "$key_path" >/dev/null
+  chmod 0600 "$key_path"
+}
+
+api_get() {
+  local path="$1"
+  curl -fsS -H "Authorization: Bearer ${LINODE_TOKEN}" "https://api.linode.com/v4${path}"
+}
+
+api_delete() {
+  local path="$1"
+  curl -fsS -X DELETE -H "Authorization: Bearer ${LINODE_TOKEN}" "https://api.linode.com/v4${path}" >/dev/null
+}
+
+delete_ids() {
+  local path_prefix="$1" id attempt
+
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    for attempt in {1..12}; do
+      echo "Deleting Linode resource ${path_prefix}/${id} (attempt ${attempt})"
+      if api_delete "${path_prefix}/${id}"; then
+        break
+      fi
+      sleep 10
+    done
+  done
+}
+
+provider_tag_cleanup() {
+  local target="$1" run_id="${2:-}" run_tag tag
+
+  run_tag="$(smoke_run_tag "$run_id")"
+  tag="$(target_tag "$target")"
+
+  api_get "/networking/firewalls?page_size=500" |
+    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+    delete_ids "/networking/firewalls"
+  api_get "/linode/instances?page_size=500" |
+    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+    delete_ids "/linode/instances"
+  sleep 10
+  api_get "/volumes?page_size=500" |
+    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
+    delete_ids "/volumes"
+}
+
+scan_host_key() {
+  local host="$1" known_hosts="$2"
+
+  mkdir -p "$(dirname "$known_hosts")"
+  touch "$known_hosts"
+  chmod 0600 "$known_hosts"
+  ssh-keyscan -H "$host" >>"$known_hosts" 2>/dev/null
+}
+
+ssh_cmd() {
+  local home_dir="$1" key_path="$2" host="$3"
+  shift 3
+
+  ssh \
+    -i "$key_path" \
+    -o BatchMode=yes \
+    -o ConnectTimeout=10 \
+    -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile="$home_dir/.ssh/known_hosts" \
+    "root@${host}" \
+    "$@"
+}
+
+wait_for_ssh() {
+  local home_dir="$1" key_path="$2" host="$3"
+  local timeout_seconds deadline attempt=1
+
+  timeout_seconds="$(boot_timeout_seconds)"
+  deadline=$((SECONDS + timeout_seconds))
+
+  echo "Waiting for SSH on root@${host}:22"
+  while (( SECONDS < deadline )); do
+    scan_host_key "$host" "$home_dir/.ssh/known_hosts" || true
+    if ssh_cmd "$home_dir" "$key_path" "$host" "true" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "SSH not ready for ${host}; retrying in 15s (attempt ${attempt})"
+    attempt=$((attempt + 1))
+    sleep 15
+  done
+
+  echo "Timed out waiting for SSH on ${host}" >&2
+  return 1
+}
+
+wait_for_cloud_init() {
+  local home_dir="$1" key_path="$2" host="$3"
+  local timeout_seconds deadline status_output
+
+  timeout_seconds="$(boot_timeout_seconds)"
+  deadline=$((SECONDS + timeout_seconds))
+
+  echo "Waiting for raw host cloud-init on ${host}"
+  while (( SECONDS < deadline )); do
+    status_output="$(ssh_cmd "$home_dir" "$key_path" "$host" "cloud-init status --long 2>&1" 2>&1 || true)"
+    printf '%s\n' "$status_output"
+    if grep -q '^status: done' <<<"$status_output"; then
+      return 0
+    fi
+    if grep -q '^status: error' <<<"$status_output"; then
+      return 1
+    fi
+    sleep 20
+  done
+
+  echo "Timed out waiting for cloud-init on ${host}" >&2
+  return 1
+}
+
+dump_remote_logs() {
+  local home_dir="$1" key_path="$2" host="$3"
+
+  echo "Dumping config-management smoke diagnostics from ${host}" >&2
+  ssh_cmd "$home_dir" "$key_path" "$host" "bash -lc 'set +e
+echo \"--- cloud-init status ---\"
+cloud-init status --long
+echo \"--- /var/log/cloud-init-output.log ---\"
+tail -n 300 /var/log/cloud-init-output.log
+echo \"--- /home/cloud-compose/run.log ---\"
+tail -n 300 /home/cloud-compose/run.log
+echo \"--- cloud-compose unit ---\"
+journalctl -u cloud-compose --no-pager -n 300
+echo \"--- docker ps ---\"
+docker ps -a
+echo \"--- compose manifest ---\"
+cat /home/cloud-compose/compose-projects.json
+'" || true
+}
+
+target_var_args() {
+  local key_path="$1" target="$2" public_key
+
+  public_key="$(cat "${key_path}.pub")"
+  printf '%s\0%s\0' "-var" "ssh_public_key=${public_key}"
+  printf '%s\0%s\0' "-var" "method=$(target_method "$target")"
+  printf '%s\0%s\0' "-var" "template=$(target_template "$target")"
+  if [[ -n "$(smoke_run_id)" ]]; then
+    printf '%s\0%s\0' "-var" "smoke_run_id=$(smoke_run_id)"
+  fi
+}
+
+deploy_config_management() {
+  local target="$1" key_path="$2" output_json="$3"
+  local method host name template environment timeout interval image key_b64
+
+  method="$(jq -r '.method' "$output_json")"
+  host="$(jq -r '.host' "$output_json")"
+  name="$(jq -r '.cloud_compose_name' "$output_json")"
+  template="$(jq -r '.app' "$output_json")"
+  environment="$(jq -r '.environment' "$output_json")"
+  timeout="$(jq -r '.healthcheck_timeout' "$output_json")"
+  interval="$(jq -r '.healthcheck_interval' "$output_json")"
+  image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-python:3.11-slim}"
+  key_b64="$(base64 <"$key_path" | tr -d '\n')"
+
+  echo "Deploying ${template} to ${host} with ${method}"
+  tar \
+    --exclude="./.git" \
+    --exclude="./.terraform" \
+    --exclude="./docs/site" \
+    -C "$repo_root" \
+    -cf - . |
+    docker run --rm -i \
+      --env "SMOKE_METHOD=${method}" \
+      --env "SMOKE_HOST=${host}" \
+      --env "SMOKE_SSH_KEY_B64=${key_b64}" \
+      --env "SMOKE_NAME=${name}" \
+      --env "SMOKE_TEMPLATE=${template}" \
+      --env "SMOKE_ENVIRONMENT=${environment}" \
+      --env "SMOKE_HEALTHCHECK_TIMEOUT=${timeout}" \
+      --env "SMOKE_HEALTHCHECK_INTERVAL=${interval}" \
+      --tmpfs /run \
+      --tmpfs /tmp \
+      "$image" \
+      bash -lc 'mkdir -p /work && tar -C /work -xf - && cd /work && bash ci/config-management-cloud-smoke-inner.sh'
+}
+
+require_run_commands() {
+  require_cmd base64
+  require_cmd curl
+  require_cmd docker
+  require_cmd jq
+  require_cmd ssh
+  require_cmd ssh-keygen
+  require_cmd ssh-keyscan
+  require_cmd tar
+  require_cmd terraform
+}
+
+require_destroy_commands() {
+  require_cmd curl
+  require_cmd jq
+  require_cmd ssh-keygen
+  require_cmd terraform
+}
+
+require_sweep_commands() {
+  require_cmd curl
+  require_cmd jq
+}
+
+run_target() (
+  set -euo pipefail
+
+  local target="$1" root workdir key_path home_dir output_json host
+  local -a auto_args var_args
+
+  valid_target "$target" || {
+    echo "Unknown config-management smoke target: $target" >&2
+    exit 2
+  }
+  require_env LINODE_TOKEN
+
+  root="$repo_root/tests/smoke/config-management-linode"
+  workdir="$(target_workdir "$target")"
+  key_path="$workdir/id_ed25519"
+  home_dir="$workdir/home"
+  output_json="$workdir/smoke.json"
+  mkdir -p "$workdir" "$home_dir/.ssh"
+  chmod 0700 "$home_dir/.ssh"
+
+  ensure_key "$key_path"
+  mapfile -d '' -t var_args < <(target_var_args "$key_path" "$target")
+
+  auto_args=()
+  if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
+    auto_args=(-auto-approve)
+  fi
+
+  cleanup_started=false
+  cleanup() {
+    local status=$?
+    local destroy_status=0 destroy_timeout
+
+    trap - EXIT INT TERM HUP
+    if [[ "$cleanup_started" == "true" ]]; then
+      exit "$status"
+    fi
+    cleanup_started=true
+
+    if [[ "${CLOUD_COMPOSE_SMOKE_KEEP:-}" == "true" ]]; then
+      echo "Keeping ${target} smoke-test resources because CLOUD_COMPOSE_SMOKE_KEEP=true"
+      exit "$status"
+    fi
+
+    echo "Destroying ${target} config-management smoke resources"
+    set +e
+    destroy_timeout="$(destroy_timeout_seconds)"
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "${destroy_timeout}s" \
+        env TF_DATA_DIR="$workdir/.terraform" \
+        terraform -chdir="$root" destroy -lock-timeout=10m -input=false "${auto_args[@]}" "${var_args[@]}"
+      destroy_status=$?
+    else
+      TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" destroy -lock-timeout=10m -input=false "${auto_args[@]}" "${var_args[@]}"
+      destroy_status=$?
+    fi
+    if [[ "$destroy_status" -ne 0 ]]; then
+      provider_tag_cleanup "$target" || true
+    fi
+    exit "$status"
+  }
+  trap cleanup EXIT INT TERM HUP
+
+  echo "Initializing ${target} raw Linode smoke"
+  TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" init -input=false
+  TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" validate
+
+  if [[ "${CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS:-}" == "true" ]]; then
+    provider_tag_cleanup "$target"
+  fi
+
+  echo "Applying ${target} raw Linode smoke"
+  TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" apply -input=false "${auto_args[@]}" "${var_args[@]}"
+  TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" output -json smoke >"$output_json"
+
+  host="$(jq -r '.host' "$output_json")"
+  wait_for_ssh "$home_dir" "$key_path" "$host"
+  if ! wait_for_cloud_init "$home_dir" "$key_path" "$host"; then
+    dump_remote_logs "$home_dir" "$key_path" "$host"
+    return 1
+  fi
+  if ! deploy_config_management "$target" "$key_path" "$output_json"; then
+    dump_remote_logs "$home_dir" "$key_path" "$host"
+    return 1
+  fi
+
+  echo "${target} config-management cloud smoke test passed"
+)
+
+destroy_target() (
+  set -euo pipefail
+
+  local target="$1" root workdir key_path destroy_status=0 destroy_timeout
+  local -a auto_args var_args
+
+  valid_target "$target" || exit 2
+  require_env LINODE_TOKEN
+
+  root="$repo_root/tests/smoke/config-management-linode"
+  workdir="$(target_workdir "$target")"
+  key_path="$workdir/id_ed25519"
+
+  if [[ ! -f "${key_path}.pub" ]]; then
+    ensure_key "$key_path"
+  fi
+  mapfile -d '' -t var_args < <(target_var_args "$key_path" "$target")
+
+  auto_args=()
+  if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
+    auto_args=(-auto-approve)
+  fi
+
+  if [[ -d "$workdir/.terraform" ]]; then
+    echo "Destroying ${target} raw Linode smoke resources from Terraform state"
+    set +e
+    destroy_timeout="$(destroy_timeout_seconds)"
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "${destroy_timeout}s" \
+        env TF_DATA_DIR="$workdir/.terraform" \
+        terraform -chdir="$root" destroy -lock-timeout=10m -input=false "${auto_args[@]}" "${var_args[@]}"
+      destroy_status=$?
+    else
+      TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" destroy -lock-timeout=10m -input=false "${auto_args[@]}" "${var_args[@]}"
+      destroy_status=$?
+    fi
+    set -e
+  fi
+
+  provider_tag_cleanup "$target" "$(smoke_run_id)"
+  return "$destroy_status"
+)
+
+main() {
+  local target
+
+  if [[ "$#" -ne 1 ]]; then
+    usage >&2
+    exit 2
+  fi
+
+  case "$1" in
+    all)
+      require_run_commands
+      for target in $(default_targets); do
+        run_target "$target"
+      done
+      ;;
+    sweep)
+      require_env LINODE_TOKEN
+      require_sweep_commands
+      for target in $(default_targets); do
+        provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      done
+      ;;
+    sweep-*)
+      require_env LINODE_TOKEN
+      require_sweep_commands
+      provider_tag_cleanup "${1#sweep-}" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      ;;
+    destroy-*)
+      require_destroy_commands
+      destroy_target "${1#destroy-}"
+      ;;
+    ansible-drupal | salt-drupal)
+      require_run_commands
+      run_target "$1"
+      ;;
+    *)
+      echo "Unknown config-management cloud smoke command: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

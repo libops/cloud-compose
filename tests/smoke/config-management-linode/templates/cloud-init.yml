@@ -1,0 +1,43 @@
+#cloud-config
+
+ssh_authorized_keys:
+%{ for key in SSH_PUBLIC_KEYS ~}
+- ${key}
+%{ endfor ~}
+
+runcmd:
+- |
+  set -eu
+
+  mount_cloud_compose_disk() {
+    device_path="$1"
+    mount_path="$2"
+    device="$(readlink -f "$device_path" 2>/dev/null || true)"
+    until [ -n "$device" ] && [ -b "$device" ]; do
+      echo "Waiting for $device_path"
+      sleep 2
+      device="$(readlink -f "$device_path" 2>/dev/null || true)"
+    done
+    mkdir -p "$mount_path"
+    if ! blkid "$device" >/dev/null 2>&1; then
+      mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$device"
+    fi
+    if ! grep -qs " $${mount_path} " /etc/fstab; then
+      echo "$${device_path} $${mount_path} ext4 defaults,nofail 0 2" >>/etc/fstab
+    fi
+    if ! mountpoint -q "$mount_path"; then
+      mount "$mount_path"
+    fi
+    chmod a+w "$mount_path"
+  }
+
+  mount_cloud_compose_disk '${DATA_DEVICE}' /mnt/disks/data
+  mount_cloud_compose_disk '${VOLUMES_DEVICE}' /mnt/disks/volumes
+  mkdir -p /mnt/disks/data/docker/volumes
+  if ! grep -qs " /mnt/disks/data/docker/volumes " /etc/fstab; then
+    echo "/mnt/disks/volumes /mnt/disks/data/docker/volumes none bind,nofail 0 0" >>/etc/fstab
+  fi
+  if ! mountpoint -q /mnt/disks/data/docker/volumes; then
+    mount /mnt/disks/data/docker/volumes
+  fi
+  chmod 0775 /mnt/disks/data /mnt/disks/volumes
