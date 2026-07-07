@@ -5,6 +5,7 @@ set -eou pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 export HOME
+cd /home/cloud-compose
 
 # shellcheck disable=SC1091
 source /home/cloud-compose/compose-apps.sh
