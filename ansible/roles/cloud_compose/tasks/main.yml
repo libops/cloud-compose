@@ -308,4 +308,6 @@
   ansible.builtin.command:
     cmd: bash "{{ cloud_compose_home }}/run.sh"
     creates: "{{ cloud_compose_home }}/.cloud-compose-bootstrap-complete"
+  async: "{{ cloud_compose_bootstrap_timeout }}"
+  poll: "{{ cloud_compose_bootstrap_poll_interval }}"
   when: cloud_compose_run_bootstrap | bool

@@ -25,6 +25,8 @@ cloud_compose_install_packages: true
 cloud_compose_reload_systemd: true
 cloud_compose_run_bootstrap: true
 cloud_compose_force_bootstrap: false
+cloud_compose_bootstrap_timeout: 3600
+cloud_compose_bootstrap_poll_interval: 15
 
 cloud_compose_extra_env: {}
 cloud_compose_runtime: {}

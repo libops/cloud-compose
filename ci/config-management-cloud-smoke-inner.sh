@@ -59,7 +59,7 @@ all:
           ansible_host: ${SMOKE_HOST}
           ansible_user: root
           ansible_ssh_private_key_file: /tmp/cloud-compose-ssh/id_ed25519
-          ansible_ssh_common_args: "-o UserKnownHostsFile=/tmp/cloud-compose-ssh/known_hosts -o StrictHostKeyChecking=yes"
+          ansible_ssh_common_args: "-o UserKnownHostsFile=/tmp/cloud-compose-ssh/known_hosts -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10"
           cloud_compose_name: ${SMOKE_NAME}
           cloud_compose_template: ${SMOKE_TEMPLATE}
           cloud_compose_runtime:
