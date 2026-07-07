@@ -1,0 +1,5 @@
+- name: Deploy cloud-compose runtime
+  hosts: cloud_compose
+  become: true
+  roles:
+    - role: cloud_compose

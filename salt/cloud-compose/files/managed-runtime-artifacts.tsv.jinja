@@ -1,0 +1,3 @@
+{% for artifact in managed_artifacts %}
+{{ artifact.name }}	{{ artifact.url }}	{{ artifact.sha256 }}	{{ artifact.path }}	{{ artifact.get('mode', '0755') }}	{{ artifact.get('owner', 'root') }}	{{ artifact.get('group', 'root') }}	{{ artifact.get('restart', '') }}
+{% endfor %}

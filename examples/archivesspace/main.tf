@@ -5,13 +5,10 @@ terraform {
 module "archivesspace" {
   source = "../app"
 
-  name           = var.name
-  cloud_provider = var.cloud_provider
-  template       = "archivesspace"
-  gcp            = var.gcp
-  digitalocean   = var.digitalocean
-  linode         = var.linode
-  runtime        = var.runtime
+  name         = var.name
+  template     = "archivesspace"
+  digitalocean = var.digitalocean
+  runtime      = var.runtime
 }
 
 output "instance" {

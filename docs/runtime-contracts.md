@@ -7,8 +7,9 @@ the desired state.
 
 ## Compose Apps
 
-Use `compose_projects` to run more than one compose app on the same VM. Each map
-entry gets:
+The default shape is one compose app per VM or existing host. Use
+`compose_projects` to run more than one compose app on the same machine. Each
+map entry gets:
 
 - a git checkout
 - a `sitectl` local context
@@ -60,6 +61,11 @@ Dependency installation dispatches by OS family:
 
 Provider modules should mount persistent data and Docker-volume disks before the
 runtime starts. Destroying/recreating the VM must not destroy these volumes.
+
+The Ansible role and Salt formula skip cloud infrastructure creation. They
+assume Debian/Ubuntu hosts already have suitable network, DNS, firewall, and
+storage policy, then install the same rootfs and write the same runtime files
+Terraform would have written through cloud-init.
 
 ## Backups
 

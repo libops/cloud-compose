@@ -5,13 +5,10 @@ terraform {
 module "drupal" {
   source = "../app"
 
-  name           = var.name
-  cloud_provider = var.cloud_provider
-  template       = "drupal"
-  gcp            = var.gcp
-  digitalocean   = var.digitalocean
-  linode         = var.linode
-  runtime        = var.runtime
+  name         = var.name
+  template     = "drupal"
+  digitalocean = var.digitalocean
+  runtime      = var.runtime
 }
 
 output "instance" {

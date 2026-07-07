@@ -6,57 +6,10 @@ locals {
   cloud_provider = lower(trimspace(var.cloud_provider))
   template_name  = lower(trimspace(var.template))
 
-  app_templates = {
-    archivesspace = {
-      repo     = "https://github.com/libops/archivesspace.git"
-      branch   = "main"
-      plugin   = "archivesspace"
-      packages = ["sitectl", "sitectl-archivesspace"]
-    }
-    ojs = {
-      repo     = "https://github.com/libops/ojs.git"
-      branch   = "main"
-      plugin   = "ojs"
-      packages = ["sitectl", "sitectl-ojs"]
-    }
-    isle = {
-      repo     = "https://github.com/libops/isle"
-      branch   = "main"
-      plugin   = "isle"
-      packages = ["sitectl", "sitectl-drupal", "sitectl-isle"]
-    }
-    drupal = {
-      repo     = "https://github.com/libops/drupal.git"
-      branch   = "main"
-      plugin   = "drupal"
-      packages = ["sitectl", "sitectl-drupal"]
-    }
-    wp = {
-      repo     = "https://github.com/libops/wp.git"
-      branch   = "main"
-      plugin   = "wp"
-      packages = ["sitectl", "sitectl-wp"]
-    }
-    "omeka-s" = {
-      repo     = "https://github.com/libops/omeka-s.git"
-      branch   = "main"
-      plugin   = "omeka-s"
-      packages = ["sitectl", "sitectl-omeka-s"]
-    }
-    "omeka-classic" = {
-      repo     = "https://github.com/libops/omeka-classic.git"
-      branch   = "main"
-      plugin   = "omeka-classic"
-      packages = ["sitectl", "sitectl-omeka-classic"]
-    }
-  }
-  empty_template = {
-    repo     = ""
-    branch   = "main"
-    plugin   = "core"
-    packages = ["sitectl"]
-  }
-  template = local.template_name == "" ? local.empty_template : try(local.app_templates[local.template_name], local.empty_template)
+  app_registry   = jsondecode(file("${path.module}/templates/apps.json"))
+  app_templates  = local.app_registry.templates
+  empty_template = local.app_registry.default
+  template       = local.template_name == "" ? local.empty_template : try(local.app_templates[local.template_name], local.empty_template)
 
   input_compose = var.runtime.compose
   input_sitectl = var.runtime.sitectl

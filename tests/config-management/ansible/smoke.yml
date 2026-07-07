@@ -1,0 +1,47 @@
+- name: Smoke cloud-compose Ansible role
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: isle-prod
+    cloud_compose_template: isle
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_runtime:
+      compose:
+        project_dir: /opt/isle
+        ingress:
+          domain: isle.example.edu
+          acme_email: admin@example.edu
+      sitectl:
+        environment: production
+  roles:
+    - role: cloud_compose
+  post_tasks:
+    - name: Validate rendered compose project manifest JSON
+      ansible.builtin.command:
+        cmd: python3 -m json.tool /home/cloud-compose/compose-projects.json
+      changed_when: false
+
+    - name: Read rendered cloud-compose environment
+      ansible.builtin.slurp:
+        src: /home/cloud-compose/.env
+      register: cloud_compose_env_file
+
+    - name: Read rendered compose project manifest
+      ansible.builtin.slurp:
+        src: /home/cloud-compose/compose-projects.json
+      register: cloud_compose_manifest_file
+
+    - name: Assert rendered Ansible runtime contract
+      ansible.builtin.assert:
+        that:
+          - '"CLOUD_COMPOSE_PROVIDER=\"onprem\"" in (cloud_compose_env_file.content | b64decode)'
+          - '"DOCKER_COMPOSE_DIR=\"/opt/isle\"" in (cloud_compose_env_file.content | b64decode)'
+          - '"DOCKER_COMPOSE_REPO=\"https://github.com/libops/isle\"" in (cloud_compose_env_file.content | b64decode)'
+          - '"SITECTL_PLUGIN=\"isle\"" in (cloud_compose_env_file.content | b64decode)'
+          - '"sitectl-isle" in (cloud_compose_env_file.content | b64decode)'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].docker_compose_repo == "https://github.com/libops/isle"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].project_dir == "/opt/isle"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].ingress.domain == "isle.example.edu"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].sitectl_plugin == "isle"'

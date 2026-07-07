@@ -3,7 +3,7 @@ terraform {
 }
 
 module "apps" {
-  source = "../.."
+  source = "../../providers/gcp"
 
   name = var.name
   gcp = {
