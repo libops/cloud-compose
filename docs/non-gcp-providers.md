@@ -87,8 +87,9 @@ base:
 ```
 
 CI verifies the local adapters with `make config-management-smoke`. The cloud
-smoke path provisions a raw Linode VM, then deploys Drupal through Ansible or
-Salt without using the cloud-compose Terraform module:
+smoke path provisions a raw Linode VM without attached volumes, then deploys
+Drupal through Ansible or Salt into `/opt/drupal` without using the
+cloud-compose Terraform module:
 
 ```bash
 LINODE_TOKEN=... make config-management-cloud-smoke METHOD=ansible

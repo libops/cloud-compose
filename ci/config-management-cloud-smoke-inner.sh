@@ -8,6 +8,7 @@ set -euo pipefail
 : "${SMOKE_NAME:?}"
 : "${SMOKE_TEMPLATE:?}"
 : "${SMOKE_ENVIRONMENT:?}"
+: "${SMOKE_PROJECT_DIR:?}"
 : "${SMOKE_HEALTHCHECK_TIMEOUT:?}"
 : "${SMOKE_HEALTHCHECK_INTERVAL:?}"
 
@@ -64,6 +65,7 @@ all:
           cloud_compose_runtime:
             compose:
               ingress_port: 80
+              project_dir: ${SMOKE_PROJECT_DIR}
             sitectl:
               environment: ${SMOKE_ENVIRONMENT}
               healthcheck_timeout: ${SMOKE_HEALTHCHECK_TIMEOUT}
@@ -85,7 +87,7 @@ deploy_salt() {
       "rm -rf /srv/cloud-compose && mkdir -p /srv/cloud-compose && tar -xzf - -C /srv/cloud-compose"
 
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
+    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -133,6 +135,7 @@ cloud_compose:
   runtime:
     compose:
       ingress_port: 80
+      project_dir: ${SMOKE_PROJECT_DIR}
     sitectl:
       environment: ${SMOKE_ENVIRONMENT}
       healthcheck_timeout: ${SMOKE_HEALTHCHECK_TIMEOUT}
@@ -155,7 +158,7 @@ REMOTE
 
 verify_remote() {
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
+    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
 set -euo pipefail
 
 test -x /home/cloud-compose/init
@@ -172,6 +175,7 @@ from pathlib import Path
 
 name = os.environ["SMOKE_NAME"]
 template = os.environ["SMOKE_TEMPLATE"]
+project_dir = os.environ["SMOKE_PROJECT_DIR"]
 env = {}
 for line in Path("/home/cloud-compose/.env").read_text().splitlines():
     if not line.strip():
@@ -186,11 +190,14 @@ assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
 assert env["CLOUD_COMPOSE_APPS"] == name
 assert env["CLOUD_COMPOSE_PRIMARY_APP"] == name
 assert env["SITECTL_PLUGIN"] == template
+assert env["DOCKER_COMPOSE_DIR"] == project_dir
 assert f"sitectl-{template}" in env["SITECTL_PACKAGES"].split()
 assert project["docker_compose_repo"] == f"https://github.com/libops/{template}.git"
+assert project["project_dir"] == project_dir
 assert project["sitectl_plugin"] == template
 PY
 
+test -d "$SMOKE_PROJECT_DIR/.git"
 systemctl is-active --quiet cloud-compose
 runuser -u cloud-compose -- env HOME=/home/cloud-compose bash -lc \
   "source /home/cloud-compose/profile.sh && sitectl healthcheck --context \"${SMOKE_NAME}\" --persist --timeout \"${SMOKE_HEALTHCHECK_TIMEOUT}\" --interval \"${SMOKE_HEALTHCHECK_INTERVAL}\" --format table"

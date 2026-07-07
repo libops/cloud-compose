@@ -7,6 +7,7 @@ cloud_compose:
   template: drupal
   runtime:
     compose:
+      project_dir: /opt/drupal
       ingress:
         domain: drupal.example.edu
         acme_email: admin@example.edu

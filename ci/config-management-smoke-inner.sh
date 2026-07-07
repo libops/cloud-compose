@@ -46,12 +46,15 @@ projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_tex
 project = projects["isle-prod"]
 
 assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
+assert env["DOCKER_COMPOSE_DIR"] == "/opt/isle"
 assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
 assert project["docker_compose_repo"] == "https://github.com/libops/isle"
+assert project["project_dir"] == "/opt/isle"
 assert project["ingress"]["domain"] == "isle.example.edu"
 assert project["sitectl_plugin"] == "isle"
+assert Path("/opt/isle").is_dir()
 
 for path in [
     "/home/cloud-compose/init",
@@ -64,7 +67,7 @@ for path in [
     assert os.access(path, os.X_OK), path
 PY
 
-rm -rf /home/cloud-compose /mnt/disks
+rm -rf /home/cloud-compose /mnt/disks /opt/isle /opt/wp /opt/drupal
 
 mkdir -p /tmp/salt/etc /tmp/salt/cache /tmp/salt/pki
 write_salt_config() {
@@ -87,9 +90,9 @@ MINION
 }
 
 run_salt_case() {
-  local minion_id="$1" expected_name="$2" expected_repo="$3" expected_plugin="$4" expected_package="$5" expected_domain="$6"
+  local minion_id="$1" expected_name="$2" expected_repo="$3" expected_plugin="$4" expected_package="$5" expected_domain="$6" expected_project_dir="$7"
 
-  rm -rf /home/cloud-compose /mnt/disks
+  rm -rf /home/cloud-compose /mnt/disks /opt/isle /opt/wp /opt/drupal
   write_salt_config "$minion_id"
 
   salt-call \
@@ -105,13 +108,13 @@ run_salt_case() {
     state.apply cloud-compose
 
   python -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
-  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" <<'PY'
+  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" "$expected_project_dir" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
-expected_name, expected_repo, expected_plugin, expected_package, expected_domain = sys.argv[1:]
+expected_name, expected_repo, expected_plugin, expected_package, expected_domain, expected_project_dir = sys.argv[1:]
 
 env = {}
 for line in Path("/home/cloud-compose/.env").read_text().splitlines():
@@ -126,12 +129,15 @@ project = projects[expected_name]
 assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
 assert env["CLOUD_COMPOSE_APPS"] == expected_name
 assert env["CLOUD_COMPOSE_PRIMARY_APP"] == expected_name
+assert env["DOCKER_COMPOSE_DIR"] == expected_project_dir
 assert env["DOCKER_COMPOSE_REPO"] == expected_repo
 assert env["SITECTL_PLUGIN"] == expected_plugin
 assert expected_package in env["SITECTL_PACKAGES"].split()
 assert project["docker_compose_repo"] == expected_repo
+assert project["project_dir"] == expected_project_dir
 assert project["sitectl_plugin"] == expected_plugin
 assert project["ingress"]["domain"] == expected_domain
+assert Path(expected_project_dir).is_dir()
 
 for path in [
     "/home/cloud-compose/init",
@@ -151,7 +157,8 @@ run_salt_case \
   https://github.com/libops/wp.git \
   wp \
   sitectl-wp \
-  wp.example.edu
+  wp.example.edu \
+  /opt/wp
 
 run_salt_case \
   drupal-prod \
@@ -159,4 +166,5 @@ run_salt_case \
   https://github.com/libops/drupal.git \
   drupal \
   sitectl-drupal \
-  drupal.example.edu
+  drupal.example.edu \
+  /opt/drupal

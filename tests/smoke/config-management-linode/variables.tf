@@ -59,18 +59,6 @@ variable "smoke_run_id" {
   description = "Optional GitHub Actions run id used to tag and name disposable smoke-test resources."
 }
 
-variable "data_volume_size_gb" {
-  type        = number
-  default     = 10
-  description = "Disposable smoke-test data volume size."
-}
-
-variable "docker_volumes_volume_size_gb" {
-  type        = number
-  default     = 30
-  description = "Disposable smoke-test Docker volumes volume size."
-}
-
 variable "healthcheck_timeout" {
   type        = string
   default     = "20m"

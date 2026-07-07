@@ -7,6 +7,7 @@ cloud_compose:
   template: wp
   runtime:
     compose:
+      project_dir: /opt/wp
       ingress:
         domain: wp.example.edu
         acme_email: admin@example.edu

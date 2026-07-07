@@ -26,17 +26,10 @@ locals {
   run_tag      = local.smoke_run_id != "" ? "gha-run-${local.smoke_run_id}" : ""
   name         = substr(join("-", compact(["cc-cm-ln", local.method, "dr", local.smoke_run_id, random_id.suffix.hex])), 0, 46)
 
-  data_volume_label           = substr("${local.name}-data", 0, 32)
-  docker_volumes_volume_label = substr("${local.name}-dock", 0, 32)
-  firewall_label              = substr("${local.name}-fw", 0, 32)
-  target_tag                  = "config-management-${local.method}-${local.template}"
-  tags                        = distinct(concat(var.tags, ["cloud-compose-smoke", "config-management-smoke", local.target_tag], local.run_tag != "" ? [local.run_tag] : []))
-
-  cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
-    DATA_DEVICE     = "/dev/disk/by-id/scsi-0Linode_Volume_${local.data_volume_label}"
-    VOLUMES_DEVICE  = "/dev/disk/by-id/scsi-0Linode_Volume_${local.docker_volumes_volume_label}"
-    SSH_PUBLIC_KEYS = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
-  })
+  firewall_label = substr("${local.name}-fw", 0, 32)
+  project_dir    = "/opt/${local.template}"
+  target_tag     = "config-management-${local.method}-${local.template}"
+  tags           = distinct(concat(var.tags, ["cloud-compose-smoke", "config-management-smoke", local.target_tag], local.run_tag != "" ? [local.run_tag] : []))
 }
 
 resource "linode_instance" "host" {
@@ -49,26 +42,6 @@ resource "linode_instance" "host" {
   backups_enabled  = false
   watchdog_enabled = true
   tags             = local.tags
-
-  metadata {
-    user_data = base64gzip(local.cloud_init)
-  }
-}
-
-resource "linode_volume" "data" {
-  label     = local.data_volume_label
-  region    = var.linode_region
-  size      = var.data_volume_size_gb
-  linode_id = linode_instance.host.id
-  tags      = local.tags
-}
-
-resource "linode_volume" "docker_volumes" {
-  label     = local.docker_volumes_volume_label
-  region    = var.linode_region
-  size      = var.docker_volumes_volume_size_gb
-  linode_id = linode_instance.host.id
-  tags      = local.tags
 }
 
 resource "linode_firewall" "host" {
@@ -120,7 +93,7 @@ output "smoke" {
     context_name         = "${local.method}-${local.template}"
     plugin               = local.template
     environment          = "smoke"
-    project_dir          = "/mnt/disks/data/libops/${local.template}.git/main"
+    project_dir          = local.project_dir
     compose_project_name = "libops-${local.template}-main"
     healthcheck_timeout  = var.healthcheck_timeout
     healthcheck_interval = var.healthcheck_interval

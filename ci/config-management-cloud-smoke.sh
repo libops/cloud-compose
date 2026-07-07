@@ -223,8 +223,11 @@ wait_for_cloud_init() {
 
   echo "Waiting for raw host cloud-init on ${host}"
   while (( SECONDS < deadline )); do
-    status_output="$(ssh_cmd "$home_dir" "$key_path" "$host" "cloud-init status --long 2>&1" 2>&1 || true)"
+    status_output="$(ssh_cmd "$home_dir" "$key_path" "$host" "if command -v cloud-init >/dev/null 2>&1; then cloud-init status --long 2>&1; else echo 'cloud-init not installed'; fi" 2>&1 || true)"
     printf '%s\n' "$status_output"
+    if grep -q '^cloud-init not installed' <<<"$status_output"; then
+      return 0
+    fi
     if grep -q '^status: done' <<<"$status_output"; then
       return 0
     fi
@@ -272,13 +275,14 @@ target_var_args() {
 
 deploy_config_management() {
   local target="$1" key_path="$2" output_json="$3"
-  local method host name template environment timeout interval image key_b64
+  local method host name template environment project_dir timeout interval image key_b64
 
   method="$(jq -r '.method' "$output_json")"
   host="$(jq -r '.host' "$output_json")"
   name="$(jq -r '.cloud_compose_name' "$output_json")"
   template="$(jq -r '.app' "$output_json")"
   environment="$(jq -r '.environment' "$output_json")"
+  project_dir="$(jq -r '.project_dir' "$output_json")"
   timeout="$(jq -r '.healthcheck_timeout' "$output_json")"
   interval="$(jq -r '.healthcheck_interval' "$output_json")"
   image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-python:3.11-slim}"
@@ -298,6 +302,7 @@ deploy_config_management() {
       --env "SMOKE_NAME=${name}" \
       --env "SMOKE_TEMPLATE=${template}" \
       --env "SMOKE_ENVIRONMENT=${environment}" \
+      --env "SMOKE_PROJECT_DIR=${project_dir}" \
       --env "SMOKE_HEALTHCHECK_TIMEOUT=${timeout}" \
       --env "SMOKE_HEALTHCHECK_INTERVAL=${interval}" \
       --tmpfs /run \

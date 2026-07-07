@@ -238,6 +238,19 @@ cloud-compose-data-dirs:
     - require:
       - user: cloud-compose-user
 
+cloud-compose-project-dirs:
+  file.directory:
+    - names:
+{% for project in compose_projects.values() %}
+      - {{ project.get('project_dir') | json }}
+{% endfor %}
+    - user: {{ user | json }}
+    - group: {{ group | json }}
+    - mode: '0775'
+    - makedirs: True
+    - require:
+      - user: cloud-compose-user
+
 cloud-compose-rootfs:
   file.recurse:
     - name: /
@@ -337,4 +350,5 @@ cloud-compose-bootstrap:
       - file: cloud-compose-env
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
+      - file: cloud-compose-project-dirs
 {% endif %}

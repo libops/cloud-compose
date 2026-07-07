@@ -221,6 +221,15 @@
     - "{{ cloud_compose_volumes_dir }}"
     - "{{ cloud_compose_data_dir }}/libops"
 
+- name: Ensure cloud-compose project directories exist
+  ansible.builtin.file:
+    path: "{{ item.project_dir }}"
+    state: directory
+    owner: "{{ cloud_compose_user }}"
+    group: "{{ cloud_compose_group }}"
+    mode: "0775"
+  loop: "{{ _cc_compose_projects.values() | list }}"
+
 - name: Install cloud-compose rootfs
   ansible.builtin.copy:
     src: "{{ cloud_compose_rootfs_source }}/"
