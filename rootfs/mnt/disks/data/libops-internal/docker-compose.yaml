@@ -41,6 +41,7 @@ services:
       - /dev/disk/:/dev/disk:ro
   cap:
     image: ghcr.io/libops/cap:main
+    command: ["/app/binary"]
     networks:
       - internal
     restart: unless-stopped
