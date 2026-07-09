@@ -615,27 +615,23 @@ configure_sitectl_context() {
 
 run_healthcheck() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local provider context timeout interval
+  local provider context
 
   provider="$(jq -r '.provider' "$output_json")"
   context="$(jq -r '.context_name' "$output_json")"
-  timeout="$(jq -r '.healthcheck_timeout' "$output_json")"
-  interval="$(jq -r '.healthcheck_interval' "$output_json")"
 
   if [[ "$provider" == "gcp" ]]; then
-    local host port user quoted_context quoted_timeout quoted_interval
+    local host port user quoted_context
 
     host="$(jq -r '.host' "$output_json")"
     port="$(jq -r '.ssh_port' "$output_json")"
     user="$(jq -r '.ssh_user' "$output_json")"
     quoted_context="$(shell_quote "$context")"
-    quoted_timeout="$(shell_quote "$timeout")"
-    quoted_interval="$(shell_quote "$interval")"
 
     ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set -euo pipefail
 export HOME=/home/cloud-compose
 source /home/cloud-compose/profile.sh
-exec sitectl healthcheck --context ${quoted_context} --persist --timeout ${quoted_timeout} --interval ${quoted_interval} --format table
+exec sitectl healthcheck --context ${quoted_context} --persist --format table
 '"
     return
   fi
@@ -643,8 +639,6 @@ exec sitectl healthcheck --context ${quoted_context} --persist --timeout ${quote
   HOME="$home_dir" sitectl healthcheck \
     --context "$context" \
     --persist \
-    --timeout "$timeout" \
-    --interval "$interval" \
     --format table
 }
 

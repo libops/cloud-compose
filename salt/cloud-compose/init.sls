@@ -35,7 +35,7 @@
 ] %}
 {% set default_up = [
   'sitectl compose --context "${SITECTL_CONTEXT_NAME}" up -d --remove-orphans',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist --timeout "${SITECTL_HEALTHCHECK_TIMEOUT}" --interval "${SITECTL_HEALTHCHECK_INTERVAL}"',
+  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
   'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
 ] %}
 {% set default_down = [
@@ -44,7 +44,7 @@
 {% set default_rollout = [
   'TARGET_REF="${GIT_REF:-${GIT_BRANCH:-${DOCKER_COMPOSE_BRANCH:-main}}}"',
   'if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --branch "$TARGET_REF"; fi',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist --timeout "${SITECTL_HEALTHCHECK_TIMEOUT}" --interval "${SITECTL_HEALTHCHECK_INTERVAL}"',
+  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
   'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
 ] %}
 {% set repo = compose.get('repo') or template.repo %}
@@ -144,7 +144,7 @@
   'DOCKER_COMPOSE_DIR': primary_project.get('project_dir', project_dir),
   'DOCKER_COMPOSE_REPO': primary_project.get('docker_compose_repo', repo),
   'DOCKER_COMPOSE_BRANCH': primary_project.get('docker_compose_branch', branch),
-  'DOCKER_COMPOSE_VERSION': docker.get('compose_version', cc.get('docker_compose_version', 'v5.2.0')),
+  'DOCKER_COMPOSE_VERSION': docker.get('compose_version', cc.get('docker_compose_version', 'v5.3.0')),
   'DOCKER_BUILDX_VERSION': docker.get('buildx_version', cc.get('docker_buildx_version', 'v0.35.0')),
   'GCP_PROJECT': '',
   'GCP_PROJECT_NUMBER': '',
@@ -157,8 +157,6 @@
   'SITECTL_CONTEXT_NAME': primary_project.get('sitectl_context_name', name),
   'SITECTL_PLUGIN': primary_project.get('sitectl_plugin', sitectl.get('plugin', template.plugin)),
   'SITECTL_ENVIRONMENT': primary_project.get('sitectl_environment', sitectl.get('environment', 'production')),
-  'SITECTL_HEALTHCHECK_TIMEOUT': sitectl.get('healthcheck_timeout', '20m'),
-  'SITECTL_HEALTHCHECK_INTERVAL': sitectl.get('healthcheck_interval', '15s'),
   'SITECTL_VERIFY_ARGS': primary_project.get('sitectl_verify_args', []) | join(' '),
   'POWER_MANAGEMENT_ENABLED': 'false',
   'COMPOSE_PROFILES': '',

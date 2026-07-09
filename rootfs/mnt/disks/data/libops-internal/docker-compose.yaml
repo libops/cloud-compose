@@ -4,7 +4,7 @@ services:
   lightsout:
     profiles:
       - lightsout
-    image: ${LIBOPS_LIGHTSOUT_IMAGE:-ghcr.io/libops/lightsout:main}
+    image: ghcr.io/libops/lightsout:main
     ports:
       - "8808:8808"
     networks:
@@ -21,7 +21,7 @@ services:
       - /mnt/disks/data:/mnt/disks/data
       - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
   cadvisor:
-    image: ${LIBOPS_CADVISOR_IMAGE:-ghcr.io/google/cadvisor:v0.60.3@sha256:c4c44a8d178a1f3985d4aec9f0876a313cc7833ee07fe1d0d8ec63707ef7d69f}
+    image: ghcr.io/google/cadvisor:v0.60.3@sha256:c4c44a8d178a1f3985d4aec9f0876a313cc7833ee07fe1d0d8ec63707ef7d69f
     command:
       - -disable_metrics
       - cpu_topology,referenced_memory,disk,memory_numa,perf_event,sched,tcp,udp
@@ -40,7 +40,7 @@ services:
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
   cap:
-    image: ${LIBOPS_CAP_IMAGE:-ghcr.io/libops/cap:main}
+    image: ghcr.io/libops/cap:main
     networks:
       - internal
     restart: unless-stopped

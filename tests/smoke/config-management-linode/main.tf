@@ -95,8 +95,6 @@ output "smoke" {
     environment          = "smoke"
     project_dir          = local.project_dir
     compose_project_name = "libops-${local.template}-main"
-    healthcheck_timeout  = var.healthcheck_timeout
-    healthcheck_interval = var.healthcheck_interval
     target_tag           = local.target_tag
   }
   description = "Raw Linode host and app details for config-management smoke tests."

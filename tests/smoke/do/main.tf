@@ -21,8 +21,6 @@ module "context" {
   smoke_run_id             = var.smoke_run_id
   docker_compose_branch    = var.docker_compose_branch
   ingress_port             = var.ingress_port
-  healthcheck_timeout      = var.healthcheck_timeout
-  healthcheck_interval     = var.healthcheck_interval
   tags                     = var.tags
 }
 
@@ -60,8 +58,6 @@ module "smoke" {
   name                    = module.context.name
   host                    = module.app.external_ip
   primary_compose_project = module.app.primary_compose_project
-  healthcheck_timeout     = module.context.healthcheck_timeout
-  healthcheck_interval    = var.healthcheck_interval
 }
 
 output "smoke" {

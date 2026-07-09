@@ -75,18 +75,6 @@ variable "docker_volumes_volume_size_gb" {
   description = "Disposable smoke-test Docker volumes volume size."
 }
 
-variable "healthcheck_timeout" {
-  type        = string
-  default     = ""
-  description = "Timeout passed to sitectl healthcheck. Empty chooses a template-specific default."
-}
-
-variable "healthcheck_interval" {
-  type        = string
-  default     = "20s"
-  description = "Interval passed to sitectl healthcheck on the VM and from the runner."
-}
-
 variable "tags" {
   type        = list(string)
   default     = ["cloud-compose"]

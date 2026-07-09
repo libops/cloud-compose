@@ -256,8 +256,6 @@ env_file_plain   = <<-EOT
     SITECTL_PLUGIN="${local.primary_compose_project.sitectl_plugin}"
     SITECTL_ENVIRONMENT="${local.primary_compose_project.sitectl_environment}"
     PRODUCTION="${var.production}"
-    SITECTL_HEALTHCHECK_TIMEOUT="${var.sitectl_healthcheck_timeout}"
-    SITECTL_HEALTHCHECK_INTERVAL="${var.sitectl_healthcheck_interval}"
     SITECTL_VERIFY_ARGS="${join(" ", local.primary_compose_project.sitectl_verify_args)}"
     GCP_APP_SERVICE_ACCOUNT_EMAIL="${local.app_service_account_email}"
     POWER_MANAGEMENT_ENABLED="${var.power_management_enabled}"
@@ -271,9 +269,6 @@ env_file_plain   = <<-EOT
     LIBOPS_MANAGED_RUNTIME_ENABLED="${var.libops_managed_runtime_enabled}"
     LIBOPS_INTERNAL_SERVICES_ENABLED="${var.libops_internal_services_enabled}"
     LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE="${var.libops_internal_services_auto_update}"
-    LIBOPS_LIGHTSOUT_IMAGE="${var.libops_lightsout_image}"
-    LIBOPS_CAP_IMAGE="${var.libops_cap_image}"
-    LIBOPS_CADVISOR_IMAGE="${var.libops_cadvisor_image}"
     ${local.rollout_env}
   EOT
 env_file_content = <<-EOT

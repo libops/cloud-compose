@@ -34,16 +34,14 @@ module "runtime" {
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
 
-  sitectl_packages             = local.sitectl.packages
-  sitectl_version              = local.sitectl.version
-  sitectl_context_name         = local.sitectl.context_name
-  sitectl_plugin               = local.sitectl.plugin
-  sitectl_environment          = local.sitectl.environment
-  sitectl_healthcheck_timeout  = local.sitectl.healthcheck_timeout
-  sitectl_healthcheck_interval = local.sitectl.healthcheck_interval
-  sitectl_verify_args          = local.sitectl.verify_args
-  docker_compose_version       = local.docker.compose_version
-  docker_buildx_version        = local.docker.buildx_version
+  sitectl_packages       = local.sitectl.packages
+  sitectl_version        = local.sitectl.version
+  sitectl_context_name   = local.sitectl.context_name
+  sitectl_plugin         = local.sitectl.plugin
+  sitectl_environment    = local.sitectl.environment
+  sitectl_verify_args    = local.sitectl.verify_args
+  docker_compose_version = local.docker.compose_version
+  docker_buildx_version  = local.docker.buildx_version
 
   libops_managed_runtime_enabled       = local.managed.enabled
   libops_internal_services_enabled     = local.managed.internal_services_enabled

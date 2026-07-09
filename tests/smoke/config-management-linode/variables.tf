@@ -59,18 +59,6 @@ variable "smoke_run_id" {
   description = "Optional GitHub Actions run id used to tag and name disposable smoke-test resources."
 }
 
-variable "healthcheck_timeout" {
-  type        = string
-  default     = "20m"
-  description = "Timeout passed to sitectl healthcheck on the VM."
-}
-
-variable "healthcheck_interval" {
-  type        = string
-  default     = "20s"
-  description = "Interval passed to sitectl healthcheck on the VM."
-}
-
 variable "tags" {
   type        = list(string)
   default     = ["cloud-compose"]

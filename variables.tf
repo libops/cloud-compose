@@ -262,34 +262,19 @@ variable "runtime" {
         docker_compose_down    = optional(list(string))
         docker_compose_rollout = optional(list(string))
       })), {})
-      init = optional(list(string), [
-        "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
-      ])
-      up = optional(list(string), [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
-        "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
-      ])
-      down = optional(list(string), [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
-      ])
-      rollout = optional(list(string), [
-        "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
-        "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
-        "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
-      ])
+      init    = optional(list(string))
+      up      = optional(list(string))
+      down    = optional(list(string))
+      rollout = optional(list(string))
     }), {})
 
     sitectl = optional(object({
-      packages             = optional(list(string), ["sitectl"])
-      version              = optional(string, "latest")
-      context_name         = optional(string, "")
-      plugin               = optional(string, "core")
-      environment          = optional(string, "production")
-      healthcheck_timeout  = optional(string, "20m")
-      healthcheck_interval = optional(string, "15s")
-      verify_args          = optional(list(string), [])
+      packages     = optional(list(string), ["sitectl"])
+      version      = optional(string, "latest")
+      context_name = optional(string, "")
+      plugin       = optional(string, "core")
+      environment  = optional(string, "production")
+      verify_args  = optional(list(string), [])
     }), {})
 
     docker = optional(object({
@@ -303,9 +288,6 @@ variable "runtime" {
       enabled                       = optional(bool, true)
       internal_services_enabled     = optional(bool, true)
       internal_services_auto_update = optional(bool, true)
-      lightsout_image               = optional(string, "ghcr.io/libops/lightsout:main")
-      cap_image                     = optional(string, "ghcr.io/libops/cap:main")
-      cadvisor_image                = optional(string, "ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d")
       artifacts = optional(list(object({
         name    = string
         url     = string

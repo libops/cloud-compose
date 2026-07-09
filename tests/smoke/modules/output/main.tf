@@ -14,7 +14,5 @@ locals {
     project_name         = var.name
     project_dir          = local.primary.project_dir
     compose_project_name = local.primary.compose_project_name
-    healthcheck_timeout  = var.healthcheck_timeout
-    healthcheck_interval = var.healthcheck_interval
   }
 }

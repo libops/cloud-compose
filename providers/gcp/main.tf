@@ -88,14 +88,12 @@ module "gcp" {
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
 
-  sitectl_packages             = local.sitectl.packages
-  sitectl_version              = local.sitectl.version
-  sitectl_context_name         = local.sitectl.context_name
-  sitectl_plugin               = local.sitectl.plugin
-  sitectl_environment          = local.sitectl.environment
-  sitectl_healthcheck_timeout  = local.sitectl.healthcheck_timeout
-  sitectl_healthcheck_interval = local.sitectl.healthcheck_interval
-  sitectl_verify_args          = local.sitectl.verify_args
+  sitectl_packages     = local.sitectl.packages
+  sitectl_version      = local.sitectl.version
+  sitectl_context_name = local.sitectl.context_name
+  sitectl_plugin       = local.sitectl.plugin
+  sitectl_environment  = local.sitectl.environment
+  sitectl_verify_args  = local.sitectl.verify_args
 
   docker_compose_version = local.docker.compose_version
   docker_buildx_version  = local.docker.buildx_version
@@ -103,9 +101,6 @@ module "gcp" {
   libops_managed_runtime_enabled       = local.managed.enabled
   libops_internal_services_enabled     = local.managed.internal_services_enabled
   libops_internal_services_auto_update = local.managed.internal_services_auto_update
-  libops_lightsout_image               = local.managed.lightsout_image
-  libops_cap_image                     = local.managed.cap_image
-  libops_cadvisor_image                = local.managed.cadvisor_image
   libops_managed_artifacts             = local.managed.artifacts
 
   allowed_ips      = local.gcp_network.power_button_allowed_ips

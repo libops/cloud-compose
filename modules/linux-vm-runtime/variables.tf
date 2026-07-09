@@ -145,6 +145,7 @@ variable "docker_compose_init" {
   default = [
     "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
   ]
+  nullable    = false
   description = "Commands run after a compose repository is cloned."
 }
 
@@ -152,9 +153,10 @@ variable "docker_compose_up" {
   type = list(string)
   default = [
     "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
     "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
+  nullable    = false
   description = "Commands used to bring a compose project up."
 }
 
@@ -163,6 +165,7 @@ variable "docker_compose_down" {
   default = [
     "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
   ]
+  nullable    = false
   description = "Commands used to stop a compose project."
 }
 
@@ -170,8 +173,9 @@ variable "docker_compose_rollout" {
   type = list(string)
   default = [
     "sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\""
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist"
   ]
+  nullable    = false
   description = "Commands used by rollout triggers."
 }
 
@@ -203,18 +207,6 @@ variable "sitectl_environment" {
   type        = string
   default     = "production"
   description = "Default sitectl environment label."
-}
-
-variable "sitectl_healthcheck_timeout" {
-  type        = string
-  default     = "10m"
-  description = "Timeout passed to sitectl healthcheck."
-}
-
-variable "sitectl_healthcheck_interval" {
-  type        = string
-  default     = "15s"
-  description = "Interval passed to sitectl healthcheck."
 }
 
 variable "sitectl_verify_args" {
