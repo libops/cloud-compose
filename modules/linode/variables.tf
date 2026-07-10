@@ -94,32 +94,19 @@ variable "runtime" {
         docker_compose_down    = optional(list(string))
         docker_compose_rollout = optional(list(string))
       })), {})
-      init = optional(list(string), [
-        "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
-      ])
-      up = optional(list(string), [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
-        "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
-      ])
-      down = optional(list(string), [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
-      ])
-      rollout = optional(list(string), [
-        "sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\""
-      ])
+      init    = optional(list(string))
+      up      = optional(list(string))
+      down    = optional(list(string))
+      rollout = optional(list(string))
     }), {})
 
     sitectl = optional(object({
-      packages             = optional(list(string), ["sitectl"])
-      version              = optional(string, "latest")
-      context_name         = optional(string, "")
-      plugin               = optional(string, "core")
-      environment          = optional(string, "production")
-      healthcheck_timeout  = optional(string, "20m")
-      healthcheck_interval = optional(string, "15s")
-      verify_args          = optional(list(string), [])
+      packages     = optional(list(string), ["sitectl"])
+      version      = optional(string, "latest")
+      context_name = optional(string, "")
+      plugin       = optional(string, "core")
+      environment  = optional(string, "production")
+      verify_args  = optional(list(string), [])
     }), {})
 
     docker = optional(object({

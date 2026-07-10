@@ -148,34 +148,59 @@ smoke_run_id() {
   printf '%s\n' "${CLOUD_COMPOSE_SMOKE_RUN_ID:-${GITHUB_RUN_ID:-}}"
 }
 
-api_delete() {
-  local provider="$1" path="$2" token
+api_request() {
+  local provider="$1" method="$2" path="$3"
+  local base_url body http_code response token token_name
 
   case "$provider" in
     digitalocean)
       token="${DIGITALOCEAN_TOKEN:-}"
-      curl -fsS -X DELETE -H "Authorization: Bearer ${token}" "https://api.digitalocean.com/v2${path}" >/dev/null
+      token_name="DIGITALOCEAN_TOKEN"
+      base_url="https://api.digitalocean.com/v2"
       ;;
     linode)
       token="${LINODE_TOKEN:-}"
-      curl -fsS -X DELETE -H "Authorization: Bearer ${token}" "https://api.linode.com/v4${path}" >/dev/null
+      token_name="LINODE_TOKEN"
+      base_url="https://api.linode.com/v4"
+      ;;
+  esac
+
+  if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${token}" -w $'\n%{http_code}' "${base_url}${path}")"; then
+    http_code="${response##*$'\n'}"
+    body="${response%$'\n'$http_code}"
+  else
+    echo "${provider} API request failed for ${method} ${path}; check ${token_name} and network access." >&2
+    return 1
+  fi
+
+  case "$http_code" in
+    2??)
+      printf '%s' "$body"
+      ;;
+    401)
+      echo "${provider} API rejected ${token_name} with HTTP 401 for ${method} ${path}; verify the GitHub secret is current and valid for this provider." >&2
+      return 22
+      ;;
+    403)
+      echo "${provider} API rejected ${token_name} with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
+      return 22
+      ;;
+    *)
+      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
       ;;
   esac
 }
 
-api_get() {
-  local provider="$1" path="$2" token
+api_delete() {
+  api_request "$1" DELETE "$2" >/dev/null
+}
 
-  case "$provider" in
-    digitalocean)
-      token="${DIGITALOCEAN_TOKEN:-}"
-      curl -fsS -H "Authorization: Bearer ${token}" "https://api.digitalocean.com/v2${path}"
-      ;;
-    linode)
-      token="${LINODE_TOKEN:-}"
-      curl -fsS -H "Authorization: Bearer ${token}" "https://api.linode.com/v4${path}"
-      ;;
-  esac
+api_get() {
+  api_request "$1" GET "$2"
 }
 
 gcp_region() {
@@ -615,27 +640,23 @@ configure_sitectl_context() {
 
 run_healthcheck() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local provider context timeout interval
+  local provider context
 
   provider="$(jq -r '.provider' "$output_json")"
   context="$(jq -r '.context_name' "$output_json")"
-  timeout="$(jq -r '.healthcheck_timeout' "$output_json")"
-  interval="$(jq -r '.healthcheck_interval' "$output_json")"
 
   if [[ "$provider" == "gcp" ]]; then
-    local host port user quoted_context quoted_timeout quoted_interval
+    local host port user quoted_context
 
     host="$(jq -r '.host' "$output_json")"
     port="$(jq -r '.ssh_port' "$output_json")"
     user="$(jq -r '.ssh_user' "$output_json")"
     quoted_context="$(shell_quote "$context")"
-    quoted_timeout="$(shell_quote "$timeout")"
-    quoted_interval="$(shell_quote "$interval")"
 
     ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set -euo pipefail
 export HOME=/home/cloud-compose
 source /home/cloud-compose/profile.sh
-exec sitectl healthcheck --context ${quoted_context} --persist --timeout ${quoted_timeout} --interval ${quoted_interval} --format table
+exec sitectl healthcheck --context ${quoted_context} --persist --format table
 '"
     return
   fi
@@ -643,8 +664,6 @@ exec sitectl healthcheck --context ${quoted_context} --persist --timeout ${quote
   HOME="$home_dir" sitectl healthcheck \
     --context "$context" \
     --persist \
-    --timeout "$timeout" \
-    --interval "$interval" \
     --format table
 }
 

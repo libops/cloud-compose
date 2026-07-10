@@ -1,8 +1,3 @@
-output "healthcheck_timeout" {
-  value       = local.healthcheck_timeout
-  description = "Normalized smoke healthcheck timeout."
-}
-
 output "name" {
   value       = local.name
   description = "Generated smoke target name."

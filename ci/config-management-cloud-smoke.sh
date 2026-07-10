@@ -126,14 +126,46 @@ ensure_key() {
   chmod 0600 "$key_path"
 }
 
+api_request() {
+  local method="$1" path="$2"
+  local body http_code response
+
+  if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${LINODE_TOKEN}" -w $'\n%{http_code}' "https://api.linode.com/v4${path}")"; then
+    http_code="${response##*$'\n'}"
+    body="${response%$'\n'$http_code}"
+  else
+    echo "linode API request failed for ${method} ${path}; check LINODE_TOKEN and network access." >&2
+    return 1
+  fi
+
+  case "$http_code" in
+    2??)
+      printf '%s' "$body"
+      ;;
+    401)
+      echo "linode API rejected LINODE_TOKEN with HTTP 401 for ${method} ${path}; verify the GitHub secret is current and valid for Linode." >&2
+      return 22
+      ;;
+    403)
+      echo "linode API rejected LINODE_TOKEN with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
+      return 22
+      ;;
+    *)
+      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
+      ;;
+  esac
+}
+
 api_get() {
-  local path="$1"
-  curl -fsS -H "Authorization: Bearer ${LINODE_TOKEN}" "https://api.linode.com/v4${path}"
+  api_request GET "$1"
 }
 
 api_delete() {
-  local path="$1"
-  curl -fsS -X DELETE -H "Authorization: Bearer ${LINODE_TOKEN}" "https://api.linode.com/v4${path}" >/dev/null
+  api_request DELETE "$1" >/dev/null
 }
 
 delete_ids() {
@@ -275,7 +307,7 @@ target_var_args() {
 
 deploy_config_management() {
   local target="$1" key_path="$2" output_json="$3"
-  local method host name template environment project_dir timeout interval image key_b64
+  local method host name template environment project_dir image key_b64
 
   method="$(jq -r '.method' "$output_json")"
   host="$(jq -r '.host' "$output_json")"
@@ -283,8 +315,6 @@ deploy_config_management() {
   template="$(jq -r '.app' "$output_json")"
   environment="$(jq -r '.environment' "$output_json")"
   project_dir="$(jq -r '.project_dir' "$output_json")"
-  timeout="$(jq -r '.healthcheck_timeout' "$output_json")"
-  interval="$(jq -r '.healthcheck_interval' "$output_json")"
   image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-python:3.11-slim}"
   key_b64="$(base64 <"$key_path" | tr -d '\n')"
 
@@ -303,8 +333,6 @@ deploy_config_management() {
       --env "SMOKE_TEMPLATE=${template}" \
       --env "SMOKE_ENVIRONMENT=${environment}" \
       --env "SMOKE_PROJECT_DIR=${project_dir}" \
-      --env "SMOKE_HEALTHCHECK_TIMEOUT=${timeout}" \
-      --env "SMOKE_HEALTHCHECK_INTERVAL=${interval}" \
       --tmpfs /run \
       --tmpfs /tmp \
       "$image" \

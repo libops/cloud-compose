@@ -184,6 +184,7 @@ variable "docker_compose_init" {
   default = [
     "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
   ]
+  nullable    = false
   description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value"
 }
 
@@ -191,9 +192,10 @@ variable "docker_compose_up" {
   type = list(string)
   default = [
     "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
     "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
+  nullable    = false
   description = "Command to start the docker compose project"
 }
 
@@ -202,6 +204,7 @@ variable "docker_compose_down" {
   default = [
     "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
   ]
+  nullable    = false
   description = "Command to stop the docker compose project"
 }
 
@@ -210,9 +213,10 @@ variable "docker_compose_rollout" {
   default = [
     "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
     "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist --timeout \"$${SITECTL_HEALTHCHECK_TIMEOUT}\" --interval \"$${SITECTL_HEALTHCHECK_INTERVAL}\"",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
     "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
+  nullable    = false
   description = "Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT_REF/GIT_BRANCH from the trigger request."
 }
 
@@ -279,18 +283,6 @@ variable "production" {
   description = "Whether this VM is the production environment. Production VMs reserve one matching machine so stop/start and recreate operations keep capacity."
 }
 
-variable "sitectl_healthcheck_timeout" {
-  type        = string
-  default     = "10m"
-  description = "Timeout passed to sitectl healthcheck --timeout in default lifecycle commands."
-}
-
-variable "sitectl_healthcheck_interval" {
-  type        = string
-  default     = "15s"
-  description = "Interval passed to sitectl healthcheck --interval in default lifecycle commands."
-}
-
 variable "sitectl_verify_args" {
   type        = list(string)
   default     = []
@@ -319,24 +311,6 @@ variable "power_management_enabled" {
   type        = bool
   default     = true
   description = "Enable GCP power-management support services such as lightsout and Cloud Run proxy-power-button. Disable for providers that do not save cost when VMs are stopped."
-}
-
-variable "libops_lightsout_image" {
-  type        = string
-  default     = "ghcr.io/libops/lightsout:main"
-  description = "Container image used for the internal lightsout service."
-}
-
-variable "libops_cap_image" {
-  type        = string
-  default     = "ghcr.io/libops/cap:main"
-  description = "Container image used for the internal CAP metrics service."
-}
-
-variable "libops_cadvisor_image" {
-  type        = string
-  default     = "ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d"
-  description = "Container image used for the internal cAdvisor service."
 }
 
 variable "libops_managed_artifacts" {

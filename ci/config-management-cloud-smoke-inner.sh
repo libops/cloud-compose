@@ -9,8 +9,6 @@ set -euo pipefail
 : "${SMOKE_TEMPLATE:?}"
 : "${SMOKE_ENVIRONMENT:?}"
 : "${SMOKE_PROJECT_DIR:?}"
-: "${SMOKE_HEALTHCHECK_TIMEOUT:?}"
-: "${SMOKE_HEALTHCHECK_INTERVAL:?}"
 
 apt-get update >/tmp/cloud-compose-apt-update.log
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -68,8 +66,6 @@ all:
               project_dir: ${SMOKE_PROJECT_DIR}
             sitectl:
               environment: ${SMOKE_ENVIRONMENT}
-              healthcheck_timeout: ${SMOKE_HEALTHCHECK_TIMEOUT}
-              healthcheck_interval: ${SMOKE_HEALTHCHECK_INTERVAL}
 EOF
 
   ansible-playbook \
@@ -87,7 +83,7 @@ deploy_salt() {
       "rm -rf /srv/cloud-compose && mkdir -p /srv/cloud-compose && tar -xzf - -C /srv/cloud-compose"
 
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
+    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -138,8 +134,6 @@ cloud_compose:
       project_dir: ${SMOKE_PROJECT_DIR}
     sitectl:
       environment: ${SMOKE_ENVIRONMENT}
-      healthcheck_timeout: ${SMOKE_HEALTHCHECK_TIMEOUT}
-      healthcheck_interval: ${SMOKE_HEALTHCHECK_INTERVAL}
 EOF
 
 /opt/cloud-compose-salt-smoke/bin/salt-call \
@@ -158,7 +152,7 @@ REMOTE
 
 verify_remote() {
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} SMOKE_HEALTHCHECK_TIMEOUT=${SMOKE_HEALTHCHECK_TIMEOUT} SMOKE_HEALTHCHECK_INTERVAL=${SMOKE_HEALTHCHECK_INTERVAL} bash -s" <<'REMOTE'
+    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
 
 test -x /home/cloud-compose/init
@@ -200,7 +194,7 @@ PY
 test -d "$SMOKE_PROJECT_DIR/.git"
 systemctl is-active --quiet cloud-compose
 runuser -u cloud-compose -- env HOME=/home/cloud-compose bash -lc \
-  "source /home/cloud-compose/profile.sh && sitectl healthcheck --context \"${SMOKE_NAME}\" --persist --timeout \"${SMOKE_HEALTHCHECK_TIMEOUT}\" --interval \"${SMOKE_HEALTHCHECK_INTERVAL}\" --format table"
+  "source /home/cloud-compose/profile.sh && sitectl healthcheck --context \"${SMOKE_NAME}\" --persist --format table"
 REMOTE
 }
 
