@@ -148,34 +148,59 @@ smoke_run_id() {
   printf '%s\n' "${CLOUD_COMPOSE_SMOKE_RUN_ID:-${GITHUB_RUN_ID:-}}"
 }
 
-api_delete() {
-  local provider="$1" path="$2" token
+api_request() {
+  local provider="$1" method="$2" path="$3"
+  local base_url body http_code response token token_name
 
   case "$provider" in
     digitalocean)
       token="${DIGITALOCEAN_TOKEN:-}"
-      curl -fsS -X DELETE -H "Authorization: Bearer ${token}" "https://api.digitalocean.com/v2${path}" >/dev/null
+      token_name="DIGITALOCEAN_TOKEN"
+      base_url="https://api.digitalocean.com/v2"
       ;;
     linode)
       token="${LINODE_TOKEN:-}"
-      curl -fsS -X DELETE -H "Authorization: Bearer ${token}" "https://api.linode.com/v4${path}" >/dev/null
+      token_name="LINODE_TOKEN"
+      base_url="https://api.linode.com/v4"
+      ;;
+  esac
+
+  if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${token}" -w $'\n%{http_code}' "${base_url}${path}")"; then
+    http_code="${response##*$'\n'}"
+    body="${response%$'\n'$http_code}"
+  else
+    echo "${provider} API request failed for ${method} ${path}; check ${token_name} and network access." >&2
+    return 1
+  fi
+
+  case "$http_code" in
+    2??)
+      printf '%s' "$body"
+      ;;
+    401)
+      echo "${provider} API rejected ${token_name} with HTTP 401 for ${method} ${path}; verify the GitHub secret is current and valid for this provider." >&2
+      return 22
+      ;;
+    403)
+      echo "${provider} API rejected ${token_name} with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
+      return 22
+      ;;
+    *)
+      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
       ;;
   esac
 }
 
-api_get() {
-  local provider="$1" path="$2" token
+api_delete() {
+  api_request "$1" DELETE "$2" >/dev/null
+}
 
-  case "$provider" in
-    digitalocean)
-      token="${DIGITALOCEAN_TOKEN:-}"
-      curl -fsS -H "Authorization: Bearer ${token}" "https://api.digitalocean.com/v2${path}"
-      ;;
-    linode)
-      token="${LINODE_TOKEN:-}"
-      curl -fsS -H "Authorization: Bearer ${token}" "https://api.linode.com/v4${path}"
-      ;;
-  esac
+api_get() {
+  api_request "$1" GET "$2"
 }
 
 gcp_region() {

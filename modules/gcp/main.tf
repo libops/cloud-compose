@@ -803,11 +803,13 @@ module "ppb" {
   count  = var.power_management_enabled ? 1 : 0
   source = "https://github.com/libops/terraform-cloudrun-v2/archive/refs/tags/0.5.3.zip//terraform-cloudrun-v2-0.5.3"
 
-  name              = var.name
-  project           = var.project_id
-  gsa               = google_service_account.ppb[0].name
-  skipNeg           = true
-  vpc_direct_egress = "PRIVATE_RANGES_ONLY"
+  name                         = var.name
+  project                      = var.project_id
+  gsa                          = google_service_account.ppb[0].name
+  skipNeg                      = true
+  vpc_direct_egress            = "PRIVATE_RANGES_ONLY"
+  vpc_direct_egress_network    = local.network_name
+  vpc_direct_egress_subnetwork = local.subnetwork_name != null ? local.subnetwork_name : "default"
   containers = concat(
     tolist([
       {
