@@ -47,7 +47,7 @@ install_docker_plugins() {
     local compose_arch buildx_asset_arch
 
     # renovate: datasource=github-releases depName=docker-compose packageName=docker/compose versioning=semver
-    DOCKER_COMPOSE_VERSION="${DOCKER_COMPOSE_VERSION:-v5.3.0}"
+    DOCKER_COMPOSE_VERSION="${DOCKER_COMPOSE_VERSION:-v5.3.1}"
     # renovate: datasource=github-releases depName=docker-buildx packageName=docker/buildx versioning=semver
     DOCKER_BUILDX_VERSION="${DOCKER_BUILDX_VERSION:-v0.35.0}"
 

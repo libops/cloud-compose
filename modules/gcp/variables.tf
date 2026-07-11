@@ -248,7 +248,7 @@ variable "sitectl_version" {
 variable "docker_compose_version" {
   type = string
   # renovate: datasource=github-releases depName=docker-compose packageName=docker/compose versioning=semver
-  default     = "v5.3.0"
+  default     = "v5.3.1"
   description = "Docker Compose release tag installed as the docker compose CLI plugin on hosts that need a manually managed plugin."
 }
 

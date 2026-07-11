@@ -21,7 +21,7 @@ services:
       - /mnt/disks/data:/mnt/disks/data
       - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
   cadvisor:
-    image: ghcr.io/google/cadvisor:v0.60.3@sha256:c4c44a8d178a1f3985d4aec9f0876a313cc7833ee07fe1d0d8ec63707ef7d69f
+    image: ghcr.io/google/cadvisor:v0.60.5@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe
     command:
       - -disable_metrics
       - cpu_topology,referenced_memory,disk,memory_numa,perf_event,sched,tcp,udp
