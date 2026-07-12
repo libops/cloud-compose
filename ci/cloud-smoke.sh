@@ -167,7 +167,7 @@ api_request() {
 
   if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${token}" -w $'\n%{http_code}' "${base_url}${path}")"; then
     http_code="${response##*$'\n'}"
-    body="${response%$'\n'$http_code}"
+    body="${response%$'\n'"$http_code"}"
   else
     echo "${provider} API request failed for ${method} ${path}; check ${token_name} and network access." >&2
     return 1
@@ -213,19 +213,198 @@ gcp_zone() {
 
 delete_ids() {
   local provider="$1" path_prefix="$2" id attempt
+  local failed=0 deleted
 
   while IFS= read -r id; do
     if [[ -z "$id" ]]; then
       continue
     fi
+    deleted=false
     for attempt in {1..12}; do
       echo "Deleting ${provider} ${path_prefix}/${id} (attempt ${attempt})"
       if api_delete "$provider" "${path_prefix}/${id}"; then
+        deleted=true
         break
       fi
       sleep 10
     done
+    if [[ "$deleted" != "true" ]]; then
+      echo "Failed to delete ${provider} ${path_prefix}/${id} after 12 attempts" >&2
+      failed=1
+    fi
   done
+
+  return "$failed"
+}
+
+gcp_command_with_retry() {
+  local operation="$1" description="$2" attempt
+  shift 2
+
+  for attempt in {1..12}; do
+    echo "${operation} gcp ${description} (attempt ${attempt})"
+    if gcloud "$@"; then
+      return 0
+    fi
+    if ((attempt < 12)); then
+      sleep 10
+    fi
+  done
+
+  echo "Failed while ${operation,,} gcp ${description} after 12 attempts" >&2
+  return 1
+}
+
+gcp_delete_with_retry() {
+  local description="$1"
+  shift
+
+  gcp_command_with_retry "Deleting" "$description" "$@"
+}
+
+gcp_remove_with_retry() {
+  local description="$1"
+  shift
+
+  gcp_command_with_retry "Removing" "$description" "$@"
+}
+
+gcp_project_iam_rows() {
+  local project="$1" name_filter="$2" account_pattern
+
+  account_pattern="(vm-|internal-|ppb-)?${name_filter#^}.*@${project}\\.iam\\.gserviceaccount\\.com"
+  gcloud projects get-iam-policy "$project" --format=json |
+    jq -r \
+      --arg account_pattern "$account_pattern" \
+      --arg start_role "projects/${project}/roles/startVM" \
+      --arg suspend_role "projects/${project}/roles/suspendVM" '
+        [$start_role, $suspend_role, "roles/logging.logWriter", "roles/monitoring.metricWriter"] as $managed_roles |
+        .bindings[]? |
+        select(.condition == null) |
+        select(.role as $role | $managed_roles | index($role)) |
+        .role as $role |
+        .members[]? |
+        select(test("^(deleted:)?serviceAccount:" + $account_pattern + "(\\?uid=[^[:space:]]+)?$")) |
+        [$role, .] | @tsv
+      '
+}
+
+gcp_smoke_residuals() {
+  local project="$1" name_filter="$2" region="$3"
+  local output name email role member
+
+  if ! output="$(gcloud run services list \
+    --project "$project" \
+    --region "$region" \
+    --filter="metadata.name~'${name_filter}'" \
+    --format='value(metadata.name)')"; then
+    echo "Could not verify Cloud Run cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'cloud-run\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcloud compute instances list \
+    --project "$project" \
+    --filter="name~'${name_filter}'" \
+    --format='value(name)')"; then
+    echo "Could not verify GCP instance cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'instance\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcloud compute firewall-rules list \
+    --project "$project" \
+    --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-)${name_filter#^}'" \
+    --format='value(name)')"; then
+    echo "Could not verify GCP firewall cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'firewall\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcloud compute disks list \
+    --project "$project" \
+    --filter="name~'${name_filter}'" \
+    --format='value(name)')"; then
+    echo "Could not verify GCP disk cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'disk\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcloud iam service-accounts list \
+    --project "$project" \
+    --filter="email~'^(vm-|internal-|ppb-)?${name_filter#^}.*@${project}\\.iam\\.gserviceaccount\\.com$'" \
+    --format='value(email)')"; then
+    echo "Could not verify GCP service-account cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r email; do
+    [[ -n "$email" ]] && printf 'service-account\t%s\n' "$email"
+  done <<<"$output"
+
+  if ! output="$(gcloud compute networks subnets list \
+    --project "$project" \
+    --filter="name~'${name_filter}'" \
+    --format='value(name)')"; then
+    echo "Could not verify GCP subnetwork cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'subnetwork\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcloud compute networks list \
+    --project "$project" \
+    --filter="name~'${name_filter}'" \
+    --format='value(name)')"; then
+    echo "Could not verify GCP network cleanup" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && printf 'network\t%s\n' "$name"
+  done <<<"$output"
+
+  if ! output="$(gcp_project_iam_rows "$project" "$name_filter")"; then
+    echo "Could not verify GCP project-IAM cleanup" >&2
+    return 1
+  fi
+  while IFS=$'\t' read -r role member; do
+    [[ -n "$role" && -n "$member" ]] && printf 'project-iam\t%s\t%s\n' "$role" "$member"
+  done <<<"$output"
+
+  return 0
+}
+
+gcp_verify_no_smoke_resources() {
+  local project="$1" name_filter="$2" region="$3"
+  local attempt residuals
+
+  for attempt in {1..12}; do
+    residuals=""
+    if residuals="$(gcp_smoke_residuals "$project" "$name_filter" "$region")"; then
+      if [[ -z "$residuals" ]]; then
+        echo "Verified that no matching gcp smoke resources remain"
+        return 0
+      fi
+      echo "Matching gcp smoke resources remain after cleanup attempt ${attempt}:" >&2
+      printf '%s\n' "$residuals" >&2
+    else
+      echo "Could not complete gcp residual-resource verification (attempt ${attempt})" >&2
+    fi
+    if ((attempt < 12)); then
+      sleep 10
+    fi
+  done
+
+  echo "GCP smoke cleanup left matching resources or could not verify their removal" >&2
+  return 1
 }
 
 smoke_run_tag() {
@@ -276,6 +455,7 @@ target_name_prefix() {
 
 provider_tag_cleanup() {
   local target="$1" run_id="${2:-}" run_tag run_fragment provider name_prefix
+  local cleanup_status=0
 
   run_tag="$(smoke_run_tag "$run_id")"
   run_fragment=""
@@ -289,96 +469,212 @@ provider_tag_cleanup() {
     digitalocean)
       api_get digitalocean "/firewalls?per_page=200" |
         jq -r --arg name_prefix "${name_prefix}-" --arg run_fragment "$run_fragment" '.firewalls[]? | select(.name | startswith($name_prefix)) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id' |
-        delete_ids digitalocean "/firewalls"
+        delete_ids digitalocean "/firewalls" || cleanup_status=1
       api_get digitalocean "/droplets?tag_name=cloud-compose-smoke&per_page=200" |
         jq -r --arg target "$target" --arg run_tag "$run_tag" '.droplets[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids digitalocean "/droplets"
+        delete_ids digitalocean "/droplets" || cleanup_status=1
       sleep 10
       api_get digitalocean "/volumes?tag_name=cloud-compose-smoke&per_page=200" |
         jq -r --arg target "$target" --arg run_tag "$run_tag" '.volumes[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids digitalocean "/volumes"
+        delete_ids digitalocean "/volumes" || cleanup_status=1
       ;;
     linode)
       api_get linode "/networking/firewalls?page_size=500" |
         jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/networking/firewalls"
+        delete_ids linode "/networking/firewalls" || cleanup_status=1
       api_get linode "/linode/instances?page_size=500" |
         jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/linode/instances"
+        delete_ids linode "/linode/instances" || cleanup_status=1
       sleep 10
       api_get linode "/volumes?page_size=500" |
         jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/volumes"
+        delete_ids linode "/volumes" || cleanup_status=1
       ;;
     gcp)
-      local project name_filter
+      local project name_filter region cloud_run_services instance_rows firewall_names disk_rows
+      local project_iam_rows service_accounts subnetwork_rows network_names
+      local zone_url region_url name email role member cloud_run_policy
       project="$GCLOUD_PROJECT"
+      region="$(gcp_region)"
       name_filter="^${name_prefix}-"
       if [[ -n "$run_id" ]]; then
         name_filter="^${name_prefix}-$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-8)-"
       fi
 
-      gcloud compute instances list \
+      if ! cloud_run_services="$(gcloud run services list \
+        --project "$project" \
+        --region "$region" \
+        --filter="metadata.name~'${name_filter}'" \
+        --format='value(metadata.name)')"; then
+        cleanup_status=1
+        cloud_run_services=""
+      fi
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        cloud_run_policy=""
+        if cloud_run_policy="$(gcloud run services get-iam-policy "$name" \
+          --project "$project" \
+          --region "$region" \
+          --format=json)"; then
+          if ! jq -e 'type == "object" and ((has("bindings") | not) or (.bindings | type == "array"))' \
+            <<<"$cloud_run_policy" >/dev/null; then
+            echo "Cloud Run IAM policy for ${name} was not valid JSON policy data" >&2
+            cleanup_status=1
+          elif jq -e '
+            any(.bindings[]?;
+              .role == "roles/run.invoker" and
+              .condition == null and
+              any(.members[]?; . == "allUsers")
+            )
+          ' <<<"$cloud_run_policy" >/dev/null; then
+            if ! gcp_remove_with_retry "Cloud Run invoker from ${name}" \
+              run services remove-iam-policy-binding "$name" \
+              --project "$project" \
+              --region "$region" \
+              --member allUsers \
+              --role roles/run.invoker \
+              --condition=None \
+              --quiet; then
+              cleanup_status=1
+            fi
+          fi
+        else
+          echo "Could not inspect Cloud Run IAM policy for ${name}" >&2
+          cleanup_status=1
+        fi
+        if ! gcp_delete_with_retry "Cloud Run service ${name}" run services delete "$name" \
+          --project "$project" \
+          --region "$region" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$cloud_run_services"
+
+      if ! instance_rows="$(gcloud compute instances list \
         --project "$project" \
         --filter="name~'${name_filter}'" \
         --format=json |
-        jq -r '.[]? | [.zone, .name] | @tsv' |
-        while IFS=$'\t' read -r zone_url name; do
-          [[ -n "$name" ]] || continue
-          echo "Deleting gcp instance ${name}"
-          gcloud compute instances delete "$name" \
-            --project "$project" \
-            --zone "${zone_url##*/}" \
-            --quiet || true
-        done
+        jq -r '.[]? | [.zone, .name] | @tsv')"; then
+        cleanup_status=1
+        instance_rows=""
+      fi
+      while IFS=$'\t' read -r zone_url name; do
+        [[ -n "$name" ]] || continue
+        if ! gcp_delete_with_retry "instance ${name}" compute instances delete "$name" \
+          --project "$project" \
+          --zone "${zone_url##*/}" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$instance_rows"
 
-      gcloud compute firewall-rules list \
+      if ! firewall_names="$(gcloud compute firewall-rules list \
         --project "$project" \
-        --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-)${name_filter#^}'" \
-        --format='value(name)' |
-        while IFS= read -r name; do
-          [[ -n "$name" ]] || continue
-          echo "Deleting gcp firewall ${name}"
-          gcloud compute firewall-rules delete "$name" --project "$project" --quiet || true
-        done
+        --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-)${name_filter#^}'" \
+        --format='value(name)')"; then
+        cleanup_status=1
+        firewall_names=""
+      fi
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if ! gcp_delete_with_retry "firewall ${name}" compute firewall-rules delete "$name" \
+          --project "$project" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$firewall_names"
 
-      gcloud compute disks list \
+      if ! disk_rows="$(gcloud compute disks list \
         --project "$project" \
         --filter="name~'${name_filter}'" \
         --format=json |
-        jq -r '.[]? | [.zone, .name] | @tsv' |
-        while IFS=$'\t' read -r zone_url name; do
-          [[ -n "$name" ]] || continue
-          echo "Deleting gcp disk ${name}"
-          gcloud compute disks delete "$name" \
-            --project "$project" \
-            --zone "${zone_url##*/}" \
-            --quiet || true
-        done
+        jq -r '.[]? | [.zone, .name] | @tsv')"; then
+        cleanup_status=1
+        disk_rows=""
+      fi
+      while IFS=$'\t' read -r zone_url name; do
+        [[ -n "$name" ]] || continue
+        if ! gcp_delete_with_retry "disk ${name}" compute disks delete "$name" \
+          --project "$project" \
+          --zone "${zone_url##*/}" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$disk_rows"
 
-      gcloud iam service-accounts list \
+      if ! project_iam_rows="$(gcp_project_iam_rows "$project" "$name_filter")"; then
+        cleanup_status=1
+        project_iam_rows=""
+      fi
+      while IFS=$'\t' read -r role member; do
+        [[ -n "$role" && -n "$member" ]] || continue
+        if ! gcp_remove_with_retry "project IAM binding ${role} for ${member}" \
+          projects remove-iam-policy-binding "$project" \
+          --member "$member" \
+          --role "$role" \
+          --condition=None \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$project_iam_rows"
+
+      if ! service_accounts="$(gcloud iam service-accounts list \
         --project "$project" \
-        --filter="email~'^(vm-|internal-)?${name_filter#^}.*@${project}\\.iam\\.gserviceaccount\\.com$'" \
-        --format='value(email)' |
-        while IFS= read -r email; do
-          [[ -n "$email" ]] || continue
-          echo "Deleting gcp service account ${email}"
-          gcloud projects remove-iam-policy-binding "$project" \
-            --member "serviceAccount:${email}" \
-            --role roles/logging.logWriter \
-            --quiet >/dev/null 2>&1 || true
-          gcloud projects remove-iam-policy-binding "$project" \
-            --member "serviceAccount:${email}" \
-            --role roles/monitoring.metricWriter \
-            --quiet >/dev/null 2>&1 || true
-          gcloud projects remove-iam-policy-binding "$project" \
-            --member "serviceAccount:${email}" \
-            --role "projects/${project}/roles/suspendVM" \
-            --quiet >/dev/null 2>&1 || true
-          gcloud iam service-accounts delete "$email" --project "$project" --quiet || true
-        done
+        --filter="email~'^(vm-|internal-|ppb-)?${name_filter#^}.*@${project}\\.iam\\.gserviceaccount\\.com$'" \
+        --format='value(email)')"; then
+        cleanup_status=1
+        service_accounts=""
+      fi
+      while IFS= read -r email; do
+        [[ -n "$email" ]] || continue
+        if ! gcp_delete_with_retry "service account ${email}" iam service-accounts delete "$email" \
+          --project "$project" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$service_accounts"
+
+      if ! subnetwork_rows="$(gcloud compute networks subnets list \
+        --project "$project" \
+        --filter="name~'${name_filter}'" \
+        --format=json |
+        jq -r '.[]? | [.region, .name] | @tsv')"; then
+        cleanup_status=1
+        subnetwork_rows=""
+      fi
+      while IFS=$'\t' read -r region_url name; do
+        [[ -n "$name" ]] || continue
+        if ! gcp_delete_with_retry "subnetwork ${name}" compute networks subnets delete "$name" \
+          --project "$project" \
+          --region "${region_url##*/}" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$subnetwork_rows"
+
+      if ! network_names="$(gcloud compute networks list \
+        --project "$project" \
+        --filter="name~'${name_filter}'" \
+        --format='value(name)')"; then
+        cleanup_status=1
+        network_names=""
+      fi
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if ! gcp_delete_with_retry "network ${name}" compute networks delete "$name" \
+          --project "$project" \
+          --quiet; then
+          cleanup_status=1
+        fi
+      done <<<"$network_names"
+
+      if ! gcp_verify_no_smoke_resources "$project" "$name_filter" "$region"; then
+        cleanup_status=1
+      fi
       ;;
   esac
+
+  return "$cleanup_status"
 }
 
 maybe_sweep_orphans() {
