@@ -89,3 +89,18 @@ for every app context. Backups are written under
 
 DigitalOcean and Linode deployments should leave power management disabled
 because stopped VMs do not provide the same cost profile.
+
+## Hosted smoke cleanup credentials
+
+Pull-request smoke jobs destroy resources in the same already-approved job.
+When a runner is cancelled or lost, the `workflow_run` fallback checks out only
+trusted default-branch code and uses separate GitHub Environments:
+
+- `cloud-smoke-cleanup-digitalocean`
+- `cloud-smoke-cleanup-linode`
+- `cloud-smoke-cleanup-gcp`
+
+Configure these cleanup environments without reviewer gates, restrict them to
+the default branch, and give each a distinct least-privilege cleanup credential.
+Do not expose a cleanup environment to pull-request-controlled code. The
+ordinary smoke environments and their create/test credentials remain separate.
