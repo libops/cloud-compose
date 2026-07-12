@@ -30,6 +30,9 @@ jobs:
       - name: Run Terraform lint
         run: make terraform-lint-check
 
+      - name: Validate fallback cleanup behavior
+        run: bash ci/cloud-smoke-cleanup-contract.sh
+
   config-management-lint:
     name: Ansible and Salt lint
     runs-on: ubuntu-24.04
@@ -159,80 +162,3 @@ jobs:
       - name: Skip GCP destroy
         if: always() && matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')
         run: echo "Skipping GCP destroy because GCP smoke secrets are not configured and no GCP resources were applied."
-
-  config-management-cleanup:
-    name: Destroy Linode ${{ matrix.method }} Drupal config-management
-    needs: config-management-cloud-smoke
-    if: always() && (failure() || cancelled()) && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        method:
-          - ansible
-          - salt
-    concurrency:
-      group: cloud-compose-config-management-${{ matrix.method }}-drupal
-      cancel-in-progress: false
-    env:
-      CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
-      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Sweep Linode config-management smoke resources
-        run: ci/config-management-cloud-smoke.sh sweep-${{ matrix.method }}-drupal
-
-  cleanup:
-    name: Destroy ${{ matrix.name }}
-    needs: smoke
-    if: always() && (failure() || cancelled())
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: DigitalOcean ISLE
-            provider: digitalocean
-            template: isle
-          - name: Linode WordPress
-            provider: linode
-            template: wp
-          - name: GCP WordPress
-            provider: gcp
-            template: wp
-    concurrency:
-      group: cloud-compose-smoke-${{ matrix.provider }}-${{ matrix.template }}
-      cancel-in-progress: false
-    env:
-      CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
-      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
-      GCLOUD_OIDC_POOL: ${{ vars.GCLOUD_OIDC_POOL || secrets.GCLOUD_OIDC_POOL }}
-      GCLOUD_PROJECT: ${{ vars.GCLOUD_PROJECT || secrets.GCLOUD_PROJECT }}
-      GCLOUD_REGION: ${{ vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
-      GSA: ${{ vars.GSA || secrets.GSA }}
-      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Authenticate to Google Cloud
-        if: matrix.provider == 'gcp' && env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != ''
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          workload_identity_provider: ${{ env.GCLOUD_OIDC_POOL }}
-          service_account: ${{ env.GSA }}
-          project_id: ${{ env.GCLOUD_PROJECT }}
-
-      - name: Install gcloud
-        if: matrix.provider == 'gcp' && env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != ''
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
-
-      - name: Sweep smoke resources
-        if: matrix.provider != 'gcp' || (env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != '')
-        run: ci/cloud-smoke.sh sweep-${{ matrix.provider }}-${{ matrix.template }}
-
-      - name: Skip GCP cleanup
-        if: matrix.provider == 'gcp' && (env.GCLOUD_OIDC_POOL == '' || env.GSA == '' || env.GCLOUD_PROJECT == '')
-        run: echo "Skipping GCP cleanup because GCP smoke secrets are not configured."
