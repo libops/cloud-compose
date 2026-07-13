@@ -73,15 +73,15 @@ fail() {
   return 1
 }
 
-sanitize_run_fragment() {
-  local value="$1"
+exact_run_namespace() {
+  local run_id="$1" runner
 
-  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-8)"
-  if [[ -z "$value" ]]; then
-    fail "the smoke run id did not contain a usable name fragment"
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    fail "compiled CI runner is missing at ${runner}; run 'make cloud-compose-ci' first"
     return 1
   fi
-  printf '%s\n' "$value"
+  "$runner" gcp namespace --run-id "$run_id"
 }
 
 upgrade_run_id() {
@@ -832,7 +832,7 @@ run_upgrade() (
   require_env GCLOUD_POWER_START_ROLE
   require_env GCLOUD_POWER_SUSPEND_ROLE
 
-  local requested_base current_ref current_sha base_sha run_id run_fragment name
+  local requested_base current_ref current_sha base_sha run_id run_namespace name
   local work_root old_source new_source state_path old_data new_data key_path public_key
   local runner_ipv4 runner_cidr region zone plan_file plan_json nonce
   local old_root new_root old_output new_output old_home new_home
@@ -850,11 +850,11 @@ run_upgrade() (
   [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]] || fail "current upgrade ref did not resolve to a full commit"
 
   run_id="$(upgrade_run_id)"
-  run_fragment="$(sanitize_run_fragment "$run_id")"
-  name="cc-g-wp-${run_fragment}-up"
+  run_namespace="$(exact_run_namespace "$run_id")"
+  name="cc-g-wp-${run_namespace}-up"
   export CLOUD_COMPOSE_SMOKE_RUN_ID="$run_id"
 
-  work_root="${CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR:-${RUNNER_TEMP:-/tmp}/cloud-compose-gcp-upgrade-${run_fragment}}"
+  work_root="${CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR:-${RUNNER_TEMP:-/tmp}/cloud-compose-gcp-upgrade-${run_namespace}}"
   [[ "$work_root" == /* ]] || fail "CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR must be an absolute path"
   old_source="$work_root/source-0.10.2"
   new_source="$work_root/source-current"
@@ -1008,13 +1008,13 @@ destroy_upgrade() {
   require_env GCLOUD_NETWORK_NAME
   require_env GCLOUD_SUBNETWORK_NAME
 
-  local current_sha run_id run_fragment work_root old_source new_source state_path old_data new_data
+  local current_sha run_id run_namespace work_root old_source new_source state_path old_data new_data
 
   current_sha="$(git -C "$repo_root" rev-parse --verify "${CLOUD_COMPOSE_UPGRADE_CURRENT_REF:-HEAD}^{commit}")"
   run_id="$(upgrade_run_id)"
-  run_fragment="$(sanitize_run_fragment "$run_id")"
+  run_namespace="$(exact_run_namespace "$run_id")"
   export CLOUD_COMPOSE_SMOKE_RUN_ID="$run_id"
-  work_root="${CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR:-${RUNNER_TEMP:-/tmp}/cloud-compose-gcp-upgrade-${run_fragment}}"
+  work_root="${CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR:-${RUNNER_TEMP:-/tmp}/cloud-compose-gcp-upgrade-${run_namespace}}"
   [[ "$work_root" == /* ]] || fail "CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR must be an absolute path"
   old_source="$work_root/source-0.10.2"
   new_source="$work_root/source-current"

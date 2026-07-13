@@ -104,7 +104,8 @@ type failureList struct {
 	errors []error
 }
 
-// NameFilter returns the legacy anchored resource-name filter shared with the current smoke Terraform fixture.
+// NameFilter returns the legacy anchored resource-name filter retained for
+// compatibility with smoke resources created before exact namespaces.
 func NameFilter(target, runID string) (string, error) {
 	prefix, err := targetNamePrefix(target)
 	if err != nil {

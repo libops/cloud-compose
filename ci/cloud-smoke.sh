@@ -554,7 +554,8 @@ target_workdir() {
 }
 
 target_var_args() {
-  local root="$1" key_path="$2" target="$3" public_key provider template
+  local root="$1" key_path="$2" target="$3" run_id="$4" run_namespace="$5"
+  local public_key provider template
   local source_ref source_sha256 source_cache_key checksum_dir checksum_file archive_tmp
 
   provider="$(target_provider "$target")"
@@ -603,8 +604,11 @@ target_var_args() {
     fi
     printf '%s\0%s\0' "-var" "cloud_compose_source_sha256=${source_sha256}"
   fi
-  if grep -q 'variable "smoke_run_id"' "$root/variables.tf" && [[ -n "$(smoke_run_id)" ]]; then
-    printf '%s\0%s\0' "-var" "smoke_run_id=$(smoke_run_id)"
+  if grep -q 'variable "smoke_run_id"' "$root/variables.tf" && [[ -n "$run_id" ]]; then
+    printf '%s\0%s\0' "-var" "smoke_run_id=${run_id}"
+  fi
+  if grep -q 'variable "smoke_run_namespace"' "$root/variables.tf" && [[ -n "$run_namespace" ]]; then
+    printf '%s\0%s\0' "-var" "smoke_run_namespace=${run_namespace}"
   fi
   if grep -q 'variable "gcp_project_id"' "$root/variables.tf"; then
     printf '%s\0%s\0' "-var" "gcp_project_id=${GCLOUD_PROJECT:-}"
@@ -846,7 +850,7 @@ run_target() (
   set -euo pipefail
 
   local target="$1"
-  local root workdir key_path home_dir output_json public_key run_id
+  local root workdir key_path home_dir output_json public_key run_id run_namespace
   local -a auto_args var_args
 
   root="$(target_root "$target")"
@@ -861,10 +865,10 @@ run_target() (
 
   ensure_key "$key_path"
   run_id="$(smoke_run_id)"
-  # Validate GCP cleanup ownership before Terraform can create resources. The
-  # reader phase intentionally keeps writing the legacy resource namespace.
-  gcp_run_namespace "$target" "$run_id" >/dev/null
-  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target")
+  # Compute outside process substitution so an invalid hosted run ID aborts
+  # before Terraform can create resources under an undiscoverable namespace.
+  run_namespace="$(gcp_run_namespace "$target" "$run_id")"
+  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target" "$run_id" "$run_namespace")
 
   auto_args=()
   if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
@@ -951,7 +955,7 @@ destroy_target() (
   set -euo pipefail
 
   local target="$1"
-  local root workdir key_path destroy_status destroy_timeout cleanup_status
+  local root workdir key_path destroy_status destroy_timeout cleanup_status run_id run_namespace
   local -a auto_args var_args
 
   root="$(target_root "$target")"
@@ -959,7 +963,12 @@ destroy_target() (
 
   workdir="$(target_workdir "$target")"
   key_path="$workdir/id_ed25519"
-  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target")
+  run_id="$(smoke_run_id)"
+  run_namespace=""
+  if [[ -n "$run_id" ]]; then
+    run_namespace="$(gcp_run_namespace "$target" "$run_id")"
+  fi
+  mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target" "$run_id" "$run_namespace")
 
   auto_args=()
   if [[ -n "${GITHUB_ACTIONS:-}" || "${CLOUD_COMPOSE_SMOKE_AUTO_APPROVE:-}" == "true" ]]; then
@@ -986,7 +995,7 @@ destroy_target() (
   fi
 
   cleanup_status=0
-  provider_tag_cleanup "$target" "$(smoke_run_id)" || cleanup_status=$?
+  provider_tag_cleanup "$target" "$run_id" || cleanup_status=$?
 
   if [[ "$destroy_status" -ne 0 && "$cleanup_status" -eq 0 ]]; then
     echo "Provider tag cleanup completed for ${target} after Terraform destroy failed"

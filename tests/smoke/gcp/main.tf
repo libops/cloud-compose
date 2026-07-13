@@ -27,6 +27,7 @@ module "context" {
   ssh_public_key           = var.ssh_public_key
   operator_ssh_public_keys = var.operator_ssh_public_keys
   smoke_run_id             = var.smoke_run_id
+  smoke_run_namespace      = var.smoke_run_namespace
   docker_compose_branch    = var.docker_compose_branch
   ingress_port             = var.ingress_port
 }

@@ -50,6 +50,15 @@ grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must match GITHUB_RUN_ID in GitHub Actions'
   fail "hosted cleanup ownership is not bound to the actual GitHub run id"
 grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must be set explicitly outside GitHub Actions' "$script" ||
   fail "manual upgrade runs can accidentally reuse an implicit cleanup scope"
+grep -Fq '"$runner" gcp namespace --run-id "$run_id"' "$script" ||
+  fail "upgrade runner does not use the shared exact run-namespace codec"
+grep -Fq 'name="cc-g-wp-${run_namespace}-up"' "$script" ||
+  fail "upgrade resource names do not use the exact run namespace"
+grep -Fq 'cloud-compose-gcp-upgrade-${run_namespace}' "$script" ||
+  fail "upgrade working directories do not use the exact run namespace"
+if grep -Fq 'sanitize_run_fragment' "$script"; then
+  fail "upgrade runner still truncates run IDs to the legacy namespace"
+fi
 grep -Fq '/mnt/disks/data/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner omits the persistent data-disk sentinel"
 grep -Fq '/mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script" ||
@@ -214,7 +223,7 @@ cleanup_log="$tmp/cleanup.log"
 set +e
 GITHUB_ACTIONS='' \
 GITHUB_RUN_ID='' \
-CLOUD_COMPOSE_SMOKE_RUN_ID=contract-run \
+CLOUD_COMPOSE_SMOKE_RUN_ID=123456789 \
 CLOUD_COMPOSE_UPGRADE_CURRENT_REF=HEAD \
 GCLOUD_PROJECT=contract-project \
 GCLOUD_NETWORK_PROJECT_ID=contract-project \

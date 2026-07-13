@@ -75,6 +75,17 @@ variable "smoke_run_id" {
   description = "Optional GitHub Actions run id used to tag and name disposable smoke-test resources."
 }
 
+variable "smoke_run_namespace" {
+  type        = string
+  default     = ""
+  description = "Optional output of cloud-compose-ci gcp namespace used in GCP disposable resource names."
+
+  validation {
+    condition     = var.smoke_run_namespace == "" || can(regex("^[0-9a-z]{9}$", var.smoke_run_namespace))
+    error_message = "smoke_run_namespace must be empty or exactly nine lowercase base36 characters."
+  }
+}
+
 variable "docker_compose_branch" {
   type        = string
   default     = "main"

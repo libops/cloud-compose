@@ -101,7 +101,7 @@ func TestCloudSmokeGCPApplyRequiresCanonicalRunID(t *testing.T) {
 	driverPath := filepath.Join(root, "ci/cloud-smoke.sh")
 	driver := readRepositoryFile(t, root, "ci/cloud-smoke.sh")
 
-	validation := `gcp_run_namespace "$target" "$run_id" >/dev/null`
+	validation := `run_namespace="$(gcp_run_namespace "$target" "$run_id")"`
 	validationIndex := strings.Index(driver, validation)
 	argumentsIndex := strings.Index(driver, `mapfile -d '' -t var_args < <(target_var_args`)
 	applyIndex := strings.Index(driver, `terraform -chdir="$root" apply`)
@@ -136,6 +136,44 @@ func TestCloudSmokeGCPApplyRequiresCanonicalRunID(t *testing.T) {
 	if output, err := runHelper(t, "linode-wp", ""); err != nil {
 		t.Fatalf("non-GCP run-ID guard changed existing behavior: %v, output = %s", err, output)
 	}
+}
+
+func TestCloudSmokeGCPWriterUsesExactRunNamespace(t *testing.T) {
+	t.Parallel()
+	root := repositoryRoot(t)
+	driver := readRepositoryFile(t, root, "ci/cloud-smoke.sh")
+	gcpVariables := readRepositoryFile(t, root, "tests/smoke/gcp/variables.tf")
+	gcpFixture := readRepositoryFile(t, root, "tests/smoke/gcp/main.tf")
+	contextVariables := readRepositoryFile(t, root, "tests/smoke/modules/context/variables.tf")
+	contextFixture := readRepositoryFile(t, root, "tests/smoke/modules/context/main.tf")
+
+	for label, marker := range map[string]string{
+		"compiled namespace command": `"$runner" gcp namespace --run-id "$run_id"`,
+		"captured raw run ID":        `run_id="$(smoke_run_id)"`,
+		"captured exact namespace":   `run_namespace="$(gcp_run_namespace "$target" "$run_id")"`,
+		"raw Terraform input":        `"smoke_run_id=${run_id}"`,
+		"exact Terraform input":      `"smoke_run_namespace=${run_namespace}"`,
+		"raw cleanup ownership":      `provider_tag_cleanup "$target" "$run_id"`,
+	} {
+		requireContains(t, driver, marker, label)
+	}
+
+	namespaceIndex := strings.Index(driver, `run_namespace="$(gcp_run_namespace "$target" "$run_id")"`)
+	argumentsIndex := strings.Index(driver, `mapfile -d '' -t var_args < <(target_var_args`)
+	if namespaceIndex < 0 || argumentsIndex < 0 || namespaceIndex >= argumentsIndex {
+		t.Fatal("fresh GCP smoke does not validate its exact namespace before Terraform argument process substitution")
+	}
+
+	for label, text := range map[string]string{
+		"GCP root variables":      gcpVariables,
+		"context variables":       contextVariables,
+		"GCP context plumbing":    gcpFixture,
+		"context naming decision": contextFixture,
+	} {
+		requireContains(t, text, "smoke_run_namespace", label)
+	}
+	requireContains(t, contextFixture, `local.cloud_provider == "gcp" ? var.smoke_run_namespace : ""`, "GCP-only exact namespace selection")
+	requireContains(t, contextFixture, `local.smoke_run_id != "" ? "gha-run-${local.smoke_run_id}" : ""`, "legacy run-id cleanup tag")
 }
 
 func TestCloudSmokeGCPWrapperFailsClosedWithoutRunID(t *testing.T) {

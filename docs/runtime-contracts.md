@@ -756,20 +756,26 @@ workflow, including cases where cancellation prevented the in-job destroy from
 finishing. Never allow pull-request branches in a cleanup environment's
 deployment policy.
 
-GCP run namespaces require a staged compatibility change because the privileged
-fallback always executes the default branch. The compiled runner recognizes the
-legacy first-eight-character namespace and the reserved exact namespace that
-encodes a canonical numeric run ID as nine fixed-width base36 characters. That
-width preserves both separators and the random suffix for every supported GCP
-template within the 21-character resource-name limit. In this reader phase the
-fresh GCP driver calls the pure `cloud-compose-ci gcp namespace` command before
-Terraform argument construction to require a non-empty canonical run ID no
-larger than 44 bits, while deliberately continuing to write legacy names. Manual GCP
-smoke applies must therefore set `CLOUD_COMPOSE_SMOKE_RUN_ID`; non-GCP smoke
-naming and invocation remain unchanged. Merge the
-dual-reader before changing the smoke Terraform writer. Retain the legacy reader
-until all branches and resources created by the old writer have expired; never
-introduce a new writer that the trusted fallback cannot discover.
+GCP smoke writers encode the complete canonical numeric GitHub Actions run ID as
+a fixed-width, nine-character lowercase base36 namespace. The fresh and upgrade
+drivers obtain that value from the compiled `cloud-compose-ci gcp namespace`
+command before Terraform can create resources. A manual fresh GCP smoke apply
+must set `CLOUD_COMPOSE_SMOKE_RUN_ID`; an empty, malformed, noncanonical, or
+greater-than-44-bit value fails before apply. Non-GCP smoke invocation remains
+unchanged. The namespace width preserves both
+separators and at least one random suffix character for every supported GCP
+template within the 21-character resource-name limit. The original decimal run
+ID remains the cleanup input and the source of compatibility tags; DigitalOcean
+and Linode naming and invocation are unchanged. Manual GCP smoke applies must
+set `CLOUD_COMPOSE_SMOKE_RUN_ID`; the smoke context validates that the supplied
+namespace decodes to that same canonical, at-most-44-bit run ID.
+
+The privileged fallback always executes the default branch, so its compiled
+runner remains a dual reader: it queries both the legacy first-eight-character
+namespace and the exact namespace for a run. Retain the legacy reader until all
+branches and resources created by the old writer have expired. A malformed,
+noncanonical, or greater-than-44-bit run ID fails before apply rather than
+creating a namespace that the trusted fallback cannot discover.
 
 Use separate provider identities for smoke and fallback cleanup:
 

@@ -110,7 +110,7 @@ $(CLOUD_COMPOSE_CI_BIN): $(GO_MODULE_FILES) $(GO_SOURCES)
 	@mkdir -p "$(dir $(CLOUD_COMPOSE_CI_BIN))"
 	go build -trimpath -o "$(CLOUD_COMPOSE_CI_BIN)" ./cmd/cloud-compose-ci
 
-gcp-upgrade-smoke-contract:
+gcp-upgrade-smoke-contract: cloud-compose-ci
 	bash ci/gcp-upgrade-smoke-contract.sh
 
 artifact-install-contract:
