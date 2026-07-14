@@ -1,4 +1,4 @@
-.PHONY: lint lint-check actionlint shell-lint runtime-config-contract application-env-contract compose-runtime-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract host-runtime-security cos-jq-portability-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract artifact-install-contract config-management-smoke
+.PHONY: lint lint-check actionlint shell-lint runtime-config-contract application-env-contract compose-runtime-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract sitectl-version-contract go-fmt-check go-vet go-contracts template-version-contract rollout-parity-contract rootfs-package-contract host-runtime-security cos-jq-portability-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract artifact-install-contract config-management-smoke cloud-compose-ci
 .PHONY: terraform-fmt terraform-fmt-check terraform-validate terraform-validate-contract terraform-lint-check terraform-docs terraform-docs-check
 .PHONY: config-management-cloud-smoke config-management-cloud-smoke-ansible-drupal config-management-cloud-smoke-salt-drupal
 .PHONY: destroy-config-management-cloud-smoke destroy-config-management-cloud-smoke-ansible-drupal destroy-config-management-cloud-smoke-salt-drupal
@@ -11,6 +11,10 @@ DOCS_PORT ?= 8888
 DOCS_DOCKER_USER ?= $(shell id -u):$(shell id -g)
 ACTIONLINT_VERSION ?= v1.7.12
 TERRAFORM_DOCS_VERSION ?= v0.21.0
+CLOUD_COMPOSE_CI_BIN ?= $(CURDIR)/.bin/cloud-compose-ci
+export CLOUD_COMPOSE_CI_BIN
+GO_MODULE_FILES := $(wildcard go.mod go.sum)
+GO_SOURCES := $(shell find cmd internal -type f -name '*.go')
 
 lint: terraform-fmt actionlint shell-lint host-runtime-security cos-jq-portability-contract application-env-contract compose-runtime-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract artifact-install-contract terraform-validate terraform-docs-check
 
@@ -75,11 +79,16 @@ systemd-contract:
 sitectl-version-contract:
 	bash ci/sitectl-version-contract.sh
 
-template-version-contract:
-	bash ci/template-version-contract.sh
+go-fmt-check:
+	@files="$$(gofmt -l .)"; test -z "$$files" || { echo "Go files require formatting:"; printf '%s\n' "$$files"; exit 1; }
 
-rollout-parity-contract:
-	bash ci/rollout-parity-contract.sh
+go-vet:
+	go vet ./...
+
+go-contracts: go-fmt-check go-vet
+	go test -count=1 ./...
+
+template-version-contract rollout-parity-contract: go-contracts
 
 rootfs-package-contract:
 	bash ci/rootfs-package-contract.sh
@@ -93,8 +102,13 @@ cos-jq-portability-contract:
 source-trust-contract:
 	bash ci/source-trust-contract.sh
 
-cloud-smoke-cleanup-contract:
-	bash ci/cloud-smoke-cleanup-contract.sh
+cloud-smoke-cleanup-contract: go-contracts
+
+cloud-compose-ci: $(CLOUD_COMPOSE_CI_BIN)
+
+$(CLOUD_COMPOSE_CI_BIN): $(GO_MODULE_FILES) $(GO_SOURCES)
+	@mkdir -p "$(dir $(CLOUD_COMPOSE_CI_BIN))"
+	go build -trimpath -o "$(CLOUD_COMPOSE_CI_BIN)" ./cmd/cloud-compose-ci
 
 gcp-upgrade-smoke-contract:
 	bash ci/gcp-upgrade-smoke-contract.sh
@@ -135,12 +149,13 @@ terraform-docs:
 terraform-docs-check:
 	go run github.com/terraform-docs/terraform-docs@$(TERRAFORM_DOCS_VERSION) markdown table --sort-by required --output-file README.md --output-check .
 
-smoke-test-clouds:
+smoke-test-clouds: cloud-compose-ci
 	ci/cloud-smoke.sh all
 
 smoke-test:
 	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
 	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
+	@if [ "$(PROVIDER)" = "gcp" ]; then $(MAKE) --no-print-directory cloud-compose-ci; fi
 	ci/cloud-smoke.sh $(PROVIDER)-$(TEMPLATE)
 
 smoke-test-digitalocean-isle:
@@ -155,6 +170,7 @@ smoke-test-gcp-wp:
 destroy-smoke:
 	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
 	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
+	@if [ "$(PROVIDER)" = "gcp" ]; then $(MAKE) --no-print-directory cloud-compose-ci; fi
 	ci/cloud-smoke.sh destroy-$(PROVIDER)-$(TEMPLATE)
 
 destroy-smoke-digitalocean-isle:

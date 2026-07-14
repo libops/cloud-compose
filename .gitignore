@@ -12,3 +12,4 @@ site/
 docs/site/
 docs/.cache/
 .cloud-compose-smoke/
+.bin/

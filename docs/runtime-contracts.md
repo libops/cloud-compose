@@ -742,10 +742,34 @@ reviewers**, and set its deployment branch policy to the selected branch
 `main` only. Those environments are consumed solely by the `workflow_run`
 workflow loaded from the default branch. It checks out `github.sha` (the trusted
 default-branch revision for that event), rejects fork-originated runs, and uses
-the originating workflow run ID to constrain the sweep. This fallback runs
-automatically after a failed, cancelled, or timed-out smoke workflow, including
-cases where cancellation prevented the in-job destroy from finishing. Never
-allow pull-request branches in a cleanup environment's deployment policy.
+the originating workflow run ID to constrain the sweep. Only the GCP app-smoke
+cleanup job builds `.bin/cloud-compose-ci`; it builds the binary once from that
+trusted checkout and uses it for GCP discovery, retries, ordered deletion, and
+residual verification. The GCP pull-request job likewise builds one binary
+before apply and reuses that exact workspace binary from its `always()` cleanup
+step. DigitalOcean and Linode app cleanup, plus Ansible and Salt
+config-management cleanup, continue to use their hardened shell drivers; the Go
+runner is not yet a general hosted-provider cleanup implementation. No cleanup
+job executes a pull-request binary or downloads one as an artifact. This
+fallback runs automatically after a failed, cancelled, or timed-out smoke
+workflow, including cases where cancellation prevented the in-job destroy from
+finishing. Never allow pull-request branches in a cleanup environment's
+deployment policy.
+
+GCP run namespaces require a staged compatibility change because the privileged
+fallback always executes the default branch. The compiled runner recognizes the
+legacy first-eight-character namespace and the reserved exact namespace that
+encodes a canonical numeric run ID as nine fixed-width base36 characters. That
+width preserves both separators and the random suffix for every supported GCP
+template within the 21-character resource-name limit. In this reader phase the
+fresh GCP driver calls the pure `cloud-compose-ci gcp namespace` command before
+Terraform argument construction to require a non-empty canonical run ID no
+larger than 44 bits, while deliberately continuing to write legacy names. Manual GCP
+smoke applies must therefore set `CLOUD_COMPOSE_SMOKE_RUN_ID`; non-GCP smoke
+naming and invocation remain unchanged. Merge the
+dual-reader before changing the smoke Terraform writer. Retain the legacy reader
+until all branches and resources created by the old writer have expired; never
+introduce a new writer that the trusted fallback cannot discover.
 
 Use separate provider identities for smoke and fallback cleanup:
 
@@ -787,5 +811,15 @@ VPC networks; it must not own the singleton foundation or the deliberately
 persistent upgrade network. Every mutation is retried, failures are accumulated
 so one stuck resource does not prevent unrelated resources from being examined,
 and a final query requires zero matching disposable resources and IAM members.
+Discovery reads are retried independently. Subnetwork and parent-network
+deletion share a bounded two-hour-ten-minute exponential-backoff window because
+Direct VPC addresses can remain allocated for one to two hours after Cloud Run
+disconnects; exhausting that window still fails the job and reports the leak.
 The workflow fails if a mutation exhausts its retry budget or residual resources
-remain, making leaks visible to operators.
+remain, making leaks visible to operators. The compiled runner requires a run ID
+by default; an operator can sweep every run for one disposable target only by
+supplying the explicit `--all-runs` flag. That explicit flag overrides a run ID
+inherited from `CLOUD_COMPOSE_SMOKE_RUN_ID`; supplying both `--run-id` and
+`--all-runs` explicitly is an error. The compatibility shell exposes the broad
+operation only when `CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true`; a missing run ID
+otherwise fails closed.

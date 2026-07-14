@@ -43,10 +43,8 @@ jobs:
       - name: Run repository lint
         run: make lint-check
 
-      - name: Validate fallback cleanup behavior
-        run: |
-          bash ci/cloud-smoke-cleanup-contract.sh
-          make hosted-cleanup-retry-contract
+      - name: Validate hosted cleanup retry behavior
+        run: make hosted-cleanup-retry-contract
 
   config-management-lint:
     name: Ansible and Salt lint
@@ -194,6 +192,15 @@ jobs:
         with:
           terraform_version: 1.14.6
           terraform_wrapper: false
+
+      - name: Install Go for cloud CI runner
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Build cloud CI runner
+        run: make cloud-compose-ci
 
       - name: Check GCP smoke configuration
         run: |
