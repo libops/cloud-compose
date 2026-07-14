@@ -18,7 +18,7 @@ module "runtime" {
   region                  = local.do.region
   data_device             = "/dev/disk/by-id/scsi-0DO_Volume_${local.data_volume_name}"
   volumes_device          = "/dev/disk/by-id/scsi-0DO_Volume_${local.docker_volumes_volume_name}"
-  ssh_users               = local.do.ssh.users
+  ssh_users               = merge(local.runtime.users, local.do.ssh.users)
   cloud_compose_ssh_keys  = local.do.ssh.cloud_compose_keys
   rootfs                  = local.runtime.rootfs
   rootfs_archive_url      = local.runtime.rootfs_archive_url
@@ -34,14 +34,15 @@ module "runtime" {
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
 
-  sitectl_packages       = local.sitectl.packages
-  sitectl_version        = local.sitectl.version
-  sitectl_context_name   = local.sitectl.context_name
-  sitectl_plugin         = local.sitectl.plugin
-  sitectl_environment    = local.sitectl.environment
-  sitectl_verify_args    = local.sitectl.verify_args
-  docker_compose_version = local.docker.compose_version
-  docker_buildx_version  = local.docker.buildx_version
+  sitectl_packages         = local.sitectl.packages
+  sitectl_version          = local.sitectl.version
+  sitectl_package_versions = local.sitectl.package_versions
+  sitectl_context_name     = local.sitectl.context_name
+  sitectl_plugin           = local.sitectl.plugin
+  sitectl_environment      = local.sitectl.environment
+  sitectl_verify_args      = local.sitectl.verify_args
+  docker_compose_version   = local.docker.compose_version
+  docker_buildx_version    = local.docker.buildx_version
 
   libops_managed_runtime_enabled       = local.managed.enabled
   libops_internal_services_enabled     = local.managed.internal_services_enabled
@@ -64,21 +65,33 @@ locals {
 }
 
 resource "digitalocean_volume" "data" {
-  region                  = local.do.region
-  name                    = local.data_volume_name
-  size                    = local.do.volumes.data_size_gb
-  initial_filesystem_type = "ext4"
-  description             = "cloud-compose persistent data for ${var.name}"
-  tags                    = local.do.tags
+  region      = local.do.region
+  name        = local.data_volume_name
+  size        = local.do.volumes.data_size_gb
+  description = "cloud-compose persistent data for ${var.name}"
+  tags        = local.do.tags
+
+  lifecycle {
+    # Older cloud-compose releases asked DigitalOcean to format and automount
+    # this volume. Ignore that creation-only state when upgrading so removing
+    # the request never replaces a durable volume. New volumes stay raw until
+    # the verified host bootstrap formats and mounts them exactly once.
+    ignore_changes = [initial_filesystem_type]
+  }
 }
 
 resource "digitalocean_volume" "docker_volumes" {
-  region                  = local.do.region
-  name                    = local.docker_volumes_volume_name
-  size                    = local.do.volumes.docker_volumes_size_gb
-  initial_filesystem_type = "ext4"
-  description             = "cloud-compose Docker volumes for ${var.name}"
-  tags                    = local.do.tags
+  region      = local.do.region
+  name        = local.docker_volumes_volume_name
+  size        = local.do.volumes.docker_volumes_size_gb
+  description = "cloud-compose Docker volumes for ${var.name}"
+  tags        = local.do.tags
+
+  lifecycle {
+    # See the data-volume lifecycle above. Existing volume identity and data
+    # must survive the transition away from provider-side initial formatting.
+    ignore_changes = [initial_filesystem_type]
+  }
 }
 
 resource "digitalocean_droplet" "cloud_compose" {
@@ -96,6 +109,14 @@ resource "digitalocean_droplet" "cloud_compose" {
   user_data         = module.runtime.cloud_init
 
   lifecycle {
+    precondition {
+      # DigitalOcean accepts at most 64 KiB of raw user_data. Bounding the
+      # base64 representation at 87,380 characters conservatively caps the
+      # UTF-8 payload at 65,535 bytes without treating Unicode code points as
+      # bytes. Archive mode keeps the bootstrap comfortably below this limit.
+      condition     = length(base64encode(module.runtime.cloud_init)) <= 87380
+      error_message = "DigitalOcean Droplet user_data is limited to 64 KiB. Set runtime.rootfs_archive_url and runtime.rootfs_archive_sha256 so the verified cloud-compose rootfs is fetched during boot instead of embedded in cloud-init."
+    }
     precondition {
       condition = alltrue([
         for _, app in module.runtime.compose_projects : trimspace(app.docker_compose_repo) != ""
@@ -117,6 +138,10 @@ resource "digitalocean_droplet" "cloud_compose" {
     precondition {
       condition     = !local.vault.agent_enabled || local.vault.auth_method != "consumer-managed" || trimspace(local.vault.agent_additional_config) != ""
       error_message = "vault_agent_additional_config is required when vault_agent_enabled uses consumer-managed auth."
+    }
+    precondition {
+      condition     = !local.managed.internal_services_enabled
+      error_message = "DigitalOcean does not support the GCP-specific privileged internal-services stack. Leave runtime.managed_runtime.internal_services_enabled false."
     }
   }
 }

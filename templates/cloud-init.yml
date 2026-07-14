@@ -13,58 +13,94 @@ users:
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
-  - ${key}
+  - ${jsonencode(key)}
 %{ endfor ~}
 %{ endif ~}
 %{ for username, ssh_keys in SSH_USERS ~}
-- name: ${username}
+- name: ${jsonencode(username)}
   shell: /bin/bash
   ssh_authorized_keys:
 %{ for key in ssh_keys ~}
-  - ${key}
+  - ${jsonencode(key)}
 %{ endfor ~}
 %{ endfor ~}
 
 bootcmd:
 # mount the main Data disk
-- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-data) || mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard $(readlink -f /dev/disk/by-id/google-data)
-- mkdir -p /mnt/disks/data
-- mount -o defaults $(readlink -f /dev/disk/by-id/google-data) /mnt/disks/data
-- chmod a+w /mnt/disks/data
+- |
+  set -eu
+  rm -f /run/cloud-compose-filesystems-ready
+  filesystem_prep=/run/cloud-compose-prepare-filesystem
+  filesystem_persist=/run/cloud-compose-persist-filesystems
+  printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
+  printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
+  chmod 0600 "$filesystem_prep" "$filesystem_persist"
+  bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data
 
 # mount the specific Volumes disk
-- fsck.ext4 -tvy $(readlink -f /dev/disk/by-id/google-docker-volumes) || mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard $(readlink -f /dev/disk/by-id/google-docker-volumes)
-- mkdir -p /mnt/disks/volumes
-- mount -o defaults $(readlink -f /dev/disk/by-id/google-docker-volumes) /mnt/disks/volumes
-- chmod a+w /mnt/disks/volumes
+- bash /run/cloud-compose-prepare-filesystem /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes
 
 - mkdir -p /mnt/disks/data/docker/volumes
-- mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
-
+- |
+  set -eu
+  if ! mountpoint -q /mnt/disks/data/docker/volumes; then
+    mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
+  fi
+  for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do
+    if ! mountpoint -q -- "$required_mount"; then
+      echo "Required cloud-compose mount is unavailable: $required_mount" >&2
+      exit 1
+    fi
+  done
 %{ if USE_OVERLAY ~}
-- mkdir -p /mnt/disks/prod-readonly
-- mount -o ro $(readlink -f /dev/disk/by-id/google-prod-volumes) /mnt/disks/prod-readonly
+  mkdir -p /mnt/disks/prod-readonly
+  if ! mountpoint -q /mnt/disks/prod-readonly; then
+    mount -o ro "$(readlink -f /dev/disk/by-id/google-prod-volumes)" /mnt/disks/prod-readonly
+  fi
+  bash /run/cloud-compose-persist-filesystems \
+    /dev/disk/by-id/google-data \
+    /dev/disk/by-id/google-docker-volumes \
+    /dev/disk/by-id/google-prod-volumes
+%{ else ~}
+  bash /run/cloud-compose-persist-filesystems \
+    /dev/disk/by-id/google-data \
+    /dev/disk/by-id/google-docker-volumes
 %{ endif ~}
+  install -m 0600 /dev/null /run/cloud-compose-filesystems-ready
 
 write_files:
 ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
 ${ENV_FILE_CONTENT}
+${APPLICATION_ENV_FILE_CONTENT}
 ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
+${ROOTFS_ARCHIVE_COMMAND}
+- |
+  set -eu
+  test -f /run/cloud-compose-filesystems-ready || {
+    echo "Cloud Compose filesystems were not prepared; refusing application initialization" >&2
+    exit 1
+  }
 %{ for CMD in ADDITIONAL_INITCMD ~}
-- ${CMD}
+  ${indent(2, CMD)}
 %{ endfor ~}
-- chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
-- chmod 0775 /mnt/disks/data /mnt/disks/volumes
-- install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
-- bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
-%{ for VOLUME in DOCKER_VOLUME_OVERLAYS ~}
-- bash /home/cloud-compose/overlay-init.sh "${VOLUME}" >> /home/cloud-compose/run.log 2>&1
-%{ endfor ~}
+  chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
+  chmod 0775 /mnt/disks/data /mnt/disks/volumes
+  install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
+  rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
+  bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
+%{ if length(ADDITIONAL_RUNCMD) > 0 ~}
+- |
+  set -eu
+  test -f /home/cloud-compose/.cloud-compose-bootstrap-complete || {
+    echo "Cloud Compose application initialization did not complete; refusing post-initialization commands" >&2
+    exit 1
+  }
 %{ for CMD in ADDITIONAL_RUNCMD ~}
-- ${CMD}
+  ${indent(2, CMD)}
 %{ endfor ~}
+%{ endif ~}

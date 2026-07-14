@@ -14,7 +14,8 @@ retry_until_success apt-get install -y \
     docker.io \
     git \
     jq \
-    make
+    make \
+    openssl
 
 install -d /usr/local/lib/docker/cli-plugins
 bash /home/cloud-compose/install-docker-plugins.sh

@@ -19,7 +19,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /mnt/disks/data:/mnt/disks/data
-      - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
+      - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:ro
   cadvisor:
     image: ghcr.io/google/cadvisor:v0.60.5@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe
     command:
@@ -52,6 +52,6 @@ services:
       CADVISOR_HOST: "cadvisor:8080"
       GOOGLE_APPLICATION_CREDENTIALS: /app/GOOGLE_APPLICATION_CREDENTIALS
     volumes:
-      - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:r
+      - ./GOOGLE_APPLICATION_CREDENTIALS:/app/GOOGLE_APPLICATION_CREDENTIALS:ro
     depends_on:
       - cadvisor

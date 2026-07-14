@@ -30,7 +30,7 @@ output "internal_ip" {
 
 output "volumes" {
   value       = module.digitalocean.volumes
-  description = "Selected provider persistent volume details where available."
+  description = "Selected provider persistent application-data and Docker-volume details."
 }
 
 output "serviceGsa" {
@@ -66,4 +66,9 @@ output "compose_projects" {
 output "primary_compose_project" {
   value       = module.digitalocean.primary_compose_project
   description = "Normalized primary compose project."
+}
+
+output "sitectl_package_versions" {
+  value       = module.digitalocean.sitectl_package_versions
+  description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
 }

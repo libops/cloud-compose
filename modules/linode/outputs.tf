@@ -36,3 +36,8 @@ output "primary_compose_project" {
   value       = module.runtime.primary_compose_project
   description = "Normalized primary compose project."
 }
+
+output "sitectl_package_versions" {
+  value       = module.runtime.sitectl_package_versions
+  description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
+}

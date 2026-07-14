@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 set -eou pipefail
-set -x
 
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
@@ -20,13 +19,28 @@ if [ -z "${ROLLOUT_DOWNLOAD_SHA256:-}" ]; then
   echo "ROLLOUT_DOWNLOAD_SHA256 is required" >&2
   exit 1
 fi
+if [[ ! "$ROLLOUT_DOWNLOAD_URL" =~ ^https://[^[:space:]]+$ ]]; then
+  echo "ROLLOUT_DOWNLOAD_URL must be an HTTPS URL without whitespace" >&2
+  exit 2
+fi
+if [[ ! "$ROLLOUT_DOWNLOAD_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "ROLLOUT_DOWNLOAD_SHA256 must be a lowercase SHA-256 digest" >&2
+  exit 2
+fi
 
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+install_tmp=""
+trap 'rm -f -- "$tmp" "$install_tmp"' EXIT
 
-retry_until_success curl -fsSL --retry 5 --retry-delay 2 -o "$tmp" "$ROLLOUT_DOWNLOAD_URL"
-echo "${ROLLOUT_DOWNLOAD_SHA256}  ${tmp}" | sha256sum -c -
-install -o root -g root -m 0755 "$tmp" /usr/local/bin/cloud-compose-rollout
+retry_until_success curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  --retry 5 --retry-all-errors --retry-delay 2 \
+  --connect-timeout 10 --max-time 300 -o "$tmp" -- "$ROLLOUT_DOWNLOAD_URL"
+printf '%s  %s\n' "$ROLLOUT_DOWNLOAD_SHA256" "$tmp" | sha256sum -c -
+install_tmp="$(mktemp /usr/local/bin/.cloud-compose-rollout.XXXXXXXXXX)"
+install -o root -g root -m 0755 "$tmp" "$install_tmp"
+printf '%s  %s\n' "$ROLLOUT_DOWNLOAD_SHA256" "$install_tmp" | sha256sum -c -
+mv -f -- "$install_tmp" /usr/local/bin/cloud-compose-rollout
+install_tmp=""
 
 systemctl daemon-reload
 systemctl enable cloud-compose-rollout.service

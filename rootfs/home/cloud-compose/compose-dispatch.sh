@@ -21,9 +21,10 @@ case "$lifecycle" in
         ;;
 esac
 
-while read -r app; do
-    if [ -z "$app" ]; then
-        continue
-    fi
+acquire_cloud_compose_lifecycle_lock "$lifecycle"
+
+apps=()
+target_compose_apps_array "$lifecycle" apps
+for app in "${apps[@]}"; do
     run_compose_app_lifecycle "$app" "$lifecycle"
-done < <(target_compose_apps "$lifecycle")
+done

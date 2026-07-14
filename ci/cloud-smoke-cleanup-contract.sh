@@ -80,7 +80,9 @@ case "${1:-} ${2:-} ${3:-} ${4:-}" in
     ;;
   "compute firewall-rules list "*)
     if ! mutation_done firewalls-delete; then
-      printf 'allow-ssh-ipv4-cc-g-wp-12345678-abcd\n'
+      printf '%s\n' \
+        'allow-ssh-ipv4-cc-g-wp-12345678-abcd' \
+        'allow-cloud-run-cc-g-wp-12345678-abcd'
     fi
     exit 0
     ;;
@@ -234,6 +236,8 @@ grep -F 'gcloud compute instances list' "$success_log" | grep -Fq 'cc-g-wp-12345
   fail "GCP cleanup did not constrain resources to the originating workflow run"
 grep -F 'gcloud iam service-accounts list' "$success_log" | grep -Fq 'ppb-' || \
   fail "GCP cleanup does not select the power-button service account"
+grep -F 'gcloud compute firewall-rules list' "$success_log" | grep -Fq 'allow-cloud-run-' || \
+  fail "GCP cleanup does not select the VM ingress firewall for Direct VPC egress"
 for role in \
   roles/logging.logWriter \
   roles/monitoring.metricWriter \

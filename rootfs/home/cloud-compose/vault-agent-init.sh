@@ -5,24 +5,40 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
-if [ "${VAULT_AGENT_ENABLED:-false}" != "true" ]; then
-    echo "Vault Agent is disabled"
-    exit 0
+case "${VAULT_AGENT_ENABLED:-false}" in
+    false)
+        echo "Vault Agent is disabled"
+        systemctl disable --now cloud-compose-vault-agent.service >/dev/null 2>&1 || true
+        rm -f -- /run/cloud-compose/vault-agent.ready
+        exit 0
+        ;;
+    true) ;;
+    *)
+        echo "VAULT_AGENT_ENABLED must be true or false" >&2
+        exit 1
+        ;;
+esac
+
+if [ -L /etc/vault-agent.d/cloud-compose.hcl ] || [ ! -f /etc/vault-agent.d/cloud-compose.hcl ]; then
+    echo "Vault Agent is enabled but its config is missing or unsafe" >&2
+    systemctl disable --now cloud-compose-vault-agent.service >/dev/null 2>&1 || true
+    exit 1
 fi
 
-if [ ! -f /etc/vault-agent.d/cloud-compose.hcl ]; then
-    echo "Vault Agent config is missing"
-    exit 0
+if [ ! -x /usr/local/bin/vault ]; then
+    echo "Vault Agent is enabled but the Vault binary is not installed" >&2
+    systemctl disable --now cloud-compose-vault-agent.service >/dev/null 2>&1 || true
+    exit 1
 fi
 
-if ! command -v vault >/dev/null 2>&1; then
-    echo "Vault binary is not installed; skipping vault-agent.service"
-    exit 0
-fi
-
-mkdir -p "$(dirname "${VAULT_AGENT_TOKEN_PATH:-/mnt/disks/data/vault/token}")"
-chmod 0700 "$(dirname "${VAULT_AGENT_TOKEN_PATH:-/mnt/disks/data/vault/token}")"
+bash /home/cloud-compose/vault-agent-readiness.sh prepare
 
 systemctl daemon-reload
-systemctl enable vault-agent.service
-systemctl restart vault-agent.service
+systemctl enable cloud-compose-vault-agent.service
+systemctl restart cloud-compose-vault-agent.service
+if ! systemctl is-active --quiet cloud-compose-vault-agent.service ||
+    [ -L /run/cloud-compose/vault-agent.ready ] || [ ! -f /run/cloud-compose/vault-agent.ready ]; then
+    echo "Vault Agent failed to initialize while explicitly enabled" >&2
+    systemctl disable --now cloud-compose-vault-agent.service >/dev/null 2>&1 || true
+    exit 1
+fi

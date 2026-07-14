@@ -80,3 +80,19 @@ variable "tags" {
   default     = ["cloud-compose"]
   description = "Extra provider tags applied to smoke-test resources."
 }
+
+variable "cloud_compose_source_ref" {
+  type        = string
+  default     = "main"
+  description = "cloud-compose Git ref whose rootfs is fetched to keep DigitalOcean user_data below 64 KiB."
+}
+
+variable "cloud_compose_source_sha256" {
+  type        = string
+  description = "SHA-256 of the cloud-compose source archive selected by cloud_compose_source_ref."
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{64}$", trimspace(var.cloud_compose_source_sha256)))
+    error_message = "cloud_compose_source_sha256 must be a 64-character SHA-256 digest."
+  }
+}

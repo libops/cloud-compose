@@ -1,0 +1,12 @@
+[Unit]
+Description=Rotate Cloud Compose GCP service-account keys daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=6h
+FixedRandomDelay=true
+Unit=cloud-compose-key-rotation.service
+
+[Install]
+WantedBy=timers.target

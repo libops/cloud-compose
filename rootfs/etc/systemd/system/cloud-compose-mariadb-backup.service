@@ -1,11 +1,11 @@
 [Unit]
 Description=Cloud Compose MariaDB Backup
 After=cloud-compose.service
-Wants=cloud-compose.service
+RequiresMountsFor=/mnt/disks/data
 
 [Service]
 Type=oneshot
 User=cloud-compose
 Group=cloud-compose
-EnvironmentFile=/home/cloud-compose/.env
 ExecStart=/bin/bash /home/cloud-compose/mariadb-backup.sh
+TimeoutStartSec=12h

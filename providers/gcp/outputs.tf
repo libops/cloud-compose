@@ -28,9 +28,14 @@ output "internal_ip" {
   description = "Selected provider VM private IPv4 address."
 }
 
+output "network" {
+  value       = module.gcp.network
+  description = "Resolved GCP network and regional subnetwork used by the VM and optional Cloud Run Direct VPC egress."
+}
+
 output "volumes" {
-  value       = null
-  description = "Selected provider persistent volume details where available."
+  value       = module.gcp.volumes
+  description = "Selected provider persistent application-data and Docker-volume details."
 }
 
 output "serviceGsa" {
@@ -66,4 +71,9 @@ output "compose_projects" {
 output "primary_compose_project" {
   value       = module.gcp.primary_compose_project
   description = "Normalized primary compose project."
+}
+
+output "sitectl_package_versions" {
+  value       = module.gcp.sitectl_package_versions
+  description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
 }

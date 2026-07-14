@@ -1,0 +1,11 @@
+- name: Require explicit dedicated-host acknowledgement
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-host-ack
+    cloud_compose_template: wp
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+  roles:
+    - role: cloud_compose

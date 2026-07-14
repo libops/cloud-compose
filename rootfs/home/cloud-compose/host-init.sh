@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source /home/cloud-compose/profile.sh
 
 cleanup() {
-  rm -f tmp.attr .env.tmp
+  if [ -n "${metadata_file:-}" ]; then
+    rm -f "$metadata_file"
+  fi
   popd >/dev/null
 }
 
@@ -11,27 +16,16 @@ pushd /home/cloud-compose >/dev/null
 
 trap cleanup EXIT
 
-if [ -f .env ]; then
-  cp .env .env.tmp
-else
-  touch .env .env.tmp
-fi
-
 if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
+  metadata_file="$(mktemp /home/cloud-compose/.metadata.XXXXXXXXXX)"
   curl -sf \
     -H "Metadata-Flavor: Google" \
-    "http://metadata.google.internal/computeMetadata/v1/?recursive=true" > tmp.attr
+    "http://metadata.google.internal/computeMetadata/v1/?recursive=true" >"$metadata_file"
 
-  {
-    echo "GCP_PUBLIC_IP=$(jq -r '.instance.networkInterfaces[0].accessConfigs[0].externalIp' tmp.attr)"
-    echo "GCP_PRIVATE_IP=$(jq -r '.instance.networkInterfaces[0].ip' tmp.attr)"
-  } >> .env.tmp
-fi
-
-if ! diff <(md5sum .env.tmp) <(md5sum .env) >/dev/null 2>&1; then
-  mv .env.tmp .env
-else
-  rm -f .env.tmp
+  update_runtime_env_file .env GCP_PUBLIC_IP \
+    "$(jq -er '.instance.networkInterfaces[0].accessConfigs[0].externalIp' "$metadata_file")"
+  update_runtime_env_file .env GCP_PRIVATE_IP \
+    "$(jq -er '.instance.networkInterfaces[0].ip' "$metadata_file")"
 fi
 
 if [ "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}" = "true" ]; then
@@ -40,7 +34,38 @@ if [ "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}" = "true" ]; then
   chown cloud-compose:cloud-compose /mnt/disks/data/libops-internal/.env
 fi
 
-chown -R cloud-compose:cloud-compose /home/cloud-compose
+# Root-owned services execute scripts and load control data from this tree.
+# Keep the home boundary itself non-writable and grant the application account
+# only explicit mutable subdirectories. In particular, sitectl owns its state
+# below .sitectl; scripts at the home boundary remain root-owned.
+chown root:root /home/cloud-compose
+chmod 0755 /home/cloud-compose
+for mutable_dir in \
+  /home/cloud-compose/apps \
+  /home/cloud-compose/bin \
+  /home/cloud-compose/state \
+  /home/cloud-compose/.sitectl \
+  /home/cloud-compose/.cache \
+  /home/cloud-compose/.config \
+  /home/cloud-compose/.local; do
+  install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"
+done
+
+find /home/cloud-compose -maxdepth 1 -type f -name '*.sh' \
+  -exec chown root:root {} + \
+  -exec chmod 0755 {} +
+for dispatcher in init up down rollout; do
+  if [ -f "/home/cloud-compose/$dispatcher" ]; then
+    chown root:root "/home/cloud-compose/$dispatcher"
+    chmod 0755 "/home/cloud-compose/$dispatcher"
+  fi
+done
+for runtime_input in .env compose-projects.json application-env.json; do
+  if [ -f "/home/cloud-compose/$runtime_input" ]; then
+    chown root:cloud-compose "/home/cloud-compose/$runtime_input"
+    chmod 0640 "/home/cloud-compose/$runtime_input"
+  fi
+done
 groupadd --force docker
 if ! id -u cloud-compose >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash --groups docker cloud-compose
@@ -51,3 +76,12 @@ elif ! id -nG cloud-compose | tr ' ' '\n' | grep -qx docker; then
     getent group docker >&2 || true
   }
 fi
+
+# Cloud-init prepares these mount roots before invoking run.sh, while the
+# Ansible and Salt adapters can install the runtime onto pre-mounted storage.
+# Normalize only the mount roots here so every entry path can create lifecycle
+# locks without granting recursive ownership of application or control data.
+for mutable_root in /mnt/disks/data /mnt/disks/volumes; do
+  install -d -m 0775 -o cloud-compose -g cloud-compose "$mutable_root"
+done
+install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops

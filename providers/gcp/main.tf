@@ -1,5 +1,20 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
+
+  required_providers {
+    cloudinit = {
+      source  = "hashicorp/cloudinit"
+      version = "~> 2.3"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.14"
+    }
+  }
 }
 
 locals {
@@ -12,6 +27,16 @@ locals {
 
   input_compose = var.runtime.compose
   input_sitectl = var.runtime.sitectl
+
+  sitectl_packages = distinct(concat(
+    ["sitectl"],
+    local.input_sitectl.packages == null ? local.template.packages : local.input_sitectl.packages,
+  ))
+  template_sitectl_package_versions = {
+    for package in local.sitectl_packages :
+    package => local.template.package_versions[package]
+    if contains(keys(local.template.package_versions), package)
+  }
 
   runtime = merge(var.runtime, {
     compose = merge(local.input_compose, {
@@ -27,11 +52,8 @@ locals {
       )
     })
     sitectl = merge(local.input_sitectl, {
-      packages = (
-        local.template_name != "" && length(local.input_sitectl.packages) == 1 && local.input_sitectl.packages[0] == "sitectl"
-        ? local.template.packages
-        : local.input_sitectl.packages
-      )
+      packages         = local.sitectl_packages
+      package_versions = merge(local.template_sitectl_package_versions, local.input_sitectl.package_versions)
       plugin = (
         local.template_name != "" && local.input_sitectl.plugin == "core"
         ? local.template.plugin
@@ -69,6 +91,7 @@ module "gcp" {
 
   service_account_email     = local.gcp_identity.vm_service_account_email
   app_service_account_email = local.gcp_identity.app_service_account_email
+  app_credentials_enabled   = local.gcp_identity.app_credentials_enabled
 
   machine_type = local.gcp_instance.machine_type
   os           = local.gcp_instance.os
@@ -88,12 +111,13 @@ module "gcp" {
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
 
-  sitectl_packages     = local.sitectl.packages
-  sitectl_version      = local.sitectl.version
-  sitectl_context_name = local.sitectl.context_name
-  sitectl_plugin       = local.sitectl.plugin
-  sitectl_environment  = local.sitectl.environment
-  sitectl_verify_args  = local.sitectl.verify_args
+  sitectl_packages         = local.sitectl.packages
+  sitectl_version          = local.sitectl.version
+  sitectl_package_versions = local.sitectl.package_versions
+  sitectl_context_name     = local.sitectl.context_name
+  sitectl_plugin           = local.sitectl.plugin
+  sitectl_environment      = local.sitectl.environment
+  sitectl_verify_args      = local.sitectl.verify_args
 
   docker_compose_version = local.docker.compose_version
   docker_buildx_version  = local.docker.buildx_version
@@ -103,28 +127,36 @@ module "gcp" {
   libops_internal_services_auto_update = local.managed.internal_services_auto_update
   libops_managed_artifacts             = local.managed.artifacts
 
-  allowed_ips      = local.gcp_network.power_button_allowed_ips
-  allowed_ssh_ipv4 = local.gcp_network.ssh_ipv4
-  allowed_ssh_ipv6 = local.gcp_network.ssh_ipv6
+  allowed_ips                = local.gcp_network.power_button_allowed_ips
+  allowed_ip_forwarded_depth = local.gcp_network.power_button_ip_depth
+  allowed_ssh_ipv4           = local.gcp_network.ssh_ipv4
+  allowed_ssh_ipv6           = local.gcp_network.ssh_ipv6
 
   create_network        = local.gcp_network.create
+  network_project_id    = local.gcp_network.project_id
   network_name          = local.gcp_network.name
   subnetwork_name       = local.gcp_network.subnetwork
   network_ip_cidr_range = local.gcp_network.ip_cidr_range
+  network_mtu           = local.gcp_network.mtu
 
   run_snapshots           = local.gcp_snapshots.enabled
   overlay_source_instance = local.gcp_overlay.source_instance
   volume_names            = local.gcp_overlay.volume_names
 
-  users   = local.runtime.users
-  rootfs  = local.runtime.rootfs
-  runcmd  = local.gcp_cloud_init.runcmd
-  initcmd = local.gcp_cloud_init.initcmd
+  users                 = local.runtime.users
+  rootfs                = local.runtime.rootfs
+  rootfs_archive_url    = local.runtime.rootfs_archive_url
+  rootfs_archive_sha256 = local.runtime.rootfs_archive_sha256
+  extra_env             = local.runtime.extra_env
+  runcmd                = local.gcp_cloud_init.runcmd
+  initcmd               = local.gcp_cloud_init.initcmd
 
   artifact_registry_repository = local.gcp_artifact_registry.repository
   artifact_registry_location   = local.gcp_artifact_registry.location
 
   power_management_enabled = local.gcp_power_management.enabled
+  power_start_role         = local.gcp_power_management.start_role
+  power_suspend_role       = local.gcp_power_management.suspend_role
   frontend                 = local.gcp_power_management.frontend
 
   rollout_enabled        = local.gcp_rollout.enabled

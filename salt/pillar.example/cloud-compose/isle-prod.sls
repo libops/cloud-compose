@@ -2,6 +2,7 @@ cloud_compose:
   name: isle-prod
   provider: onprem
   template: isle
+  dedicated_host_acknowledged: true
   runtime:
     compose:
       ingress:

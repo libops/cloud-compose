@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 }
 
 module "apps" {
@@ -7,8 +7,7 @@ module "apps" {
 
   name = var.name
   gcp = {
-    project_id     = var.project_id
-    project_number = var.project_number
+    project_id = var.project_id
   }
   runtime = {
     compose = {

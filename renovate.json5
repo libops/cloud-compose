@@ -18,6 +18,22 @@
     },
     {
       customType: 'regex',
+      description: 'Update Docker Compose configuration-management defaults',
+      managerFilePatterns: [
+        '/^ansible/roles/cloud_compose/defaults/main\\.yml$/',
+        '/^salt/cloud-compose/init\\.sls$/',
+      ],
+      matchStrings: [
+        'cloud_compose_docker_compose_version:\\s*(?<currentValue>v?[^\\s]+)',
+        "docker\\.get\\('compose_version',\\s*cc\\.get\\('docker_compose_version',\\s*'(?<currentValue>v?[^']+)'\\)\\)",
+      ],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'docker-compose',
+      packageNameTemplate: 'docker/compose',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
       description: 'Update Docker Compose and Buildx shell fallback defaults',
       managerFilePatterns: [
         '/(^|/)install-docker-plugins\\.sh$/',
@@ -26,6 +42,41 @@
         '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+[A-Z_]+="\\$\\{[A-Z_]+:-(?<currentValue>[^}]+)\\}"',
       ],
       versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
+    },
+    {
+      customType: 'regex',
+      description: 'Update the digest-pinned Alpine COS build environment',
+      managerFilePatterns: [
+        '/(^|/)install-dependencies-cos\\.sh$/',
+      ],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+ALPINE_BUILD_IMAGE="alpine:(?<currentValue>[^@"]+)@(?<currentDigest>sha256:[0-9a-f]{64})"',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
+    },
+    {
+      customType: 'regex',
+      description: 'Update the digest-pinned configuration-management test image',
+      managerFilePatterns: [
+        '/(^|/)config-management(-cloud)?-smoke\\.sh$/',
+      ],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: packageName=(?<packageName>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\s+CONFIG_MANAGEMENT_IMAGE_DEFAULT="python:(?<currentValue>[^@"]+)@(?<currentDigest>sha256:[0-9a-f]{64})"',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
+    },
+    {
+      customType: 'regex',
+      description: 'Update pinned Python tools in the documentation image',
+      managerFilePatterns: [
+        '/^docs/Dockerfile$/',
+      ],
+      matchStrings: [
+        'pip install (?<depName>uv)==(?<currentValue>[^\\s&]+)',
+        'uv pip install [^\\n]* (?<depName>zensical)==(?<currentValue>[^\\s&]+)',
+      ],
+      datasourceTemplate: 'pypi',
+      versioningTemplate: 'pep440',
     },
   ],
 }

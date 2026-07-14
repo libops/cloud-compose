@@ -16,7 +16,7 @@ the same lifecycle path used by later rollouts.
 
 - Compose app lifecycle management through `sitectl`
 - Multi-app VM support through `compose_projects`
-- GCP app and VM identity separation
+- GCP foundation/application state and identity separation
 - Optional Vault Agent contract
 - Optional GCP power management through Cloud Run and lightsout
 - Provider-neutral runtime contracts for DigitalOcean and Linode
@@ -26,6 +26,7 @@ the same lifecycle path used by later rollouts.
 ## Start here
 
 - [Runtime contracts](runtime-contracts.md) explains the VM/app contract.
+- [GCP foundation and application states](runtime-contracts.md#gcp-foundation-and-application-states) explains singleton API/IAM ownership, Shared VPC, and Direct VPC egress.
 - [Managed runtime](managed-runtime.md) covers host tools and internal services.
 - [Rollout API](rollout.md) covers authenticated deploy triggers.
 - [Provider entrypoints and on-prem](non-gcp-providers.md) covers non-GCP and existing-host boundaries.

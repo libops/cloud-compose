@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 
   required_providers {
     google = {
@@ -13,10 +13,6 @@ provider "google" {
   project = local.project_id != "" ? local.project_id : "unused"
   region  = var.gcp_region
   zone    = var.gcp_zone
-}
-
-data "google_project" "current" {
-  project_id = local.project_id
 }
 
 locals {
@@ -41,10 +37,9 @@ module "app" {
   name     = module.context.name
   template = module.context.template
   gcp = {
-    project_id     = local.project_id
-    project_number = data.google_project.current.number
-    region         = var.gcp_region
-    zone           = var.gcp_zone
+    project_id = local.project_id
+    region     = var.gcp_region
+    zone       = var.gcp_zone
     instance = {
       machine_type = var.gcp_machine_type
       os           = var.gcp_os

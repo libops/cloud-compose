@@ -55,7 +55,13 @@ variable "ingress_port" {
 variable "rootfs_archive_url" {
   type        = string
   default     = ""
-  description = "Optional cloud-compose rootfs archive URL for providers with metadata size limits."
+  description = "Optional cloud-compose rootfs archive URL for providers with metadata size limits. Must be set with rootfs_archive_sha256."
+}
+
+variable "rootfs_archive_sha256" {
+  type        = string
+  default     = ""
+  description = "SHA-256 for rootfs_archive_url."
 }
 
 variable "tags" {

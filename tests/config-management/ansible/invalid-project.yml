@@ -1,0 +1,17 @@
+- name: Reject invalid cloud-compose projects
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-project
+    cloud_compose_dedicated_host_acknowledged: true
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_runtime:
+      compose:
+        projects:
+          "Bad/Name":
+            docker_compose_repo: https://github.com/libops/wp.git
+            ingress_port: 80
+  roles:
+    - role: cloud_compose

@@ -4,11 +4,16 @@ set -euo pipefail
 
 : "${SMOKE_METHOD:?}"
 : "${SMOKE_HOST:?}"
-: "${SMOKE_SSH_KEY_B64:?}"
 : "${SMOKE_NAME:?}"
 : "${SMOKE_TEMPLATE:?}"
 : "${SMOKE_ENVIRONMENT:?}"
 : "${SMOKE_PROJECT_DIR:?}"
+
+readonly smoke_ssh_key_mount="/run/secrets/cloud-compose-ssh-key"
+if [[ -L "$smoke_ssh_key_mount" || ! -f "$smoke_ssh_key_mount" ]]; then
+  echo "Config-management smoke SSH key mount is missing or unsafe" >&2
+  exit 1
+fi
 
 apt-get update >/tmp/cloud-compose-apt-update.log
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -29,8 +34,7 @@ python -m pip install --no-cache-dir \
   Jinja2==3.1.4 >/tmp/cloud-compose-pip-install.log
 
 install -d -m 0700 /tmp/cloud-compose-ssh
-printf '%s' "$SMOKE_SSH_KEY_B64" | base64 -d >/tmp/cloud-compose-ssh/id_ed25519
-chmod 0600 /tmp/cloud-compose-ssh/id_ed25519
+install -m 0600 "$smoke_ssh_key_mount" /tmp/cloud-compose-ssh/id_ed25519
 touch /tmp/cloud-compose-ssh/known_hosts
 chmod 0600 /tmp/cloud-compose-ssh/known_hosts
 ssh-keyscan -H "$SMOKE_HOST" >>/tmp/cloud-compose-ssh/known_hosts 2>/dev/null
@@ -40,15 +44,36 @@ ssh_opts=(
   -i /tmp/cloud-compose-ssh/id_ed25519
   -o BatchMode=yes
   -o ConnectTimeout=20
+  -o ServerAliveCountMax=10
+  -o ServerAliveInterval=30
   -o StrictHostKeyChecking=yes
   -o UserKnownHostsFile=/tmp/cloud-compose-ssh/known_hosts
 )
+
+retry_remote_operation() {
+  local label="$1" attempt status
+  shift
+
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+    if [[ "$attempt" -eq 3 ]]; then
+      echo "${label} failed after ${attempt} attempts" >&2
+      return "$status"
+    fi
+    echo "${label} failed; retrying in 15s (attempt $((attempt + 1)) of 3)" >&2
+    sleep 15
+  done
+}
 
 deploy_ansible() {
   export ANSIBLE_RETRY_FILES_ENABLED=false
   export ANSIBLE_ROLES_PATH=/work/ansible/roles
 
-  cat >/tmp/cloud-compose-ansible-inventory.yml <<EOF
+  cat >/tmp/cloud-compose-ansible-inventory.yml <<EOF || return 1
 all:
   children:
     cloud_compose:
@@ -60,6 +85,7 @@ all:
           ansible_ssh_common_args: "-o UserKnownHostsFile=/tmp/cloud-compose-ssh/known_hosts -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10"
           cloud_compose_name: ${SMOKE_NAME}
           cloud_compose_template: ${SMOKE_TEMPLATE}
+          cloud_compose_dedicated_host_acknowledged: true
           cloud_compose_runtime:
             compose:
               ingress_port: 80
@@ -74,15 +100,19 @@ EOF
 }
 
 deploy_salt() {
-  tar -C /work \
+  if ! tar -C /work \
     --exclude="./.git" \
     --exclude="./.terraform" \
     --exclude="./docs/site" \
     -czf - . |
     ssh "${ssh_opts[@]}" "$ssh_target" \
-      "rm -rf /srv/cloud-compose && mkdir -p /srv/cloud-compose && tar -xzf - -C /srv/cloud-compose"
+      "rm -rf /srv/cloud-compose && mkdir -p /srv/cloud-compose && tar -xzf - -C /srv/cloud-compose"; then
+    return 1
+  fi
 
-  ssh "${ssh_opts[@]}" "$ssh_target" \
+  # Smoke settings must be expanded locally for the remote shell.
+  # shellcheck disable=SC2029
+  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
     "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -128,6 +158,7 @@ cloud_compose:
   name: ${SMOKE_NAME}
   provider: onprem
   template: ${SMOKE_TEMPLATE}
+  dedicated_host_acknowledged: true
   runtime:
     compose:
       ingress_port: 80
@@ -148,9 +179,14 @@ EOF
   --config-dir=/tmp/cloud-compose-salt/etc \
   state.apply cloud-compose
 REMOTE
+  then
+    return 1
+  fi
 }
 
 verify_remote() {
+  # Smoke settings must be expanded locally for the remote shell.
+  # shellcheck disable=SC2029
   ssh "${ssh_opts[@]}" "$ssh_target" \
     "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
@@ -161,21 +197,33 @@ test -x /home/cloud-compose/down
 test -x /home/cloud-compose/rollout
 test -x /home/cloud-compose/run.sh
 python3 -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
+python3 -m json.tool /home/cloud-compose/application-env.json >/dev/null
 
 python3 - <<'PY'
 import json
 import os
+import subprocess
 from pathlib import Path
 
 name = os.environ["SMOKE_NAME"]
 template = os.environ["SMOKE_TEMPLATE"]
 project_dir = os.environ["SMOKE_PROJECT_DIR"]
-env = {}
-for line in Path("/home/cloud-compose/.env").read_text().splitlines():
-    if not line.strip():
-        continue
-    key, raw = line.split("=", 1)
-    env[key] = json.loads(raw)
+def load_runtime_env(path):
+    result = subprocess.run(
+        [
+            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
+            "bash", "--noprofile", "--norc", "-c",
+            "source /home/cloud-compose/profile.sh; env -0",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    return {
+        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
+        for entry in result.stdout.split(b"\0") if b"=" in entry
+    }
+
+env = load_runtime_env(Path("/home/cloud-compose/.env"))
 
 projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
 project = projects[name]
@@ -199,12 +247,12 @@ REMOTE
 }
 
 case "$SMOKE_METHOD" in
-  ansible) deploy_ansible ;;
-  salt) deploy_salt ;;
+  ansible) retry_remote_operation "Ansible deployment" deploy_ansible ;;
+  salt) retry_remote_operation "Salt deployment" deploy_salt ;;
   *)
     echo "Unknown config-management smoke method: ${SMOKE_METHOD}" >&2
     exit 2
     ;;
 esac
 
-verify_remote
+retry_remote_operation "Remote verification" verify_remote

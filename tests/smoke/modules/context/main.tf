@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 
   required_providers {
     random = {
@@ -41,7 +41,8 @@ locals {
   tags         = distinct(concat(var.tags, ["cloud-compose-smoke", local.target], local.run_tag != "" ? [local.run_tag] : []))
   ssh_keys     = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
   runtime_base = {
-    rootfs_archive_url = var.rootfs_archive_url
+    rootfs_archive_url    = var.rootfs_archive_url
+    rootfs_archive_sha256 = var.rootfs_archive_sha256
     compose = {
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port

@@ -1,0 +1,18 @@
+- name: Reject an unknown primary cloud-compose project
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-primary
+    cloud_compose_template: wp
+    cloud_compose_dedicated_host_acknowledged: true
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_runtime:
+      compose:
+        primary: missing
+        projects:
+          wp:
+            docker_compose_repo: https://github.com/libops/wp.git
+  roles:
+    - role: cloud_compose

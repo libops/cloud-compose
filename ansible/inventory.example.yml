@@ -6,6 +6,7 @@ all:
           ansible_user: debian
           cloud_compose_name: isle-prod
           cloud_compose_template: isle
+          cloud_compose_dedicated_host_acknowledged: true
           cloud_compose_runtime:
             compose:
               ingress:
@@ -17,6 +18,7 @@ all:
           ansible_user: debian
           cloud_compose_name: wp-prod
           cloud_compose_template: wp
+          cloud_compose_dedicated_host_acknowledged: true
           cloud_compose_runtime:
             compose:
               ingress:
@@ -28,6 +30,7 @@ all:
           ansible_user: debian
           cloud_compose_name: drupal-prod
           cloud_compose_template: drupal
+          cloud_compose_dedicated_host_acknowledged: true
           cloud_compose_runtime:
             compose:
               ingress:

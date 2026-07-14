@@ -3,9 +3,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# renovate: datasource=docker depName=python packageName=python versioning=docker
+CONFIG_MANAGEMENT_IMAGE_DEFAULT="python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3"
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Usage:
   ci/config-management-cloud-smoke.sh all
   ci/config-management-cloud-smoke.sh ansible-drupal
@@ -27,7 +29,7 @@ Optional environment:
   CLOUD_COMPOSE_SMOKE_RUN_ID
   CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS=true
   CLOUD_COMPOSE_SMOKE_WORKDIR=.cloud-compose-smoke
-  CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE=python:3.11-slim
+  CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE=${CONFIG_MANAGEMENT_IMAGE_DEFAULT}
 EOF
 }
 
@@ -118,7 +120,16 @@ target_workdir() {
 ensure_key() {
   local key_path="$1"
 
+  if [[ -L "$key_path" || ( -e "$key_path" && ! -f "$key_path" ) ]]; then
+    echo "Config-management smoke SSH private-key path is unsafe: $key_path" >&2
+    return 1
+  fi
   if [[ -f "$key_path" ]]; then
+    if [[ -L "${key_path}.pub" || ! -f "${key_path}.pub" ]]; then
+      echo "Config-management smoke SSH public-key path is missing or unsafe: ${key_path}.pub" >&2
+      return 1
+    fi
+    chmod 0600 "$key_path"
     return 0
   fi
   mkdir -p "$(dirname "$key_path")"
@@ -138,7 +149,7 @@ api_request() {
     -w $'\n%{http_code}' \
     "https://api.linode.com/v4${path}")"; then
     http_code="${response##*$'\n'}"
-    body="${response%$'\n'$http_code}"
+    body="${response%$'\n'"$http_code"}"
   else
     echo "linode API request failed for ${method} ${path}; check LINODE_TOKEN and network access." >&2
     return 75
@@ -447,7 +458,7 @@ target_var_args() {
 
 deploy_config_management() {
   local target="$1" key_path="$2" output_json="$3"
-  local method host name template environment project_dir image key_b64
+  local method host name template environment project_dir image
 
   method="$(jq -r '.method' "$output_json")"
   host="$(jq -r '.host' "$output_json")"
@@ -455,24 +466,31 @@ deploy_config_management() {
   template="$(jq -r '.app' "$output_json")"
   environment="$(jq -r '.environment' "$output_json")"
   project_dir="$(jq -r '.project_dir' "$output_json")"
-  image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-python:3.11-slim}"
-  key_b64="$(base64 <"$key_path" | tr -d '\n')"
+  image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-$CONFIG_MANAGEMENT_IMAGE_DEFAULT}"
+
+  if [[ -L "$key_path" || ! -f "$key_path" ]]; then
+    echo "Config-management smoke SSH private-key path is missing or unsafe: $key_path" >&2
+    return 1
+  fi
+  key_path="$(cd -P -- "$(dirname -- "$key_path")" && pwd)/$(basename -- "$key_path")"
+  if [[ "$key_path" == *,* ]]; then
+    echo "Config-management smoke SSH private-key path cannot contain a comma: $key_path" >&2
+    return 1
+  fi
 
   echo "Deploying ${template} to ${host} with ${method}"
-  tar \
-    --exclude="./.git" \
-    --exclude="./.terraform" \
-    --exclude="./docs/site" \
-    -C "$repo_root" \
-    -cf - . |
+  # Stream only the committed source under test. Archiving the working tree
+  # would also copy ignored Terraform state and the generated private key into
+  # the helper container and, for Salt, onward to the provisioned VM.
+  git -C "$repo_root" archive --format=tar HEAD |
     docker run --rm -i \
       --env "SMOKE_METHOD=${method}" \
       --env "SMOKE_HOST=${host}" \
-      --env "SMOKE_SSH_KEY_B64=${key_b64}" \
       --env "SMOKE_NAME=${name}" \
       --env "SMOKE_TEMPLATE=${template}" \
       --env "SMOKE_ENVIRONMENT=${environment}" \
       --env "SMOKE_PROJECT_DIR=${project_dir}" \
+      --mount "type=bind,src=${key_path},dst=/run/secrets/cloud-compose-ssh-key,readonly" \
       --tmpfs /run \
       --tmpfs /tmp \
       "$image" \
@@ -480,14 +498,13 @@ deploy_config_management() {
 }
 
 require_run_commands() {
-  require_cmd base64
   require_cmd curl
   require_cmd docker
+  require_cmd git
   require_cmd jq
   require_cmd ssh
   require_cmd ssh-keygen
   require_cmd ssh-keyscan
-  require_cmd tar
   require_cmd terraform
 }
 
@@ -641,7 +658,6 @@ destroy_target() (
   fi
 
   provider_tag_cleanup "$target" "$(smoke_run_id)" || cleanup_status=$?
-
   if [[ "$destroy_status" -ne 0 && "$cleanup_status" -eq 0 ]]; then
     echo "Provider tag cleanup completed for ${target} after Terraform destroy failed"
     return 0

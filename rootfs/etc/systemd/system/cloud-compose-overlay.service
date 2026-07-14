@@ -1,0 +1,15 @@
+[Unit]
+Description=Mount Cloud Compose Docker volume overlays
+Before=docker.service cloud-compose.service
+RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/home/cloud-compose/.env
+ExecStart=/bin/bash /home/cloud-compose/mount-overlays.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

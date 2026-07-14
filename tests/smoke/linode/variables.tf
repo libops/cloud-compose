@@ -86,3 +86,13 @@ variable "cloud_compose_source_ref" {
   default     = "main"
   description = "cloud-compose Git ref whose rootfs is fetched by providers with metadata size limits."
 }
+
+variable "cloud_compose_source_sha256" {
+  type        = string
+  description = "SHA-256 of the cloud-compose source archive selected by cloud_compose_source_ref."
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{64}$", trimspace(var.cloud_compose_source_sha256)))
+    error_message = "cloud_compose_source_sha256 must be a 64-character SHA-256 digest."
+  }
+}

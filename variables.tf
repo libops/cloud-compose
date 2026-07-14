@@ -36,6 +36,7 @@ variable "gcp" {
     identity = optional(object({
       vm_service_account_email  = optional(string, "")
       app_service_account_email = optional(string, "")
+      app_credentials_enabled   = optional(bool, false)
     }), {})
 
     instance = optional(object({
@@ -51,10 +52,13 @@ variable "gcp" {
 
     network = optional(object({
       create                   = optional(bool, true)
+      project_id               = optional(string, "")
       name                     = optional(string, "")
       subnetwork               = optional(string, "")
       ip_cidr_range            = optional(string, "10.42.0.0/24")
+      mtu                      = optional(number, 1460)
       power_button_allowed_ips = optional(list(string), [])
+      power_button_ip_depth    = optional(number)
       ssh_ipv4                 = optional(list(string), [])
       ssh_ipv6                 = optional(list(string), [])
     }), {})
@@ -79,7 +83,9 @@ variable "gcp" {
     }), {})
 
     power_management = optional(object({
-      enabled = optional(bool, true)
+      enabled      = optional(bool, false)
+      start_role   = optional(string, "")
+      suspend_role = optional(string, "")
       frontend = optional(object({
         image  = string
         port   = optional(number, 8080)
@@ -138,10 +144,54 @@ variable "gcp" {
     condition     = var.gcp.rollout.release_sha256 == "" || can(regex("^[0-9a-f]{64}$", var.gcp.rollout.release_sha256))
     error_message = "gcp.rollout.release_sha256 must be empty or a lowercase SHA256 hex digest."
   }
+
+  validation {
+    condition = (
+      (var.gcp.rollout.release_url == "" || can(regex("^https://[^[:space:]]+$", var.gcp.rollout.release_url))) &&
+      (var.gcp.rollout.jwks_uri == "" || can(regex("^https://[^[:space:]]+$", var.gcp.rollout.jwks_uri))) &&
+      (trimspace(var.gcp.rollout.custom_claims) == "" || can(keys(jsondecode(var.gcp.rollout.custom_claims))))
+    )
+    error_message = "GCP rollout release_url and jwks_uri must use HTTPS, and custom_claims must be empty or a JSON object."
+  }
+
+  validation {
+    condition = (
+      var.gcp.rollout.port >= 1 &&
+      var.gcp.rollout.port <= 65535 &&
+      floor(var.gcp.rollout.port) == var.gcp.rollout.port &&
+      (var.gcp.power_management.frontend == null ? true : (
+        var.gcp.power_management.frontend.port >= 1 &&
+        var.gcp.power_management.frontend.port <= 65535 &&
+        floor(var.gcp.power_management.frontend.port) == var.gcp.power_management.frontend.port
+      ))
+    )
+    error_message = "gcp.rollout.port and gcp.power_management.frontend.port must be whole numbers between 1 and 65535."
+  }
+
+  validation {
+    condition = (
+      can(cidrhost(var.gcp.network.ip_cidr_range, 0)) &&
+      length(regexall(":", var.gcp.network.ip_cidr_range)) == 0 &&
+      alltrue([for cidr in var.gcp.network.power_button_allowed_ips : can(cidrhost(cidr, 0))]) &&
+      alltrue([for cidr in var.gcp.network.ssh_ipv4 : can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) == 0]) &&
+      alltrue([for cidr in var.gcp.network.ssh_ipv6 : can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) > 0]) &&
+      alltrue([for cidr in var.gcp.rollout.allowed_ipv4 : can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) == 0])
+    )
+    error_message = "GCP network CIDRs must be valid and match their advertised IPv4 or IPv6 family."
+  }
+
+  validation {
+    condition = var.gcp.network.power_button_ip_depth == null ? true : (
+      var.gcp.network.power_button_ip_depth >= 0 &&
+      var.gcp.network.power_button_ip_depth <= 10 &&
+      floor(var.gcp.network.power_button_ip_depth) == var.gcp.network.power_button_ip_depth
+    )
+    error_message = "gcp.network.power_button_ip_depth must be null or a whole number from 0 through 10."
+  }
 }
 
 variable "digitalocean" {
-  description = "DigitalOcean infrastructure settings."
+  description = "DigitalOcean infrastructure settings. droplet.backups covers only the Droplet boot disk; attached application and Docker volumes require a separate offsite backup policy."
   type = object({
     region = optional(string, "tor1")
     tags   = optional(list(string), ["cloud-compose"])
@@ -176,7 +226,7 @@ variable "digitalocean" {
 }
 
 variable "linode" {
-  description = "Linode infrastructure settings."
+  description = "Linode infrastructure settings. instance.backups_enabled covers only the instance disk; attached application and Docker Block Storage volumes require a separate offsite backup policy."
   type = object({
     region = optional(string, "us-east")
     tags   = optional(list(string), ["cloud-compose"])
@@ -211,6 +261,15 @@ variable "linode" {
     }), {})
   })
   default = {}
+
+  validation {
+    condition = alltrue([
+      for key in var.linode.instance.authorized_keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
+      ]) && alltrue([
+      for username in var.linode.instance.authorized_users : can(regex("^[A-Za-z0-9._-]+$", username))
+    ])
+    error_message = "linode.instance authorized_keys must be non-empty single-line values and authorized_users must contain safe single-line usernames."
+  }
 }
 
 variable "runtime" {
@@ -255,8 +314,8 @@ variable "runtime" {
         sitectl_context_name   = optional(string)
         sitectl_plugin         = optional(string)
         sitectl_environment    = optional(string)
-        sitectl_packages       = optional(list(string), [])
-        sitectl_verify_args    = optional(list(string), [])
+        sitectl_packages       = optional(list(string))
+        sitectl_verify_args    = optional(list(string))
         docker_compose_init    = optional(list(string))
         docker_compose_up      = optional(list(string))
         docker_compose_down    = optional(list(string))
@@ -269,12 +328,13 @@ variable "runtime" {
     }), {})
 
     sitectl = optional(object({
-      packages     = optional(list(string), ["sitectl"])
-      version      = optional(string, "latest")
-      context_name = optional(string, "")
-      plugin       = optional(string, "core")
-      environment  = optional(string, "production")
-      verify_args  = optional(list(string), [])
+      packages         = optional(list(string))
+      version          = optional(string, "latest")
+      package_versions = optional(map(string), {})
+      context_name     = optional(string, "")
+      plugin           = optional(string, "core")
+      environment      = optional(string, "production")
+      verify_args      = optional(list(string), [])
     }), {})
 
     docker = optional(object({
@@ -286,8 +346,8 @@ variable "runtime" {
 
     managed_runtime = optional(object({
       enabled                       = optional(bool, true)
-      internal_services_enabled     = optional(bool, true)
-      internal_services_auto_update = optional(bool, true)
+      internal_services_enabled     = optional(bool, false)
+      internal_services_auto_update = optional(bool, false)
       artifacts = optional(list(object({
         name    = string
         url     = string
@@ -305,7 +365,7 @@ variable "runtime" {
       namespace               = optional(string, "")
       role                    = optional(string, "")
       agent_enabled           = optional(bool, false)
-      auth_method             = optional(string, "gcp-iam")
+      auth_method             = optional(string, "auto")
       gcp_auth_mount_path     = optional(string, "auth/gcp")
       agent_token_path        = optional(string, "/mnt/disks/data/vault/token")
       agent_additional_config = optional(string, "")
@@ -322,32 +382,82 @@ variable "runtime" {
   default = {}
 
   validation {
-    condition = alltrue([
-      for name, app in var.runtime.compose.projects :
-      can(regex("^[a-z][a-z0-9-]*$", name)) &&
-      trimspace(app.docker_compose_repo) != "" &&
-      try(app.ingress_port, var.runtime.compose.ingress_port) > 0 &&
-      try(app.ingress_port, var.runtime.compose.ingress_port) <= 65535
-    ])
-    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be between 1 and 65535."
+    condition = (
+      (trimspace(var.runtime.rootfs_archive_url) == "") == (trimspace(var.runtime.rootfs_archive_sha256) == "") &&
+      (trimspace(var.runtime.rootfs_archive_sha256) == "" || can(regex("^[0-9a-fA-F]{64}$", trimspace(var.runtime.rootfs_archive_sha256))))
+    )
+    error_message = "runtime.rootfs_archive_url and a 64-character runtime.rootfs_archive_sha256 must be supplied together."
   }
 
   validation {
     condition = alltrue([
-      for package in var.runtime.sitectl.packages :
+      for name in keys(var.runtime.extra_env) :
+      can(regex("^[A-Za-z_][A-Za-z0-9_]*$", name)) &&
+      !contains(["HOME", "PATH"], name) &&
+      alltrue([
+        for prefix in [
+          "CLOUD_COMPOSE_",
+          "COMPOSE_",
+          "DOCKER_",
+          "SITECTL_",
+          "LIBOPS_",
+          "GCP_",
+          "VAULT_",
+          "ROLLOUT_",
+          "POWER_MANAGEMENT_",
+        ] : !startswith(name, prefix)
+      ])
+    ])
+    error_message = "runtime.extra_env names must be valid environment names and must not override cloud-compose control-plane keys (HOME, PATH, or CLOUD_COMPOSE_/COMPOSE_/DOCKER_/SITECTL_/LIBOPS_/GCP_/VAULT_/ROLLOUT_/POWER_MANAGEMENT_ prefixes)."
+  }
+
+  validation {
+    condition = (
+      var.runtime.compose.ingress_port >= 1 &&
+      var.runtime.compose.ingress_port <= 65535 &&
+      floor(var.runtime.compose.ingress_port) == var.runtime.compose.ingress_port &&
+      alltrue([
+        for name, app in var.runtime.compose.projects :
+        can(regex("^[a-z][a-z0-9-]*$", name)) &&
+        trimspace(app.docker_compose_repo) != "" &&
+        coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port) >= 1 &&
+        coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port) <= 65535 &&
+        floor(coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)) == coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)
+      ])
+    )
+    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress ports must be whole numbers between 1 and 65535."
+  }
+
+  validation {
+    condition = alltrue([
+      for package in coalesce(var.runtime.sitectl.packages, []) :
       can(regex("^sitectl(-[a-z0-9]+)*$", package))
     ])
     error_message = "runtime.sitectl.packages entries must be release package names such as sitectl, sitectl-isle, or sitectl-wp."
   }
 
   validation {
-    condition     = var.runtime.sitectl.version == "latest" || can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+", var.runtime.sitectl.version))
-    error_message = "runtime.sitectl.version must be latest or a release tag such as v0.19.7."
+    condition = (
+      var.runtime.sitectl.version == "latest" ||
+      can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", var.runtime.sitectl.version))
+    )
+    error_message = "runtime.sitectl.version must be latest or an exact semantic-version release tag such as v0.38.0."
   }
 
   validation {
-    condition     = contains(["gcp-iam", "consumer-managed"], var.runtime.vault.auth_method)
-    error_message = "runtime.vault.auth_method must be gcp-iam or consumer-managed."
+    condition = alltrue([
+      for package, version in var.runtime.sitectl.package_versions :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package)) && (
+        version == "latest" ||
+        can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", version))
+      )
+    ])
+    error_message = "runtime.sitectl.package_versions keys must be sitectl package names and values must be latest or exact semantic-version release tags."
+  }
+
+  validation {
+    condition     = contains(["auto", "gcp-iam", "consumer-managed"], var.runtime.vault.auth_method)
+    error_message = "runtime.vault.auth_method must be auto, gcp-iam, or consumer-managed."
   }
 
   validation {

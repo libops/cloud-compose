@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 }
 
 module "drupal" {
@@ -20,7 +20,8 @@ module "drupal" {
     }
   }
   runtime = {
-    rootfs_archive_url = "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz"
+    rootfs_archive_url    = "https://github.com/libops/cloud-compose/releases/download/${var.cloud_compose_source_ref}/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_sha256 = var.cloud_compose_source_sha256
     compose = {
       repo         = var.docker_compose_repo
       branch       = var.docker_compose_branch

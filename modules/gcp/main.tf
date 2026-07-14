@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 
   required_providers {
     cloudinit = {
@@ -18,13 +18,19 @@ terraform {
 }
 
 locals {
-  rootFs            = "${path.module}/../../rootfs"
-  additional_rootfs = var.rootfs != "" ? var.rootfs : ""
+  rootFs                      = "${path.module}/../../rootfs"
+  additional_rootfs           = var.rootfs != "" ? var.rootfs : ""
+  rootfs_archive_url          = trimspace(var.rootfs_archive_url)
+  rootfs_archive_sha256       = lower(trimspace(var.rootfs_archive_sha256))
+  rootfs_overlay_staging_path = "/var/lib/cloud-compose/rootfs-overlay"
+  project_number              = tostring(data.google_project.service.number)
 
   single_compose_project = {
     (var.name) = {
       docker_compose_repo    = var.docker_compose_repo
       docker_compose_branch  = var.docker_compose_branch
+      project_dir            = null
+      compose_project_name   = null
       ingress_port           = var.ingress_port
       ingress                = var.sitectl_ingress
       sitectl_context_name   = trimspace(var.sitectl_context_name) != "" ? trimspace(var.sitectl_context_name) : var.name
@@ -38,7 +44,7 @@ locals {
       docker_compose_rollout = var.docker_compose_rollout
     }
   }
-  raw_compose_projects        = length(var.compose_projects) > 0 ? var.compose_projects : local.single_compose_project
+  raw_compose_projects        = length(var.compose_projects) > 0 ? var.compose_projects : tomap(local.single_compose_project)
   primary_compose_project_key = trimspace(var.primary_compose_project) != "" ? trimspace(var.primary_compose_project) : keys(local.raw_compose_projects)[0]
   compose_projects = {
     for app_name, app in local.raw_compose_projects : app_name => {
@@ -47,13 +53,13 @@ locals {
       docker_compose_branch = trimspace(coalesce(try(app.docker_compose_branch, null), var.docker_compose_branch))
       repo_path             = trim(replace(trimspace(app.docker_compose_repo), "/^[^:]+://[^/]+/", ""), "/")
       project_dir = (
-        trimspace(try(app.project_dir, "")) != ""
-        ? trimspace(try(app.project_dir, ""))
+        try(trimspace(app.project_dir), "") != ""
+        ? try(trimspace(app.project_dir), "")
         : "/mnt/disks/data/${trim(replace(trimspace(app.docker_compose_repo), "/^[^:]+://[^/]+/", ""), "/")}/${trimspace(coalesce(try(app.docker_compose_branch, null), var.docker_compose_branch))}"
       )
       compose_project_name = (
-        trimspace(try(app.compose_project_name, "")) != ""
-        ? trimspace(try(app.compose_project_name, ""))
+        try(trimspace(app.compose_project_name), "") != ""
+        ? try(trimspace(app.compose_project_name), "")
         : replace(lower(replace(replace(format("%s-%s", trim(replace(trimspace(app.docker_compose_repo), "/^[^:]+://[^/]+/", ""), "/"), trimspace(coalesce(try(app.docker_compose_branch, null), var.docker_compose_branch))), ".git", ""), "/[^a-zA-Z0-9]/", "-")), "/-+/", "-")
       )
       ingress_port = coalesce(try(app.ingress_port, null), var.ingress_port)
@@ -68,48 +74,171 @@ locals {
         upload_timeout  = try(app.ingress.upload_timeout, null) != null ? trimspace(app.ingress.upload_timeout) : trimspace(var.sitectl_ingress.upload_timeout)
       }
       sitectl_context_name = (
-        trimspace(try(app.sitectl_context_name, "")) != ""
-        ? trimspace(try(app.sitectl_context_name, ""))
+        trimspace(app.sitectl_context_name != null ? app.sitectl_context_name : "") != ""
+        ? trimspace(app.sitectl_context_name)
         : app_name
       )
       sitectl_plugin      = trimspace(coalesce(try(app.sitectl_plugin, null), var.sitectl_plugin))
       sitectl_environment = trimspace(coalesce(try(app.sitectl_environment, null), var.sitectl_environment))
-      sitectl_packages    = distinct(concat(["sitectl"], try(app.sitectl_packages, [])))
-      sitectl_verify_args = try(app.sitectl_verify_args, var.sitectl_verify_args)
+      sitectl_packages = distinct(concat(
+        ["sitectl"],
+        coalesce(try(app.sitectl_packages, null), var.sitectl_packages),
+      ))
+      sitectl_verify_args = coalesce(try(app.sitectl_verify_args, null), var.sitectl_verify_args)
       init_commands       = try(app.docker_compose_init, null) != null ? app.docker_compose_init : var.docker_compose_init
       up_commands         = try(app.docker_compose_up, null) != null ? app.docker_compose_up : var.docker_compose_up
       down_commands       = try(app.docker_compose_down, null) != null ? app.docker_compose_down : var.docker_compose_down
       rollout_commands    = try(app.docker_compose_rollout, null) != null ? app.docker_compose_rollout : var.docker_compose_rollout
     }
   }
-  primary_compose_project = local.compose_projects[local.primary_compose_project_key]
+  validated_compose_projects = {
+    for app_name, app in local.compose_projects : app_name => merge(app, {
+      project_dir = module.project_directories.project_dirs[app_name]
+    })
+  }
+  primary_compose_project = local.validated_compose_projects[local.primary_compose_project_key]
   sitectl_packages = distinct(concat(
     ["sitectl"],
     var.sitectl_packages,
     flatten([for _, app in local.compose_projects : app.sitectl_packages])
   ))
-  create_network  = var.create_network && trimspace(var.network_name) == "" && trimspace(var.subnetwork_name) == ""
-  network_name    = trimspace(var.network_name) != "" ? trimspace(var.network_name) : (local.create_network ? google_compute_network.cloud-compose[0].self_link : "default")
-  subnetwork_name = trimspace(var.subnetwork_name) != "" ? trimspace(var.subnetwork_name) : (local.create_network ? google_compute_subnetwork.cloud-compose[0].self_link : null)
+  requested_network_name        = trimsuffix(trimspace(var.network_name), "/")
+  requested_subnetwork_name     = trimsuffix(trimspace(var.subnetwork_name), "/")
+  create_network                = var.create_network && local.requested_network_name == "" && local.requested_subnetwork_name == ""
+  configured_network_project_id = trimspace(var.network_project_id) != "" ? trimspace(var.network_project_id) : var.project_id
+  requested_network_self_link_parts = try(
+    regex("projects/([^/]+)/global/networks/([^/]+)$", local.requested_network_name),
+    [],
+  )
+  selected_subnetwork_reference = (
+    local.requested_subnetwork_name != "" ? local.requested_subnetwork_name :
+    local.requested_network_name != "" ? basename(local.requested_network_name) :
+    "default"
+  )
+  selected_subnetwork_self_link_parts = try(
+    regex("projects/([^/]+)/regions/([^/]+)/subnetworks/([^/]+)$", local.selected_subnetwork_reference),
+    [],
+  )
+  selected_subnetwork_is_self_link = length(local.selected_subnetwork_self_link_parts) == 3
+  selected_subnetwork_lookup_project = (
+    local.selected_subnetwork_is_self_link ? local.selected_subnetwork_self_link_parts[0] :
+    length(local.requested_network_self_link_parts) == 2 ? local.requested_network_self_link_parts[0] :
+    local.configured_network_project_id
+  )
+  selected_subnetwork_lookup_region = local.selected_subnetwork_is_self_link ? local.selected_subnetwork_self_link_parts[1] : var.region
+  selected_network_reference = (
+    local.requested_network_name != "" ? local.requested_network_name :
+    local.create_network ? "" : data.google_compute_subnetwork.selected[0].network
+  )
+  selected_network_self_link_parts = try(
+    regex("projects/([^/]+)/global/networks/([^/]+)$", local.selected_network_reference),
+    [],
+  )
+  selected_network_lookup_project = (
+    length(local.selected_network_self_link_parts) == 2 ? local.selected_network_self_link_parts[0] :
+    local.selected_subnetwork_is_self_link ? local.selected_subnetwork_self_link_parts[0] :
+    local.configured_network_project_id
+  )
+  selected_network_lookup_name = length(local.selected_network_self_link_parts) == 2 ? local.selected_network_self_link_parts[1] : basename(local.selected_network_reference)
+  network_name = (
+    local.create_network ? google_compute_network.cloud-compose[0].self_link :
+    data.google_compute_network.selected[0].self_link
+  )
+  subnetwork_name = (
+    local.create_network ? google_compute_subnetwork.cloud-compose[0].self_link :
+    data.google_compute_subnetwork.selected[0].self_link
+  )
+  resolved_network_self_link_parts = try(regex("projects/([^/]+)/global/networks/([^/]+)$", local.network_name), [])
+  resolved_subnetwork_self_link_parts = try(
+    regex("projects/([^/]+)/regions/([^/]+)/subnetworks/([^/]+)$", local.subnetwork_name),
+    [],
+  )
+  network_project_id    = local.create_network ? var.project_id : local.resolved_network_self_link_parts[0]
+  subnetwork_project_id = local.create_network ? var.project_id : local.resolved_subnetwork_self_link_parts[0]
+  subnetwork_region     = local.create_network ? var.region : local.resolved_subnetwork_self_link_parts[1]
+  # Cloud Run v2 accepts canonical relative Compute resource names for Direct
+  # VPC egress. Keep the HTTPS self links above for Compute resources, but do
+  # not pass them through to the Cloud Run API.
+  cloud_run_network_resource_name = format(
+    "projects/%s/global/networks/%s",
+    local.network_project_id,
+    local.create_network ? google_compute_network.cloud-compose[0].name : local.resolved_network_self_link_parts[1],
+  )
+  cloud_run_subnetwork_resource_name = format(
+    "projects/%s/regions/%s/subnetworks/%s",
+    local.subnetwork_project_id,
+    local.subnetwork_region,
+    local.create_network ? google_compute_subnetwork.cloud-compose[0].name : local.resolved_subnetwork_self_link_parts[2],
+  )
+  network_namespace = (
+    local.network_project_id == var.project_id
+    ? var.name
+    : "${var.name}-${substr(sha256(var.project_id), 0, 8)}"
+  )
+  cloud_run_subnetwork_cidr = (
+    local.create_network ? var.network_ip_cidr_range :
+    data.google_compute_subnetwork.selected[0].ip_cidr_range
+  )
+  # The Google network data source does not expose MTU. For existing or Shared
+  # VPC networks, network_mtu is an explicit caller attestation.
+  cloud_run_network_mtu = var.network_mtu
+  cloud_run_subnetwork_prefix_length = try(
+    tonumber(element(split("/", local.cloud_run_subnetwork_cidr), 1)),
+    null,
+  )
+  cloud_run_subnetwork_network_octets = try([
+    for octet in split(".", cidrhost(local.cloud_run_subnetwork_cidr, 0)) : tonumber(octet)
+  ], [])
+  cloud_run_subnetwork_range_supported = try(
+    length(local.cloud_run_subnetwork_network_octets) == 4 && (
+      local.cloud_run_subnetwork_network_octets[0] == 10 && local.cloud_run_subnetwork_prefix_length >= 8 ||
+      local.cloud_run_subnetwork_network_octets[0] == 172 && local.cloud_run_subnetwork_network_octets[1] >= 16 && local.cloud_run_subnetwork_network_octets[1] <= 31 && local.cloud_run_subnetwork_prefix_length >= 12 ||
+      local.cloud_run_subnetwork_network_octets[0] == 192 && local.cloud_run_subnetwork_network_octets[1] == 168 && local.cloud_run_subnetwork_prefix_length >= 16 ||
+      local.cloud_run_subnetwork_network_octets[0] == 100 && local.cloud_run_subnetwork_network_octets[1] >= 64 && local.cloud_run_subnetwork_network_octets[1] <= 127 && local.cloud_run_subnetwork_prefix_length >= 10 ||
+      local.cloud_run_subnetwork_network_octets[0] >= 240 && local.cloud_run_subnetwork_prefix_length >= 4
+    ),
+    false,
+  )
+  selected_network_matches_subnetwork = (
+    local.create_network ||
+    data.google_compute_subnetwork.selected[0].network == data.google_compute_network.selected[0].self_link
+  )
+  configured_network_project_matches = (
+    trimspace(var.network_project_id) == "" ||
+    local.network_project_id == trimspace(var.network_project_id)
+  )
+  selected_subnetwork_project_matches = local.network_project_id == local.subnetwork_project_id
+  selected_subnetwork_region_matches  = local.subnetwork_region == var.region
 
-  # Get files from base rootfs
-  base_files = fileset(local.rootFs, "**")
+  # Archive mode fetches the packaged base rootfs at boot. A consumer-provided
+  # rootfs is staged separately and applied after extraction so it still wins.
+  base_files = local.rootfs_archive_url == "" ? fileset(local.rootFs, "**") : []
 
   # Get files from additional rootfs if path is provided
   additional_files = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
 
-  # Combine both file sets (additional files will override base files with same path)
+  # Combine both file sets (additional files override base files with the same path).
   all_files = merge(
-    { for file in local.base_files : file => "${local.rootFs}/${file}" },
-    { for file in local.additional_files : file => "${local.additional_rootfs}/${file}" }
+    {
+      for file in local.base_files : file => {
+        destination = "/${file}"
+        source      = "${local.rootFs}/${file}"
+      }
+    },
+    {
+      for file in local.additional_files : file => {
+        destination = local.rootfs_archive_url == "" ? "/${file}" : "${local.rootfs_overlay_staging_path}/${file}"
+        source      = "${local.additional_rootfs}/${file}"
+      }
+    }
   )
 
   write_files_content = join("\n", [
-    for file, fullpath in local.all_files : <<-EOT
-      - path: ${jsonencode("/${file}")}
+    for file, config in local.all_files : <<-EOT
+      - path: ${jsonencode(config.destination)}
         permissions: ${jsonencode(endswith(file, ".sh") ? "0755" : "0644")}
         encoding: gzip+base64
-        content: ${jsonencode(base64gzip(file(fullpath)))}
+        content: ${jsonencode(base64gzip(file(config.source)))}
 EOT
   ])
   docker_compose_scripts = join("\n", [
@@ -132,10 +261,10 @@ compose_projects_file = <<-EOT
     - path: "/home/cloud-compose/compose-projects.json"
       permissions: "0640"
       encoding: gzip+base64
-      content: ${jsonencode(base64gzip(jsonencode(local.compose_projects)))}
+      content: ${jsonencode(base64gzip(jsonencode(local.validated_compose_projects)))}
 EOT
 managed_runtime_artifact_lines = [
-  for artifact in var.libops_managed_artifacts : join("\t", [
+  for artifact in module.managed_artifacts.artifacts : join("\t", [
     artifact.name,
     artifact.url,
     artifact.sha256,
@@ -191,7 +320,6 @@ vault_agent_env_content    = <<-EOT
     VAULT_NAMESPACE=${trimspace(var.vault_namespace)}
     VAULT_ROLE=${trimspace(var.vault_role)}
     VAULT_AUTH_METHOD=${var.vault_auth_method}
-    GOOGLE_APPLICATION_CREDENTIALS=/mnt/disks/data/cloud-compose/app/GOOGLE_APPLICATION_CREDENTIALS
   EOT
 vault_agent_config_content = <<-EOT
     vault {
@@ -216,80 +344,130 @@ vault_agent_files_raw      = <<-EOT
       content: ${jsonencode(base64gzip(local.vault_agent_config_content))}
   EOT
 vault_agent_files          = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? local.vault_agent_files_raw : ""
-rollout_env_lines = var.rollout_enabled ? [
-  "ROLLOUT_ENABLED=true",
-  "ROLLOUT_DOWNLOAD_URL=\"${trimspace(var.rollout_release_url)}\"",
-  "ROLLOUT_DOWNLOAD_SHA256=\"${trimspace(var.rollout_release_sha256)}\"",
-  "PORT=\"${var.rollout_port}\"",
-  "JWKS_URI=\"${trimspace(var.rollout_jwks_uri)}\"",
-  "JWT_AUD=\"${trimspace(var.rollout_jwt_audience)}\"",
-  "CUSTOM_CLAIMS='${trimspace(var.rollout_custom_claims)}'",
-  "ROLLOUT_CMD=\"/bin/bash\"",
-  "ROLLOUT_ARGS=\"/home/cloud-compose/rollout\"",
-  "ROLLOUT_LOCK_FILE=\"/mnt/disks/data/rollout.lock\"",
-  ] : [
-  "ROLLOUT_ENABLED=false",
-]
-rollout_env      = join("\n", local.rollout_env_lines)
-env_file_plain   = <<-EOT
-    HOME=/home/cloud-compose
-    GCP_PROJECT="${var.project_id}"
-    GCP_PROJECT_NUMBER="${var.project_number}"
-    GCP_INSTANCE_NAME="${var.name}"
-    CLOUD_COMPOSE_INSTANCE_NAME="${var.name}"
-    GCP_REGION="${var.region}"
-    GCP_ZONE="${var.zone}"
-    CLOUD_COMPOSE_PROVIDER="gcp"
-    CLOUD_COMPOSE_APPS="${join(" ", keys(local.compose_projects))}"
-    CLOUD_COMPOSE_PRIMARY_APP="${local.primary_compose_project_key}"
-    COMPOSE_PROJECTS_FILE="/home/cloud-compose/compose-projects.json"
-    COMPOSE_PROJECT_NAME=${local.primary_compose_project.compose_project_name}
-    COMPOSE_BIND_PORT="${local.primary_compose_project.ingress_port}"
-    DOCKER_COMPOSE_DIR=${local.primary_compose_project.project_dir}
-    DOCKER_COMPOSE_REPO="${local.primary_compose_project.docker_compose_repo}"
-    DOCKER_COMPOSE_BRANCH="${local.primary_compose_project.docker_compose_branch}"
-    DOCKER_COMPOSE_VERSION="${var.docker_compose_version}"
-    DOCKER_BUILDX_VERSION="${var.docker_buildx_version}"
-    SITECTL_PACKAGES="${join(" ", local.sitectl_packages)}"
-    SITECTL_VERSION="${var.sitectl_version}"
-    SITECTL_CONTEXT_NAME="${local.primary_compose_project.sitectl_context_name}"
-    SITECTL_PLUGIN="${local.primary_compose_project.sitectl_plugin}"
-    SITECTL_ENVIRONMENT="${local.primary_compose_project.sitectl_environment}"
-    PRODUCTION="${var.production}"
-    SITECTL_VERIFY_ARGS="${join(" ", local.primary_compose_project.sitectl_verify_args)}"
-    GCP_APP_SERVICE_ACCOUNT_EMAIL="${local.app_service_account_email}"
-    POWER_MANAGEMENT_ENABLED="${var.power_management_enabled}"
-    COMPOSE_PROFILES="${local.internal_services_compose_profiles}"
-    VAULT_ADDR="${trimspace(var.vault_addr)}"
-    VAULT_NAMESPACE="${trimspace(var.vault_namespace)}"
-    VAULT_ROLE="${trimspace(var.vault_role)}"
-    VAULT_AGENT_ENABLED="${var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"}"
-    VAULT_AUTH_METHOD="${var.vault_auth_method}"
-    VAULT_AGENT_TOKEN_PATH="${var.vault_agent_token_path}"
-    LIBOPS_MANAGED_RUNTIME_ENABLED="${var.libops_managed_runtime_enabled}"
-    LIBOPS_INTERNAL_SERVICES_ENABLED="${var.libops_internal_services_enabled}"
-    LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE="${var.libops_internal_services_auto_update}"
-    ${local.rollout_env}
-  EOT
-env_file_content = <<-EOT
+rollout_env = var.rollout_enabled ? {
+  ROLLOUT_ENABLED         = "true"
+  ROLLOUT_DOWNLOAD_URL    = trimspace(var.rollout_release_url)
+  ROLLOUT_DOWNLOAD_SHA256 = trimspace(var.rollout_release_sha256)
+  ROLLOUT_PORT            = tostring(var.rollout_port)
+  ROLLOUT_JWKS_URI        = trimspace(var.rollout_jwks_uri)
+  ROLLOUT_JWT_AUD         = trimspace(var.rollout_jwt_audience)
+  ROLLOUT_CUSTOM_CLAIMS   = trimspace(var.rollout_custom_claims)
+  ROLLOUT_CMD             = "/bin/bash"
+  ROLLOUT_ARGS            = "/home/cloud-compose/rollout"
+  ROLLOUT_LOCK_FILE       = "/mnt/disks/data/rollout.lock"
+  } : {
+  ROLLOUT_ENABLED = "false"
+}
+host_env = merge({
+  HOME                                 = "/home/cloud-compose"
+  GCP_PROJECT                          = var.project_id
+  GCP_PROJECT_NUMBER                   = local.project_number
+  GCP_INSTANCE_NAME                    = var.name
+  CLOUD_COMPOSE_INSTANCE_NAME          = var.name
+  GCP_REGION                           = var.region
+  GCP_ZONE                             = var.zone
+  CLOUD_COMPOSE_PROVIDER               = "gcp"
+  CLOUD_COMPOSE_APPS                   = join(" ", keys(local.compose_projects))
+  CLOUD_COMPOSE_PRIMARY_APP            = local.primary_compose_project_key
+  COMPOSE_PROJECTS_FILE                = "/home/cloud-compose/compose-projects.json"
+  COMPOSE_PROJECT_NAME                 = local.primary_compose_project.compose_project_name
+  COMPOSE_BIND_PORT                    = tostring(local.primary_compose_project.ingress_port)
+  DOCKER_COMPOSE_DIR                   = local.primary_compose_project.project_dir
+  DOCKER_COMPOSE_REPO                  = local.primary_compose_project.docker_compose_repo
+  DOCKER_COMPOSE_BRANCH                = local.primary_compose_project.docker_compose_branch
+  DOCKER_COMPOSE_VERSION               = var.docker_compose_version
+  DOCKER_BUILDX_VERSION                = var.docker_buildx_version
+  DOCKER_VOLUME_OVERLAYS               = join(" ", var.volume_names)
+  SITECTL_PACKAGES                     = join(" ", module.sitectl_runtime.packages)
+  SITECTL_VERSION                      = var.sitectl_version
+  SITECTL_PACKAGE_VERSIONS             = jsonencode(module.sitectl_runtime.package_versions)
+  SITECTL_CONTEXT_NAME                 = local.primary_compose_project.sitectl_context_name
+  SITECTL_PLUGIN                       = local.primary_compose_project.sitectl_plugin
+  SITECTL_ENVIRONMENT                  = local.primary_compose_project.sitectl_environment
+  PRODUCTION                           = tostring(var.production)
+  SITECTL_VERIFY_ARGS                  = join(" ", local.primary_compose_project.sitectl_verify_args)
+  GCP_APP_SERVICE_ACCOUNT_EMAIL        = local.app_service_account_email
+  GCP_APP_CREDENTIALS_ENABLED          = tostring(local.app_credentials_enabled)
+  POWER_MANAGEMENT_ENABLED             = tostring(var.power_management_enabled)
+  COMPOSE_PROFILES                     = local.internal_services_compose_profiles
+  VAULT_ADDR                           = trimspace(var.vault_addr)
+  VAULT_NAMESPACE                      = trimspace(var.vault_namespace)
+  VAULT_ROLE                           = trimspace(var.vault_role)
+  VAULT_AGENT_ENABLED                  = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
+  VAULT_AUTH_METHOD                    = var.vault_auth_method
+  VAULT_AGENT_TOKEN_PATH               = var.vault_agent_token_path
+  LIBOPS_MANAGED_RUNTIME_ENABLED       = tostring(var.libops_managed_runtime_enabled)
+  LIBOPS_INTERNAL_SERVICES_ENABLED     = tostring(local.internal_services_enabled)
+  LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE = tostring(local.internal_services_enabled && var.libops_internal_services_auto_update)
+}, local.rollout_env)
+env_file_content             = <<-EOT
     - path: "/home/cloud-compose/.env"
       permissions: "0640"
       encoding: gzip+base64
-      content: ${jsonencode(base64gzip(local.env_file_plain))}
+      content: ${jsonencode(base64gzip(module.runtime_env.content))}
 EOT
-use_overlay      = length(var.volume_names) > 0
-prod_disk_name   = var.overlay_source_instance != "" ? format("%s-data-disk", var.overlay_source_instance) : ""
-prod_disk_url    = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
+application_env_file_content = <<-EOT
+    - path: "/home/cloud-compose/application-env.json"
+      permissions: "0640"
+      encoding: gzip+base64
+      content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}
+EOT
+rootfs_archive_command_raw   = <<-EOT
+    - |
+      set -eu
+      test -f /run/cloud-compose-filesystems-ready || {
+        echo "Cloud Compose filesystems were not prepared; refusing rootfs installation" >&2
+        exit 1
+      }
+      archive_url="$(printf '%s' '${base64encode(local.rootfs_archive_url)}' | base64 -d)"
+      archive_sha256=${jsonencode(local.rootfs_archive_sha256)}
+      overlay_dir=${jsonencode(local.rootfs_overlay_staging_path)}
+      case "$archive_url" in
+        https://*) ;;
+        *) echo "rootfs archive URL must use HTTPS" >&2; exit 1 ;;
+      esac
+      case "$archive_url" in
+        *[[:space:]]*) echo "rootfs archive URL must not contain whitespace" >&2; exit 1 ;;
+      esac
+      tmp="$(mktemp -d)"
+      trap 'rm -rf "$tmp"' EXIT
+      curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 900 \
+        --connect-timeout 10 --max-time 300 -o "$tmp/rootfs.tar.gz" -- "$archive_url"
+      if ! command -v sha256sum >/dev/null 2>&1; then
+        echo "sha256sum is required to verify $archive_url" >&2
+        exit 1
+      fi
+      printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
+      tar -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
+      rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
+      if [ -z "$rootfs_dir" ]; then
+        echo "rootfs directory not found in $archive_url" >&2
+        exit 1
+      fi
+      cp -a "$rootfs_dir"/. /
+      if [ -d "$overlay_dir" ]; then
+        cp -a "$overlay_dir"/. /
+        rm -rf "$overlay_dir"
+      fi
+  EOT
+rootfs_archive_command       = local.rootfs_archive_url != "" ? local.rootfs_archive_command_raw : ""
+use_overlay                  = length(var.volume_names) > 0
+prod_disk_url                = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
 rollout_runcmd = var.rollout_enabled ? [
   "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
 ] : []
 cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
+  FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
+  FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
   WRITE_FILES_CONTENT            = local.write_files_content,
   DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts,
   COMPOSE_PROJECTS_FILE          = local.compose_projects_file,
   ENV_FILE_CONTENT               = local.env_file_content,
+  APPLICATION_ENV_FILE_CONTENT   = local.application_env_file_content,
   VAULT_AGENT_FILES              = local.vault_agent_files,
   MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file,
+  ROOTFS_ARCHIVE_COMMAND         = local.rootfs_archive_command,
   USE_OVERLAY                    = local.use_overlay,
   DOCKER_VOLUME_OVERLAYS         = var.volume_names,
   CLOUD_COMPOSE_SSH_KEYS         = try(var.users["cloud-compose"], []),
@@ -298,19 +476,65 @@ cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", 
   ADDITIONAL_RUNCMD              = concat(local.rollout_runcmd, var.runcmd),
 })
 
-vm_service_account_email = var.service_account_email != "" ? var.service_account_email : google_service_account.cloud-compose[0].email
-vm_service_account_id    = var.service_account_email != "" ? "projects/${var.project_id}/serviceAccounts/${var.service_account_email}" : google_service_account.cloud-compose[0].id
-vm_service_account_name  = var.service_account_email != "" ? local.vm_service_account_id : google_service_account.cloud-compose[0].name
+vm_service_account_email = var.service_account_email != "" ? data.google_service_account.vm[0].email : google_service_account.cloud-compose[0].email
+vm_service_account_id    = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].id
+vm_service_account_name  = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].name
 
-app_service_account_email = var.app_service_account_email != "" ? var.app_service_account_email : google_service_account.app[0].email
-app_service_account_id    = var.app_service_account_email != "" ? "projects/${var.project_id}/serviceAccounts/${var.app_service_account_email}" : google_service_account.app[0].id
-app_service_account_name  = var.app_service_account_email != "" ? local.app_service_account_id : google_service_account.app[0].name
+app_service_account_email = var.app_service_account_email != "" ? data.google_service_account.app[0].email : google_service_account.app[0].email
+app_service_account_id    = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].id
+app_service_account_name  = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].name
 
+app_credentials_enabled            = var.app_credentials_enabled
+internal_services_enabled          = var.libops_internal_services_enabled || var.power_management_enabled
 internal_services_compose_profiles = var.power_management_enabled ? "lightsout" : ""
 scheduled_snapshots_enabled        = var.production && var.run_snapshots
 # have prod snapshot begin near the initial run so non-prod overlays can
 # discover a production snapshot; non-production plans avoid snapshot resources.
 snapshot_start_time = local.scheduled_snapshots_enabled ? formatdate("h:00", time_static.snapshot_time_static[0].rfc3339) : "00:00"
+}
+
+data "google_project" "service" {
+  project_id = var.project_id
+}
+
+data "google_service_account" "vm" {
+  count = var.service_account_email != "" ? 1 : 0
+
+  project    = var.project_id
+  account_id = var.service_account_email
+}
+
+data "google_service_account" "app" {
+  count = var.app_service_account_email != "" ? 1 : 0
+
+  project    = var.project_id
+  account_id = var.app_service_account_email
+}
+
+module "sitectl_runtime" {
+  source = "../sitectl-runtime"
+
+  packages         = local.sitectl_packages
+  fallback_version = var.sitectl_version
+  package_versions = var.sitectl_package_versions
+}
+
+module "managed_artifacts" {
+  source = "../managed-artifacts"
+
+  artifacts = var.libops_managed_artifacts
+}
+
+module "project_directories" {
+  source = "../project-directories"
+
+  project_dirs = { for app_name, app in local.compose_projects : app_name => app.project_dir }
+}
+
+module "runtime_env" {
+  source = "../runtime-env"
+
+  env = local.host_env
 }
 
 resource "time_static" "snapshot_time_static" {
@@ -340,23 +564,18 @@ resource "google_artifact_registry_repository_iam_member" "private-policy-cloud-
   member     = "serviceAccount:${local.vm_service_account_email}"
 }
 
-# let VM run as the GSA
-resource "google_service_account_iam_member" "gsa-user" {
-  service_account_id = local.vm_service_account_id
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${var.project_number}-compute@developer.gserviceaccount.com"
-}
-
-resource "google_service_account_iam_member" "token-creator" {
-  service_account_id = local.vm_service_account_id
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${local.vm_service_account_email}"
-}
-
 # push logs to GCP
 resource "google_project_iam_member" "log" {
   project = var.project_id
   role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${local.vm_service_account_email}"
+}
+
+# The host monitoring agent runs as the VM identity, not the optional
+# internal-services identity used by the privileged Compose project.
+resource "google_project_iam_member" "monitoring" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${local.vm_service_account_email}"
 }
 
@@ -365,6 +584,7 @@ resource "google_compute_network" "cloud-compose" {
   name                    = var.name
   project                 = var.project_id
   auto_create_subnetworks = false
+  mtu                     = var.network_mtu
 }
 
 resource "google_compute_subnetwork" "cloud-compose" {
@@ -375,6 +595,22 @@ resource "google_compute_subnetwork" "cloud-compose" {
   network                  = google_compute_network.cloud-compose[0].self_link
   ip_cidr_range            = var.network_ip_cidr_range
   private_ip_google_access = true
+}
+
+data "google_compute_network" "selected" {
+  count = local.create_network ? 0 : 1
+
+  name    = local.selected_network_lookup_name
+  project = local.selected_network_lookup_project
+}
+
+data "google_compute_subnetwork" "selected" {
+  count = local.create_network ? 0 : 1
+
+  self_link = local.selected_subnetwork_is_self_link ? local.selected_subnetwork_reference : null
+  name      = local.selected_subnetwork_is_self_link ? null : basename(local.selected_subnetwork_reference)
+  project   = local.selected_subnetwork_is_self_link ? null : local.selected_subnetwork_lookup_project
+  region    = local.selected_subnetwork_is_self_link ? null : local.selected_subnetwork_lookup_region
 }
 
 resource "google_compute_disk" "boot" {
@@ -535,7 +771,7 @@ resource "google_compute_instance" "cloud-compose" {
   machine_type              = var.machine_type
   zone                      = var.zone
   allow_stopping_for_update = true
-  tags                      = ["cloud-compose", var.name]
+  tags                      = ["cloud-compose", local.network_namespace]
   can_ip_forward            = "false"
 
   boot_disk {
@@ -611,8 +847,107 @@ resource "google_compute_instance" "cloud-compose" {
 
   lifecycle {
     precondition {
+      condition     = var.project_number == "" || var.project_number == local.project_number
+      error_message = "project_number does not match the number derived from project_id; omit the deprecated assertion or correct it."
+    }
+    precondition {
+      condition = (
+        var.service_account_email == "" ||
+        (
+          data.google_service_account.vm[0].email == var.service_account_email &&
+          startswith(data.google_service_account.vm[0].name, "projects/${var.project_id}/serviceAccounts/")
+        )
+      )
+      error_message = "service_account_email must belong to project_id; cross-project VM service accounts require a separate, explicitly managed organization-policy and service-agent contract."
+    }
+    precondition {
+      condition = (
+        var.app_service_account_email == "" ||
+        (
+          data.google_service_account.app[0].email == var.app_service_account_email &&
+          startswith(data.google_service_account.app[0].name, "projects/${var.project_id}/serviceAccounts/")
+        )
+      )
+      error_message = "app_service_account_email must belong to project_id; cross-project app service accounts are not supported by this module."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || trimspace(var.power_start_role) != ""
+      error_message = "power_start_role is required when power management is enabled; use the singleton GCP foundation module output."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || trimspace(var.power_suspend_role) != ""
+      error_message = "power_suspend_role is required when power management is enabled; use the singleton GCP foundation module output."
+    }
+    precondition {
+      condition = (
+        !var.power_management_enabled ||
+        startswith(var.power_start_role, "organizations/") ||
+        startswith(var.power_start_role, "projects/${var.project_id}/roles/")
+      )
+      error_message = "A project-scoped power_start_role must belong to project_id; organization-scoped custom roles are also accepted."
+    }
+    precondition {
+      condition = (
+        !var.power_management_enabled ||
+        startswith(var.power_suspend_role, "organizations/") ||
+        startswith(var.power_suspend_role, "projects/${var.project_id}/roles/")
+      )
+      error_message = "A project-scoped power_suspend_role must belong to project_id; organization-scoped custom roles are also accepted."
+    }
+    precondition {
+      condition     = replace(var.zone, "/-[a-z]$/", "") == var.region
+      error_message = "zone must belong to region."
+    }
+    precondition {
+      condition = (
+        (local.rootfs_archive_url == "") == (local.rootfs_archive_sha256 == "") &&
+        (local.rootfs_archive_sha256 == "" || can(regex("^[0-9a-f]{64}$", local.rootfs_archive_sha256)))
+      )
+      error_message = "rootfs_archive_url and a 64-character rootfs_archive_sha256 must be supplied together."
+    }
+    precondition {
       condition     = contains(keys(local.compose_projects), local.primary_compose_project_key)
       error_message = "primary_compose_project must be one of the compose_projects keys."
+    }
+    precondition {
+      condition     = local.selected_network_matches_subnetwork
+      error_message = "The selected GCP subnetwork must belong to the selected network."
+    }
+    precondition {
+      condition     = local.configured_network_project_matches
+      error_message = "network_project_id must match the project embedded in a network or subnetwork self link."
+    }
+    precondition {
+      condition     = local.selected_subnetwork_project_matches
+      error_message = "The selected GCP network and subnetwork must belong to the same project."
+    }
+    precondition {
+      condition     = local.selected_subnetwork_region_matches
+      error_message = "The selected GCP subnetwork must belong to the Cloud Run region."
+    }
+    precondition {
+      condition = !var.power_management_enabled || try(
+        can(cidrnetmask(local.cloud_run_subnetwork_cidr)) &&
+        tonumber(element(split("/", local.cloud_run_subnetwork_cidr), 1)) <= 26,
+        false,
+      )
+      error_message = "Direct VPC egress requires an IPv4 subnetwork with a /26 or larger address range."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || local.cloud_run_subnetwork_range_supported
+      error_message = "Direct VPC egress requires a Cloud Run-supported IPv4 range: RFC1918, RFC6598 (100.64.0.0/10), or Class E (240.0.0.0/4)."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || local.cloud_run_network_mtu == 1460
+      error_message = "Direct VPC egress requires the selected network to use the Cloud Run default MTU of 1460."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || length(var.allowed_ips) > 0
+      error_message = "Power management requires at least one explicit original-client CIDR in allowed_ips; use 0.0.0.0/0 and ::/0 only when public wake-up is intentional."
+    }
+    precondition {
+      condition     = !var.power_management_enabled || var.allowed_ip_forwarded_depth != null
+      error_message = "Power management requires an explicit allowed_ip_forwarded_depth. Use 0 for direct public Cloud Run and verify a larger right-edge suffix before placing another trusted proxy or external Application Load Balancer in front."
     }
     precondition {
       condition     = !var.vault_agent_enabled || trimspace(var.vault_addr) != ""
@@ -664,45 +999,68 @@ resource "google_compute_instance" "cloud-compose" {
       condition     = !var.rollout_enabled || trimspace(var.rollout_jwt_audience) != ""
       error_message = "rollout_jwt_audience is required when rollout_enabled is true."
     }
+    precondition {
+      condition = (
+        !var.production ||
+        !var.power_management_enabled ||
+        var.frontend == null ||
+        can(regex("@sha256:[0-9a-f]{64}$", trimspace(var.frontend.image)))
+      )
+      error_message = "A production power-management frontend image must be pinned by @sha256 digest."
+    }
   }
 
-  depends_on = [google_compute_disk.overlay_disk]
+  depends_on = [
+    google_compute_disk.overlay_disk,
+    google_project_iam_member.log,
+    google_project_iam_member.monitoring,
+    google_service_account_iam_member.app-keys,
+    google_service_account_iam_member.internal-services-keys,
+    google_service_account_iam_member.vault_agent_jwt_signer_policy,
+  ]
 }
-
-# machine needs to be able to suspend itself
-data "google_project_iam_custom_role" "gce-suspend" {
-  project = var.project_id
-  role_id = "suspendVM"
-}
-
 
 # =============================================================================
 # LIBOPS ADMIN SERVICES IDENTITY
 # =============================================================================
 
 resource "google_service_account" "internal-services" {
+  count      = local.internal_services_enabled ? 1 : 0
   account_id = format("internal-%s", var.name)
   project    = var.project_id
 }
 
 resource "google_service_account_iam_member" "internal-services-keys" {
-  service_account_id = google_service_account.internal-services.id
+  count              = local.internal_services_enabled ? 1 : 0
+  service_account_id = google_service_account.internal-services[0].id
   role               = "roles/iam.serviceAccountKeyAdmin"
   member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
 # push metrics to GCP
 resource "google_project_iam_member" "stackdriver" {
+  count   = local.internal_services_enabled ? 1 : 0
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.internal-services.email}"
+  member  = "serviceAccount:${google_service_account.internal-services[0].email}"
 }
 
-# suspend the GCP instance
-resource "google_project_iam_member" "gce-suspend" {
-  project = var.project_id
-  role    = data.google_project_iam_custom_role.gce-suspend.name
-  member  = "serviceAccount:${google_service_account.internal-services.email}"
+# Suspend only this deployment's VM. The custom role itself is a long-lived,
+# singleton project-foundation concern shared by application stacks.
+resource "google_compute_instance_iam_member" "gce-suspend" {
+  count = var.power_management_enabled ? 1 : 0
+
+  project       = var.project_id
+  zone          = var.zone
+  instance_name = google_compute_instance.cloud-compose.name
+  role          = var.power_suspend_role
+  member        = "serviceAccount:${google_service_account.internal-services[0].email}"
+
+  # Instance IAM policies are deleted with the VM even when its replacement
+  # reuses the same name, zone, role, and member values.
+  lifecycle {
+    replace_triggered_by = [google_compute_instance.cloud-compose]
+  }
 }
 
 # =============================================================================
@@ -716,15 +1074,19 @@ resource "google_service_account" "app" {
 }
 
 resource "google_service_account_iam_member" "app-keys" {
+  count = local.app_credentials_enabled ? 1 : 0
+
   service_account_id = local.app_service_account_id
   role               = "roles/iam.serviceAccountKeyAdmin"
   member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
-resource "google_service_account_iam_member" "self_jwt_signer_policy" {
+resource "google_service_account_iam_member" "vault_agent_jwt_signer_policy" {
+  count = var.vault_agent_enabled && var.vault_auth_method == "gcp-iam" ? 1 : 0
+
   service_account_id = local.app_service_account_id
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = format("serviceAccount:%s", local.app_service_account_email)
+  member             = "serviceAccount:${local.vm_service_account_email}"
 }
 
 # =============================================================================
@@ -732,16 +1094,23 @@ resource "google_service_account_iam_member" "self_jwt_signer_policy" {
 # =============================================================================
 
 locals {
+  trusted_client_proxy_depth = var.allowed_ip_forwarded_depth != null ? var.allowed_ip_forwarded_depth : 0
   base_config = yamldecode(
     <<EOT
 type: google_compute_engine
 port: ${local.primary_compose_project.ingress_port}
 scheme: http
 ipForwardedHeader: X-Forwarded-For
-ipDepth: 0
+ipDepth: ${local.trusted_client_proxy_depth}
 powerOnCooldown: 30
+powerOnTimeout: 240
 proxyTimeouts:
-  dialTimeout: 120
+  # Direct VPC egress can take a minute to establish, and the VM application
+  # stack can need several more after Compute reports RUNNING. Keep the two
+  # bounded phases plus a 60-second response margin inside Cloud Run's 600s.
+  dialTimeout: 300
+  dialAttemptTimeout: 5
+  dialRetryInterval: 1
   keepAlive: 120
   idleConnTimeout: 90
   tlsHandshakeTimeout: 10
@@ -756,15 +1125,8 @@ EOT
     name         = var.name
     usePrivateIp = true
   }
-  allowed_ips = tolist([
-    "127.0.0.1/32",
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-  ])
-
   dynamic_properties = {
-    allowedIps      = concat(local.allowed_ips, var.allowed_ips)
+    allowedIps      = distinct(var.allowed_ips)
     machineMetadata = local.machine
   }
 
@@ -789,6 +1151,15 @@ EOT
     }
   ]
 
+  ppb_container = {
+    name          = "proxy-power-button"
+    image         = "us-docker.pkg.dev/libops-images/public/ppb:0.5.1@sha256:249697fe2ce7e007053af270be2d5cb064ffa545572a035e405e2763298149bc"
+    cpu           = "1000m"
+    memory        = "1Gi"
+    port          = 8080
+    startup_probe = "/healthcheck"
+  }
+
   startup_config = merge(local.base_config, local.dynamic_properties, local.frontend_proxy_target)
 }
 
@@ -801,58 +1172,63 @@ resource "google_service_account" "ppb" {
 
 module "ppb" {
   count  = var.power_management_enabled ? 1 : 0
-  source = "https://github.com/libops/terraform-cloudrun-v2/archive/refs/tags/0.5.3.zip//terraform-cloudrun-v2-0.5.3"
+  source = "https://github.com/libops/terraform-cloudrun-v2/archive/8415816cd559f365d7ddeee9ed3d3a88665cd824.zip//terraform-cloudrun-v2-8415816cd559f365d7ddeee9ed3d3a88665cd824"
 
   name                         = var.name
   project                      = var.project_id
   gsa                          = google_service_account.ppb[0].name
   skipNeg                      = true
   vpc_direct_egress            = "PRIVATE_RANGES_ONLY"
-  vpc_direct_egress_network    = local.network_name
-  vpc_direct_egress_subnetwork = local.subnetwork_name != null ? local.subnetwork_name : "default"
+  vpc_direct_egress_network    = local.cloud_run_network_resource_name
+  vpc_direct_egress_subnetwork = local.cloud_run_subnetwork_resource_name
   containers = concat(
-    tolist([
-      {
-        name   = "proxy-power-button",
-        image  = "us-docker.pkg.dev/libops-images/public/ppb:0.4.2@sha256:e073702aab35db2661dc5f16bbdeaa32bfc79223212d5ba5f2892776cd94205e",
-        cpu    = "1000m"
-        memory = "1Gi",
-        port   = 8080
-      }
-    ]),
+    tolist([local.ppb_container]),
     local.frontend_container,
   )
   invokers = [
     "allUsers"
   ]
   min_instances = 0
-  max_instances = 5
-  regions       = [var.region]
+  # PPB coordinates one VM power transition in memory. A single active
+  # instance keeps concurrent requests on that coordinator; PPB still joins a
+  # competing transition during Cloud Run revision overlap.
+  max_instances   = 1
+  timeout_seconds = 600
+  regions         = [var.region]
   addl_env_vars = tolist([
     {
       name  = "PPB_YAML"
       value = yamlencode(local.startup_config)
     }
   ])
+
+  # Keep the module independent of the instance IAM binding. A module-level
+  # dependency also delays its service-account data source; during a same-name
+  # VM replacement that creates a cycle through the replacement-triggered
+  # start/suspend bindings and the deposed VM. Terraform still completes both
+  # the Cloud Run service and its instance-scoped start grant before apply
+  # returns.
+  depends_on = [google_compute_firewall.allow-cloud-run-ingress]
 }
 
-# cloud run ingress needs to be able to turn on a machine
-data "google_project_iam_custom_role" "gce-start" {
-  count   = var.power_management_enabled ? 1 : 0
-  project = var.project_id
-  role_id = "startVM"
-}
+# Allow PPB to inspect and power only this deployment's VM.
+resource "google_compute_instance_iam_member" "gce-start" {
+  count = var.power_management_enabled ? 1 : 0
 
-resource "google_project_iam_member" "gce-start" {
-  count   = var.power_management_enabled ? 1 : 0
-  project = var.project_id
-  role    = data.google_project_iam_custom_role.gce-start[0].name
-  member  = "serviceAccount:${google_service_account.ppb[0].email}"
+  project       = var.project_id
+  zone          = var.zone
+  instance_name = google_compute_instance.cloud-compose.name
+  role          = var.power_start_role
+  member        = "serviceAccount:${google_service_account.ppb[0].email}"
+
+  lifecycle {
+    replace_triggered_by = [google_compute_instance.cloud-compose]
+  }
 }
 
 resource "google_compute_firewall" "allow_ssh_ipv4" {
-  project   = var.project_id
-  name      = format("allow-ssh-ipv4-%s", var.name)
+  project   = local.network_project_id
+  name      = format("allow-ssh-ipv4-%s", local.network_namespace)
   network   = local.network_name
   priority  = 10
   direction = "INGRESS"
@@ -861,14 +1237,14 @@ resource "google_compute_firewall" "allow_ssh_ipv4" {
     protocol = "tcp"
     ports    = ["22"]
   }
-  target_tags = [var.name]
+  target_tags = [local.network_namespace]
 
   source_ranges = length(var.allowed_ssh_ipv4) > 0 ? var.allowed_ssh_ipv4 : ["127.0.0.1/32"]
 }
 
 resource "google_compute_firewall" "allow_ssh_ipv6" {
-  project   = var.project_id
-  name      = format("allow-ssh-ipv6-%s", var.name)
+  project   = local.network_project_id
+  name      = format("allow-ssh-ipv6-%s", local.network_namespace)
   network   = local.network_name
   priority  = 10
   direction = "INGRESS"
@@ -878,15 +1254,15 @@ resource "google_compute_firewall" "allow_ssh_ipv6" {
     ports    = ["22"]
   }
 
-  target_tags = [var.name]
+  target_tags = [local.network_namespace]
 
   source_ranges = length(var.allowed_ssh_ipv6) > 0 ? var.allowed_ssh_ipv6 : ["127.0.0.1/32"]
 }
 
 resource "google_compute_firewall" "allow_rollout_ipv4" {
   count     = var.rollout_enabled ? 1 : 0
-  project   = var.project_id
-  name      = format("allow-rollout-ipv4-%s", var.name)
+  project   = local.network_project_id
+  name      = format("allow-rollout-ipv4-%s", local.network_namespace)
   network   = local.network_name
   priority  = 20
   direction = "INGRESS"
@@ -896,6 +1272,28 @@ resource "google_compute_firewall" "allow_rollout_ipv4" {
     ports    = [tostring(var.rollout_port)]
   }
 
-  target_tags   = [var.name]
+  target_tags   = [local.network_namespace]
   source_ranges = length(var.rollout_allowed_ipv4) > 0 ? var.rollout_allowed_ipv4 : ["127.0.0.1/32"]
+}
+
+resource "google_compute_firewall" "allow-cloud-run-ingress" {
+  count = var.power_management_enabled ? 1 : 0
+
+  project   = local.network_project_id
+  name      = format("allow-cloud-run-%s", local.network_namespace)
+  network   = local.network_name
+  priority  = 20
+  direction = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = [tostring(local.primary_compose_project.ingress_port)]
+  }
+
+  target_tags = [local.network_namespace]
+
+  # Direct VPC egress addresses are ephemeral. Google requires ingress rules
+  # to use the complete source subnet rather than individual IPs or Cloud Run
+  # service identities/network tags.
+  source_ranges = [local.cloud_run_subnetwork_cidr]
 }

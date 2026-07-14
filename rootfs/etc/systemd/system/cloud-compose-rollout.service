@@ -2,13 +2,13 @@
 Description=Cloud Compose Rollout API
 After=network-online.target cloud-compose.service
 Wants=network-online.target
+RequiresMountsFor=/mnt/disks/data
 
 [Service]
 User=root
 Group=root
-EnvironmentFile=/home/cloud-compose/.env
 WorkingDirectory=/mnt/disks/data
-ExecStart=/usr/local/bin/cloud-compose-rollout
+ExecStart=/bin/bash /home/cloud-compose/run-rollout-service.sh
 Restart=on-failure
 RestartSec=5s
 

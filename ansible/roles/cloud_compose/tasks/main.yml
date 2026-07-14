@@ -14,6 +14,40 @@
       - cloud_compose_volumes_dir == "/mnt/disks/volumes"
     fail_msg: "The packaged cloud-compose rootfs currently requires the cloud-compose user/group and /home/cloud-compose, /mnt/disks/data, and /mnt/disks/volumes paths."
 
+- name: Require valid cloud-compose adapter roots
+  ansible.builtin.assert:
+    that:
+      - cloud_compose_runtime is mapping
+      - cloud_compose_extra_env is mapping
+      - (cloud_compose_runtime.extra_env | default(cloud_compose_extra_env)) is mapping
+      - cloud_compose_provider == "onprem"
+      - cloud_compose_name is string
+      - cloud_compose_name is match('^[a-z][a-z0-9-]*$')
+      - cloud_compose_template is string
+      - cloud_compose_dedicated_host_acknowledged is boolean
+      - cloud_compose_dedicated_host_acknowledged
+      - cloud_compose_install_packages is boolean
+      - cloud_compose_reload_systemd is boolean
+      - cloud_compose_run_bootstrap is boolean
+      - cloud_compose_force_bootstrap is boolean
+      - cloud_compose_managed_runtime_enabled is boolean
+      - cloud_compose_internal_services_enabled is boolean
+      - cloud_compose_internal_services_auto_update is boolean
+    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, and cloud_compose_dedicated_host_acknowledged=true before it can own Docker and host runtime configuration."
+
+- name: Require safe cloud-compose environment entries
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - item.key is match('^[A-Za-z_][A-Za-z0-9_]*$')
+      - item.key not in ['HOME', 'PATH']
+      - (item.key | regex_search('^(CLOUD_COMPOSE_|COMPOSE_|DOCKER_|SITECTL_|LIBOPS_|GCP_|VAULT_|ROLLOUT_|POWER_MANAGEMENT_)')) is none
+      - item.value is string
+    fail_msg: "cloud_compose_extra_env names must match ^[A-Za-z_][A-Za-z0-9_]*$, must not replace HOME, PATH, or reserved control-plane prefixes, and values must be strings."
+  loop: "{{ (cloud_compose_runtime.extra_env | default(cloud_compose_extra_env)) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Load cloud-compose app template registry
   ansible.builtin.set_fact:
     _cc_registry: "{{ lookup('ansible.builtin.file', cloud_compose_templates_file) | from_json }}"
@@ -21,27 +55,133 @@
     _cc_sitectl: "{{ cloud_compose_runtime.sitectl | default({}) }}"
     _cc_managed: "{{ cloud_compose_runtime.managed_runtime | default({}) }}"
     _cc_vault: "{{ cloud_compose_runtime.vault | default({}) }}"
+    _cc_extra_env: "{{ cloud_compose_runtime.extra_env | default(cloud_compose_extra_env) }}"
+
+- name: Require valid cloud-compose runtime sections and template
+  ansible.builtin.assert:
+    that:
+      - _cc_compose is mapping
+      - _cc_sitectl is mapping
+      - _cc_managed is mapping
+      - _cc_vault is mapping
+      - (_cc_compose.ingress | default({})) is mapping
+      - (_cc_compose.projects | default({})) is mapping
+      - (_cc_compose.primary | default('')) is string
+      - (_cc_sitectl.package_versions | default(cloud_compose_sitectl_package_versions)) is mapping
+      - (_cc_sitectl.packages | default([])) is sequence
+      - (_cc_sitectl.packages | default([])) is not string
+      - (_cc_sitectl.packages | default([])) is not mapping
+      - (cloud_compose_template | trim | length) == 0 or (cloud_compose_template | lower | trim) in _cc_registry.templates
+      - (_cc_managed.enabled | default(cloud_compose_managed_runtime_enabled)) is boolean
+      - (_cc_managed.internal_services_enabled | default(cloud_compose_internal_services_enabled)) is boolean
+      - (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update)) is boolean
+      - (_cc_vault.agent_enabled | default(false)) is boolean
+      - not (_cc_vault.agent_enabled | default(false))
+    fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, and Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible)."
 
 - name: Resolve cloud-compose template defaults
   ansible.builtin.set_fact:
     _cc_template_name: "{{ cloud_compose_template | lower | trim }}"
     _cc_template: "{{ (_cc_registry.templates[cloud_compose_template | lower | trim] if (cloud_compose_template | trim | length) > 0 else _cc_registry.default) | default(_cc_registry.default, true) }}"
 
+- name: Require a whole-number global ingress port
+  ansible.builtin.assert:
+    that:
+      - >-
+        _cc_compose.ingress_port is not defined or
+        (
+          _cc_compose.ingress_port is number and
+          _cc_compose.ingress_port is not boolean and
+          _cc_compose.ingress_port >= 1 and
+          _cc_compose.ingress_port <= 65535 and
+          _cc_compose.ingress_port == (_cc_compose.ingress_port | int)
+        )
+    fail_msg: "compose.ingress_port must be a whole number between 1 and 65535."
+
 - name: Normalize cloud-compose runtime settings
   ansible.builtin.set_fact:
     _cc_repo: "{{ _cc_compose.repo | default(_cc_template.repo, true) }}"
     _cc_branch: "{{ _cc_compose.branch | default(_cc_template.branch, true) }}"
-    _cc_ingress_port: "{{ _cc_compose.ingress_port | default(80, true) }}"
+    _cc_ingress_port: "{{ _cc_compose.ingress_port | default(80, true) | int }}"
     _cc_ingress: "{{ cloud_compose_default_ingress | combine(_cc_compose.ingress | default({}), recursive=True) }}"
     _cc_sitectl_plugin: "{{ _cc_sitectl.plugin | default(_cc_template.plugin, true) }}"
-    _cc_sitectl_packages: "{{ (['sitectl'] + (_cc_sitectl.packages | default(_cc_template.packages, true))) | unique }}"
+    _cc_sitectl_packages: "{{ (['sitectl'] + (_cc_sitectl.packages | default(_cc_template.packages))) | unique }}"
+    _cc_sitectl_version: "{{ _cc_sitectl.version | default(cloud_compose_sitectl_version) }}"
+    _cc_template_sitectl_package_versions: "{{ _cc_template.package_versions | default({}) }}"
+    _cc_sitectl_package_version_overrides: "{{ _cc_sitectl.package_versions | default(cloud_compose_sitectl_package_versions) }}"
     _cc_sitectl_environment: "{{ _cc_sitectl.environment | default('production', true) }}"
     _cc_sitectl_context_name: "{{ _cc_sitectl.context_name | default(cloud_compose_name, true) }}"
     _cc_verify_args: "{{ _cc_sitectl.verify_args | default([], true) }}"
-    _cc_init_commands: "{{ _cc_compose.init | default(cloud_compose_default_init, true) }}"
-    _cc_up_commands: "{{ _cc_compose.up | default(cloud_compose_default_up, true) }}"
-    _cc_down_commands: "{{ _cc_compose.down | default(cloud_compose_default_down, true) }}"
-    _cc_rollout_commands: "{{ _cc_compose.rollout | default(cloud_compose_default_rollout, true) }}"
+    _cc_init_commands: "{{ _cc_compose.init | default(cloud_compose_default_init) }}"
+    _cc_up_commands: "{{ _cc_compose.up | default(cloud_compose_default_up) }}"
+    _cc_down_commands: "{{ _cc_compose.down | default(cloud_compose_default_down) }}"
+    _cc_rollout_commands: "{{ _cc_compose.rollout | default(cloud_compose_default_rollout) }}"
+    _cc_internal_services_enabled: "{{ _cc_managed.internal_services_enabled | default(cloud_compose_internal_services_enabled) }}"
+
+- name: Reject GCP-only internal services on an on-prem host
+  ansible.builtin.assert:
+    that:
+      - _cc_internal_services_enabled is boolean
+      - not _cc_internal_services_enabled
+    fail_msg: "The privileged internal-services stack is GCP-specific and is not supported by the on-prem Ansible adapter; set managed_runtime.internal_services_enabled=false."
+
+- name: Require valid single-project runtime inputs
+  ansible.builtin.assert:
+    that:
+      - _cc_repo is string
+      - _cc_branch is string
+      - _cc_sitectl_packages is sequence
+      - _cc_sitectl_packages is not string
+    fail_msg: "compose repository and branch must be strings and sitectl.packages must be a list."
+
+- name: Require global lifecycle command lists
+  ansible.builtin.assert:
+    that:
+      - _cc_init_commands is sequence
+      - _cc_init_commands is not string
+      - _cc_init_commands is not mapping
+      - _cc_up_commands is sequence
+      - _cc_up_commands is not string
+      - _cc_up_commands is not mapping
+      - _cc_down_commands is sequence
+      - _cc_down_commands is not string
+      - _cc_down_commands is not mapping
+      - _cc_rollout_commands is sequence
+      - _cc_rollout_commands is not string
+      - _cc_rollout_commands is not mapping
+    fail_msg: "compose init, up, down, and rollout lifecycle commands must be lists of strings."
+
+- name: Require global lifecycle command strings
+  ansible.builtin.assert:
+    that:
+      - (_cc_init_commands | reject('string') | list | length) == 0
+      - (_cc_up_commands | reject('string') | list | length) == 0
+      - (_cc_down_commands | reject('string') | list | length) == 0
+      - (_cc_rollout_commands | reject('string') | list | length) == 0
+    fail_msg: "compose init, up, down, and rollout lifecycle commands must be lists of strings."
+
+- name: Require valid sitectl version inputs
+  ansible.builtin.assert:
+    that:
+      - _cc_sitectl_package_version_overrides is mapping
+      - >-
+        (_cc_sitectl_version | string) == 'latest' or
+        (_cc_sitectl_version | string) is match('^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$')
+    fail_msg: "sitectl.version must be latest or an exact semantic-version release tag, and sitectl.package_versions must be a map."
+
+- name: Require valid sitectl package version overrides
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - (item.key | string) is match('^sitectl(-[a-z0-9]+)*$')
+      - item.value is string
+      - >-
+        (item.value | string) == 'latest' or
+        (item.value | string) is match('^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$')
+    fail_msg: "sitectl.package_versions keys must be sitectl package names and values must be latest or exact semantic-version release tags."
+  loop: "{{ _cc_sitectl_package_version_overrides | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 - name: Derive cloud-compose project paths
   ansible.builtin.set_fact:
@@ -50,6 +190,38 @@
     _cc_compose_project_name: "{{ _cc_compose.compose_project_name | default(((_cc_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '')) ~ '-' ~ _cc_branch) | lower | regex_replace('\\.git$', '') | regex_replace('[^a-zA-Z0-9]', '-') | regex_replace('-+', '-'), true) }}"
     _cc_explicit_projects: "{{ _cc_compose.projects | default({}, true) }}"
     _cc_managed_artifacts: "{{ _cc_managed.artifacts | default(cloud_compose_managed_artifacts, true) }}"
+
+- name: Require an explicit project map
+  ansible.builtin.assert:
+    that:
+      - _cc_explicit_projects is mapping
+    fail_msg: "cloud_compose_runtime.compose.projects must be a map."
+
+- name: Require valid explicit cloud-compose projects
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - item.key is match('^[a-z][a-z0-9-]*$')
+      - item.value is mapping
+      - (item.value.docker_compose_repo | default(item.value.repo | default('', true), true)) is string
+      - (item.value.docker_compose_repo | default(item.value.repo | default('', true), true) | string | trim | length) > 0
+      - (item.value.ingress | default({})) is mapping
+      - >-
+        item.value.ingress_port is not defined or
+        (
+          item.value.ingress_port is number and
+          item.value.ingress_port is not boolean and
+          item.value.ingress_port >= 1 and
+          item.value.ingress_port <= 65535 and
+          item.value.ingress_port == (item.value.ingress_port | int)
+        )
+      - (item.value.sitectl_packages | default(_cc_sitectl_packages)) is sequence
+      - (item.value.sitectl_packages | default(_cc_sitectl_packages)) is not string
+      - (item.value.sitectl_packages | default(_cc_sitectl_packages)) is not mapping
+    fail_msg: "compose.projects keys must match ^[a-z][a-z0-9-]*$, repositories are required, ingress ports must be whole numbers between 1 and 65535, and sitectl_packages must be lists."
+  loop: "{{ _cc_explicit_projects | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 - name: Require a compose repository
   ansible.builtin.assert:
@@ -87,11 +259,11 @@
     _cc_explicit_project_map: "{{ _cc_explicit_project_map | combine({item.key: _cc_project}, recursive=False) }}"
   vars:
     _cc_app: "{{ item.value }}"
-    _cc_app_repo: "{{ item.value.docker_compose_repo | default(item.value.repo | default(_cc_repo, true), true) }}"
+    _cc_app_repo: "{{ item.value.docker_compose_repo | default(item.value.repo | default('', true), true) }}"
     _cc_app_branch: "{{ item.value.docker_compose_branch | default(item.value.branch | default(_cc_branch, true), true) }}"
     _cc_app_repo_path: "{{ item.value.repo_path | default((_cc_app_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '')), true) }}"
     _cc_app_ingress: "{{ _cc_ingress | combine(item.value.ingress | default({}), recursive=True) }}"
-    _cc_app_packages: "{{ (['sitectl'] + (item.value.sitectl_packages | default(_cc_sitectl_packages, true))) | unique }}"
+    _cc_app_packages: "{{ (['sitectl'] + (item.value.sitectl_packages | default(_cc_sitectl_packages))) | unique }}"
     _cc_project:
       name: "{{ item.key }}"
       docker_compose_repo: "{{ _cc_app_repo }}"
@@ -99,24 +271,56 @@
       repo_path: "{{ _cc_app_repo_path }}"
       project_dir: "{{ item.value.project_dir | default(cloud_compose_data_dir ~ '/' ~ _cc_app_repo_path ~ '/' ~ _cc_app_branch, true) }}"
       compose_project_name: "{{ item.value.compose_project_name | default((_cc_app_repo_path ~ '-' ~ _cc_app_branch) | lower | regex_replace('\\.git$', '') | regex_replace('[^a-zA-Z0-9]', '-') | regex_replace('-+', '-'), true) }}"
-      ingress_port: "{{ item.value.ingress_port | default(_cc_ingress_port, true) }}"
+      ingress_port: "{{ item.value.ingress_port | default(_cc_ingress_port) }}"
       ingress: "{{ _cc_app_ingress }}"
       sitectl_context_name: "{{ item.value.sitectl_context_name | default(item.key, true) }}"
       sitectl_plugin: "{{ item.value.sitectl_plugin | default(_cc_sitectl_plugin, true) }}"
       sitectl_environment: "{{ item.value.sitectl_environment | default(_cc_sitectl_environment, true) }}"
       sitectl_packages: "{{ _cc_app_packages }}"
       sitectl_verify_args: "{{ item.value.sitectl_verify_args | default(_cc_verify_args, true) }}"
-      init_commands: "{{ item.value.init_commands | default(item.value.docker_compose_init | default(_cc_init_commands, true), true) }}"
-      up_commands: "{{ item.value.up_commands | default(item.value.docker_compose_up | default(_cc_up_commands, true), true) }}"
-      down_commands: "{{ item.value.down_commands | default(item.value.docker_compose_down | default(_cc_down_commands, true), true) }}"
-      rollout_commands: "{{ item.value.rollout_commands | default(item.value.docker_compose_rollout | default(_cc_rollout_commands, true), true) }}"
+      init_commands: "{{ item.value.init_commands | default(item.value.docker_compose_init | default(_cc_init_commands)) }}"
+      up_commands: "{{ item.value.up_commands | default(item.value.docker_compose_up | default(_cc_up_commands)) }}"
+      down_commands: "{{ item.value.down_commands | default(item.value.docker_compose_down | default(_cc_down_commands)) }}"
+      rollout_commands: "{{ item.value.rollout_commands | default(item.value.docker_compose_rollout | default(_cc_rollout_commands)) }}"
   loop: "{{ _cc_explicit_projects | dict2items }}"
   when: _cc_explicit_projects | length > 0
 
 - name: Select cloud-compose projects
   ansible.builtin.set_fact:
     _cc_compose_projects: "{{ _cc_explicit_project_map if (_cc_explicit_projects | length) > 0 else dict([(cloud_compose_name, _cc_single_project)]) }}"
-    _cc_primary_key: "{{ _cc_compose.primary | default(((_cc_explicit_project_map.keys() | list | first) if (_cc_explicit_projects | length) > 0 else cloud_compose_name), true) }}"
+    _cc_primary_key: "{{ _cc_compose.primary | default(((_cc_explicit_project_map.keys() | list | sort | first) if (_cc_explicit_projects | length) > 0 else cloud_compose_name), true) }}"
+
+- name: Require normalized lifecycle command lists
+  ansible.builtin.assert:
+    that:
+      - item.value.init_commands is sequence
+      - item.value.init_commands is not string
+      - item.value.init_commands is not mapping
+      - item.value.up_commands is sequence
+      - item.value.up_commands is not string
+      - item.value.up_commands is not mapping
+      - item.value.down_commands is sequence
+      - item.value.down_commands is not string
+      - item.value.down_commands is not mapping
+      - item.value.rollout_commands is sequence
+      - item.value.rollout_commands is not string
+      - item.value.rollout_commands is not mapping
+    fail_msg: "Lifecycle init, up, down, and rollout commands for every compose project must be lists of strings."
+  loop: "{{ _cc_compose_projects | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Require normalized lifecycle command strings
+  ansible.builtin.assert:
+    that:
+      - (item.value.init_commands | reject('string') | list | length) == 0
+      - (item.value.up_commands | reject('string') | list | length) == 0
+      - (item.value.down_commands | reject('string') | list | length) == 0
+      - (item.value.rollout_commands | reject('string') | list | length) == 0
+    fail_msg: "Lifecycle init, up, down, and rollout commands for every compose project must be lists of strings."
+  loop: "{{ _cc_compose_projects | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 - name: Require a valid primary cloud-compose project
   ansible.builtin.assert:
@@ -127,6 +331,39 @@
 - name: Select primary cloud-compose project
   ansible.builtin.set_fact:
     _cc_primary_project: "{{ _cc_compose_projects[_cc_primary_key] }}"
+
+- name: Validate project directory and managed artifact host boundaries
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/validate-runtime-inputs.py"
+    executable: "{{ ansible_facts.discovered_interpreter_python | default(ansible_python_interpreter | default('/usr/bin/python3')) }}"
+  environment:
+    CLOUD_COMPOSE_VALIDATION_PAYLOAD_B64: >-
+      {{ {'projects': (_cc_compose_projects.values() | list), 'artifacts': _cc_managed_artifacts} | to_json | b64encode }}
+  changed_when: false
+
+- name: Initialize resolved sitectl package versions
+  ansible.builtin.set_fact:
+    _cc_all_sitectl_packages: "{{ (_cc_sitectl_packages + (_cc_compose_projects.values() | map(attribute='sitectl_packages') | flatten)) | unique }}"
+    _cc_sitectl_package_versions: {}
+
+- name: Require package version overrides to select installed packages
+  ansible.builtin.assert:
+    that:
+      - (_cc_sitectl_package_version_overrides.keys() | difference(_cc_all_sitectl_packages) | list | length) == 0
+    fail_msg: "package_versions may only select installed sitectl packages."
+
+- name: Require valid installed sitectl package names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - (item | string) is match('^sitectl(-[a-z0-9]+)*$')
+    fail_msg: "sitectl packages must use valid release package names."
+  loop: "{{ _cc_all_sitectl_packages }}"
+
+- name: Resolve sitectl package versions
+  ansible.builtin.set_fact:
+    _cc_sitectl_package_versions: "{{ _cc_sitectl_package_versions | combine({item: (_cc_sitectl_package_version_overrides[item] | default(_cc_template_sitectl_package_versions[item] | default(_cc_sitectl_version)) | string)}) }}"
+  loop: "{{ _cc_all_sitectl_packages }}"
 
 - name: Build cloud-compose environment
   ansible.builtin.set_fact:
@@ -150,8 +387,9 @@
       GCP_REGION: ""
       GCP_ZONE: ""
       GCP_APP_SERVICE_ACCOUNT_EMAIL: ""
-      SITECTL_PACKAGES: "{{ (_cc_sitectl_packages + (_cc_compose_projects.values() | map(attribute='sitectl_packages') | flatten)) | unique | join(' ') }}"
-      SITECTL_VERSION: "{{ cloud_compose_sitectl_version }}"
+      SITECTL_PACKAGES: "{{ _cc_all_sitectl_packages | join(' ') }}"
+      SITECTL_VERSION: "{{ _cc_sitectl_version | string }}"
+      SITECTL_PACKAGE_VERSIONS: "{{ _cc_sitectl_package_versions | to_json }}"
       SITECTL_CONTEXT_NAME: "{{ _cc_primary_project.sitectl_context_name }}"
       SITECTL_PLUGIN: "{{ _cc_primary_project.sitectl_plugin }}"
       SITECTL_ENVIRONMENT: "{{ _cc_primary_project.sitectl_environment }}"
@@ -164,14 +402,14 @@
       VAULT_AGENT_ENABLED: "{{ ((_cc_vault.agent_enabled | default(false, true)) and (_cc_vault.addr | default('', true) | trim | length > 0)) | ternary('true', 'false') }}"
       VAULT_AUTH_METHOD: "{{ _cc_vault.auth_method | default('consumer-managed', true) }}"
       VAULT_AGENT_TOKEN_PATH: "{{ _cc_vault.agent_token_path | default('/mnt/disks/data/vault/token', true) }}"
-      LIBOPS_MANAGED_RUNTIME_ENABLED: "{{ (_cc_managed.enabled | default(cloud_compose_managed_runtime_enabled, true)) | ternary('true', 'false') }}"
-      LIBOPS_INTERNAL_SERVICES_ENABLED: "{{ (_cc_managed.internal_services_enabled | default(cloud_compose_internal_services_enabled, true)) | ternary('true', 'false') }}"
-      LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE: "{{ (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update, true)) | ternary('true', 'false') }}"
+      LIBOPS_MANAGED_RUNTIME_ENABLED: "{{ (_cc_managed.enabled | default(cloud_compose_managed_runtime_enabled)) | ternary('true', 'false') }}"
+      LIBOPS_INTERNAL_SERVICES_ENABLED: "{{ _cc_internal_services_enabled | ternary('true', 'false') }}"
+      LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE: "{{ (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update)) | ternary('true', 'false') }}"
       INTERNAL_SERVICES_COMPOSE_PROFILES: ""
 
-- name: Merge extra cloud-compose environment
+- name: Keep host controls separate from application environment
   ansible.builtin.set_fact:
-    _cc_env: "{{ _cc_env_base | combine(cloud_compose_extra_env, recursive=False) }}"
+    _cc_env: "{{ _cc_env_base }}"
 
 - name: Install Debian runtime dependencies
   ansible.builtin.apt:
@@ -182,6 +420,7 @@
       - git
       - jq
       - make
+      - openssl
     state: present
     update_cache: true
   when: cloud_compose_install_packages | bool
@@ -232,6 +471,35 @@
     dest: /
     mode: preserve
 
+- name: Inspect cloud-compose lifecycle lock directory
+  ansible.builtin.stat:
+    path: /run/lock/cloud-compose
+    follow: false
+  register: cloud_compose_lifecycle_lock_dir
+
+- name: Inspect cloud-compose lifecycle lock file
+  ansible.builtin.stat:
+    path: /run/lock/cloud-compose/lifecycle.lock
+    follow: false
+  register: cloud_compose_lifecycle_lock_file
+
+- name: Prepare cloud-compose lifecycle lock
+  ansible.builtin.command:
+    cmd: systemd-tmpfiles --create /etc/tmpfiles.d/cloud-compose.conf
+  changed_when: >-
+    not (
+      (cloud_compose_lifecycle_lock_dir.stat.isdir | default(false)) and
+      not (cloud_compose_lifecycle_lock_dir.stat.islnk | default(false)) and
+      (cloud_compose_lifecycle_lock_dir.stat.uid | default(-1)) == 0 and
+      (cloud_compose_lifecycle_lock_dir.stat.gr_name | default('')) == cloud_compose_group and
+      (cloud_compose_lifecycle_lock_dir.stat.mode | default('')) == '0750' and
+      (cloud_compose_lifecycle_lock_file.stat.isreg | default(false)) and
+      not (cloud_compose_lifecycle_lock_file.stat.islnk | default(false)) and
+      (cloud_compose_lifecycle_lock_file.stat.uid | default(-1)) == 0 and
+      (cloud_compose_lifecycle_lock_file.stat.gr_name | default('')) == cloud_compose_group and
+      (cloud_compose_lifecycle_lock_file.stat.mode | default('')) == '0660'
+    )
+
 - name: Find cloud-compose shell scripts
   ansible.builtin.find:
     paths: "{{ cloud_compose_home }}"
@@ -249,9 +517,9 @@
 - name: Write cloud-compose lifecycle dispatchers
   ansible.builtin.copy:
     dest: "{{ cloud_compose_home }}/{{ item }}"
-    owner: "{{ cloud_compose_user }}"
+    owner: root
     group: "{{ cloud_compose_group }}"
-    mode: "0755"
+    mode: "0750"
     content: |
       #!/usr/bin/env bash
 
@@ -269,15 +537,24 @@
   ansible.builtin.template:
     src: env.j2
     dest: "{{ cloud_compose_home }}/.env"
-    owner: "{{ cloud_compose_user }}"
+    owner: root
     group: "{{ cloud_compose_group }}"
     mode: "0640"
+
+- name: Write Compose application environment data
+  ansible.builtin.copy:
+    dest: "{{ cloud_compose_home }}/application-env.json"
+    owner: root
+    group: "{{ cloud_compose_group }}"
+    mode: "0640"
+    content: "{{ _cc_extra_env | to_json }}\n"
+  no_log: true
 
 - name: Write cloud-compose project manifest
   ansible.builtin.template:
     src: compose-projects.json.j2
     dest: "{{ cloud_compose_home }}/compose-projects.json"
-    owner: "{{ cloud_compose_user }}"
+    owner: root
     group: "{{ cloud_compose_group }}"
     mode: "0640"
 
@@ -285,9 +562,10 @@
   ansible.builtin.template:
     src: managed-runtime-artifacts.tsv.j2
     dest: "{{ cloud_compose_home }}/managed-runtime-artifacts.tsv"
-    owner: "{{ cloud_compose_user }}"
+    owner: root
     group: "{{ cloud_compose_group }}"
     mode: "0640"
+  no_log: true
 
 - name: Reload systemd units
   ansible.builtin.systemd:

@@ -1,0 +1,13 @@
+[Unit]
+Description=Prune old unused Cloud Compose Docker data daily
+
+[Timer]
+OnBootSec=10m
+OnUnitInactiveSec=24h
+RandomizedDelaySec=2h
+FixedRandomDelay=true
+Persistent=true
+Unit=cloud-compose-docker-prune.service
+
+[Install]
+WantedBy=timers.target

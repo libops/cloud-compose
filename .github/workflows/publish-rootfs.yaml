@@ -1,0 +1,30 @@
+name: Publish rootfs release asset
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build and verify canonical rootfs asset
+        run: |
+          ci/rootfs-package-contract.sh
+          ci/package-rootfs.sh dist
+
+      - name: Upload rootfs asset and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          dist/cloud-compose-rootfs.tar.gz
+          dist/cloud-compose-rootfs.tar.gz.sha256
+          --clobber

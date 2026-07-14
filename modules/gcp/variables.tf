@@ -1,11 +1,50 @@
 variable "project_id" {
   description = "The GCP project ID"
   type        = string
+
+  validation {
+    condition     = can(regex("^([a-z0-9][a-z0-9.-]*:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.project_id))
+    error_message = "project_id must be a valid lowercase GCP project ID (legacy domain-scoped prefixes are accepted)."
+  }
 }
 
 variable "project_number" {
   type        = string
-  description = "The GCP project number"
+  default     = ""
+  description = "Deprecated optional project-number assertion. The module derives the authoritative number from project_id and rejects a mismatched non-empty value."
+
+  validation {
+    condition     = var.project_number == "" || can(regex("^[0-9]+$", var.project_number))
+    error_message = "project_number must be empty or contain only decimal digits."
+  }
+}
+
+variable "power_start_role" {
+  type        = string
+  default     = ""
+  description = "Full project- or organization-custom-role name granting compute.instances.get, start, and resume. Required when power management is enabled; create it in the singleton GCP foundation module."
+
+  validation {
+    condition = var.power_start_role == "" || can(regex(
+      "^(projects/([a-z0-9][a-z0-9.-]*:)?[a-z][a-z0-9-]{4,28}[a-z0-9]|organizations/[0-9]+)/roles/[A-Za-z0-9_.]+$",
+      var.power_start_role,
+    ))
+    error_message = "power_start_role must be empty or a full projects/.../roles/... or organizations/.../roles/... custom-role name."
+  }
+}
+
+variable "power_suspend_role" {
+  type        = string
+  default     = ""
+  description = "Full project- or organization-custom-role name granting compute.instances.get and suspend. Required when power management is enabled; create it in the singleton GCP foundation module."
+
+  validation {
+    condition = var.power_suspend_role == "" || can(regex(
+      "^(projects/([a-z0-9][a-z0-9.-]*:)?[a-z][a-z0-9-]{4,28}[a-z0-9]|organizations/[0-9]+)/roles/[A-Za-z0-9_.]+$",
+      var.power_suspend_role,
+    ))
+    error_message = "power_suspend_role must be empty or a full projects/.../roles/... or organizations/.../roles/... custom-role name."
+  }
 }
 
 variable "region" {
@@ -23,18 +62,39 @@ variable "zone" {
 variable "name" {
   type        = string
   description = "The site name (will be the name of the GCP instance)"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{4,19}[a-z0-9]$", var.name))
+    error_message = "name must be 6 through 21 lowercase letters, numbers, or hyphens; it must start with a letter and end with a letter or number so every generated GCP service-account ID is valid."
+  }
 }
 
 variable "service_account_email" {
-  description = "Existing service account email for the VM. When empty, this module creates one."
+  description = "Existing same-project service account email dedicated to this application state for the VM. When empty, this module creates one. Reuse across application states and cross-project attachment are not supported."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.service_account_email == "" || can(regex("^[a-z0-9-]+@[a-z0-9.-]+\\.iam\\.gserviceaccount\\.com$", var.service_account_email))
+    error_message = "service_account_email must be empty or a valid Google service-account email."
+  }
 }
 
 variable "app_service_account_email" {
-  description = "Existing service account email for the compose app identity. When empty, this module creates one. On GCP this identity is used for app-scoped credentials such as Vault GCP IAM auth."
+  description = "Existing same-project service account email dedicated to this application state for the compose app identity. When empty, this module creates one. Reuse across application states is not supported. On GCP this identity is used for optional app-scoped credentials and managed Vault GCP IAM auth."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.app_service_account_email == "" || can(regex("^[a-z0-9-]+@[a-z0-9.-]+\\.iam\\.gserviceaccount\\.com$", var.app_service_account_email))
+    error_message = "app_service_account_email must be empty or a valid Google service-account email."
+  }
+}
+
+variable "app_credentials_enabled" {
+  description = "Create and rotate a user-managed JSON key for the app service account. Leave false unless an application explicitly requires a file credential; managed Vault Agent GCP IAM auth uses VM attached identity and does not require this."
+  type        = bool
+  default     = false
 }
 
 variable "disk_type" {
@@ -85,6 +145,11 @@ variable "ingress_port" {
   type        = number
   default     = 80
   description = "TCP port on the VM that the Cloud Run ingress should connect to."
+
+  validation {
+    condition     = var.ingress_port >= 1 && var.ingress_port <= 65535 && floor(var.ingress_port) == var.ingress_port
+    error_message = "ingress_port must be a whole number between 1 and 65535."
+  }
 }
 
 variable "primary_compose_project" {
@@ -152,8 +217,8 @@ variable "compose_projects" {
     sitectl_context_name   = optional(string)
     sitectl_plugin         = optional(string)
     sitectl_environment    = optional(string)
-    sitectl_packages       = optional(list(string), [])
-    sitectl_verify_args    = optional(list(string), [])
+    sitectl_packages       = optional(list(string))
+    sitectl_verify_args    = optional(list(string))
     docker_compose_init    = optional(list(string))
     docker_compose_up      = optional(list(string))
     docker_compose_down    = optional(list(string))
@@ -166,10 +231,11 @@ variable "compose_projects" {
       for name, app in var.compose_projects :
       can(regex("^[a-z][a-z0-9-]*$", name)) &&
       trimspace(app.docker_compose_repo) != "" &&
-      try(app.ingress_port, 80) > 0 &&
-      try(app.ingress_port, 80) <= 65535
+      coalesce(try(app.ingress_port, null), var.ingress_port) >= 1 &&
+      coalesce(try(app.ingress_port, null), var.ingress_port) <= 65535 &&
+      floor(coalesce(try(app.ingress_port, null), var.ingress_port)) == coalesce(try(app.ingress_port, null), var.ingress_port)
     ])
-    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be between 1 and 65535."
+    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be a whole number between 1 and 65535."
   }
 }
 
@@ -211,13 +277,13 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-$${DOCKER_COMPOSE_BRANCH:-main}}}\"",
-    "if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --branch \"$TARGET_REF\"; fi",
+    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-}}\"",
+    "if [ -n \"$TARGET_REF\" ]; then sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --ref \"$TARGET_REF\"; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git; fi",
     "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
     "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
   nullable    = false
-  description = "Command to roll out a new git ref for the docker compose project. The optional rollout service sets GIT_REF/GIT_BRANCH from the trigger request."
+  description = "Commands used by rollout triggers. GIT_REF/GIT_BRANCH selects a source ref; without one, sitectl reconciles the current checkout."
 }
 
 variable "sitectl_packages" {
@@ -237,11 +303,31 @@ variable "sitectl_packages" {
 variable "sitectl_version" {
   type        = string
   default     = "latest"
-  description = "Sitectl release tag to install for sitectl packages, or latest to follow https://github.com/libops/sitectl/releases/latest."
+  description = "Legacy fallback sitectl release tag for packages without a package-specific override."
 
   validation {
-    condition     = var.sitectl_version == "latest" || can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+", var.sitectl_version))
-    error_message = "sitectl_version must be latest or a release tag such as v0.19.7."
+    condition = (
+      var.sitectl_version == "latest" ||
+      can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", var.sitectl_version))
+    )
+    error_message = "sitectl_version must be latest or an exact semantic-version release tag such as v0.38.0."
+  }
+}
+
+variable "sitectl_package_versions" {
+  type        = map(string)
+  default     = {}
+  description = "Per-package release tags that override sitectl_version."
+
+  validation {
+    condition = alltrue([
+      for package, version in var.sitectl_package_versions :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package)) && (
+        version == "latest" ||
+        can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", version))
+      )
+    ])
+    error_message = "sitectl_package_versions keys must be sitectl package names and values must be latest or exact semantic-version release tags."
   }
 }
 
@@ -297,20 +383,20 @@ variable "libops_managed_runtime_enabled" {
 
 variable "libops_internal_services_auto_update" {
   type        = bool
-  default     = true
+  default     = false
   description = "Whether the managed runtime updater should pull and restart the internal LibOps compose project."
 }
 
 variable "libops_internal_services_enabled" {
   type        = bool
-  default     = true
-  description = "Whether to start the internal LibOps services timer. GCP deployments usually keep this enabled; non-GCP modules disable it by default."
+  default     = false
+  description = "Whether to start the privileged internal LibOps services. Enable explicitly only when the Docker socket and host-observability access are accepted."
 }
 
 variable "power_management_enabled" {
   type        = bool
-  default     = true
-  description = "Enable GCP power-management support services such as lightsout and Cloud Run proxy-power-button. Disable for providers that do not save cost when VMs are stopped."
+  default     = false
+  description = "Enable GCP power-management support services such as lightsout and Cloud Run proxy-power-button. This explicitly enables the privileged internal-services runtime required by lightsout."
 }
 
 variable "libops_managed_artifacts" {
@@ -343,31 +429,79 @@ variable "libops_managed_artifacts" {
 variable "allowed_ips" {
   type        = list(string)
   default     = []
-  description = "CIDR IP Addresses allowed to turn on this site's GCP instance"
+  description = "Original-client CIDRs allowed to turn on this site's GCP instance after the configured trusted X-Forwarded-For suffix is removed. Required when power management is enabled."
+
+  validation {
+    condition     = alltrue([for cidr in var.allowed_ips : can(cidrhost(cidr, 0))])
+    error_message = "allowed_ips entries must be valid IPv4 or IPv6 CIDR ranges."
+  }
+}
+
+variable "allowed_ip_forwarded_depth" {
+  type        = number
+  default     = null
+  nullable    = true
+  description = "Explicit number of trusted proxy addresses after the original client in X-Forwarded-For. Direct public Cloud Run uses 0 because Google appends the original client as the rightmost value. Any additional proxy requires a separately verified larger value. Required when power management is enabled."
+
+  validation {
+    condition = var.allowed_ip_forwarded_depth == null ? true : (
+      var.allowed_ip_forwarded_depth >= 0 &&
+      var.allowed_ip_forwarded_depth <= 10 &&
+      floor(var.allowed_ip_forwarded_depth) == var.allowed_ip_forwarded_depth
+    )
+    error_message = "allowed_ip_forwarded_depth must be null or a whole number from 0 through 10."
+  }
 }
 
 variable "allowed_ssh_ipv4" {
   type        = list(string)
   default     = []
-  description = "CIDR IPv4 Addresses allowed to to SSH into this site's GCP instance"
+  description = "IPv4 CIDR ranges allowed to SSH into this site's GCP instance."
+
+  validation {
+    condition = alltrue([
+      for cidr in var.allowed_ssh_ipv4 :
+      can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) == 0
+    ])
+    error_message = "allowed_ssh_ipv4 entries must be valid IPv4 CIDR ranges."
+  }
 }
 
 variable "allowed_ssh_ipv6" {
   type        = list(string)
   default     = []
-  description = "CIDR IPv6 Addresses allowed to SSH into this site's GCP instance"
+  description = "IPv6 CIDR ranges allowed to SSH into this site's GCP instance."
+
+  validation {
+    condition = alltrue([
+      for cidr in var.allowed_ssh_ipv6 :
+      can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) > 0
+    ])
+    error_message = "allowed_ssh_ipv6 entries must be valid IPv6 CIDR ranges."
+  }
 }
 
 variable "network_name" {
   type        = string
   default     = ""
-  description = "Existing VPC network name or self link for the VM and firewall rules. When empty and create_network is true, this module creates a per-deployment network."
+  description = "Existing VPC network name or self link for the VM, Cloud Run Direct VPC egress, and firewall rules. When supplied without subnetwork_name, Cloud Run and the module select the same-named regional subnet."
 }
 
 variable "subnetwork_name" {
   type        = string
   default     = ""
-  description = "Existing regional subnetwork name or self link for the VM. When empty and create_network is true, this module creates a per-deployment subnetwork."
+  description = "Existing regional subnetwork name or self link for the VM and Cloud Run Direct VPC egress. When supplied without network_name, the module derives its parent network."
+}
+
+variable "network_project_id" {
+  type        = string
+  default     = ""
+  description = "Project containing an existing network and subnetwork. Defaults to project_id. Set it for Shared VPC; the singleton GCP foundation owns Cloud Run subnet IAM, while this stack's Terraform caller must be able to inspect the network and manage its per-stack firewall rules."
+
+  validation {
+    condition     = var.network_project_id == "" || can(regex("^([a-z0-9][a-z0-9.-]*:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.network_project_id))
+    error_message = "network_project_id must be empty or a valid lowercase GCP project ID."
+  }
 }
 
 variable "create_network" {
@@ -382,8 +516,19 @@ variable "network_ip_cidr_range" {
   description = "CIDR range used for the managed GCP subnetwork when create_network is true."
 
   validation {
-    condition     = can(cidrhost(var.network_ip_cidr_range, 1))
-    error_message = "network_ip_cidr_range must be a valid CIDR range."
+    condition     = can(cidrhost(var.network_ip_cidr_range, 1)) && length(regexall(":", var.network_ip_cidr_range)) == 0
+    error_message = "network_ip_cidr_range must be a valid IPv4 CIDR range."
+  }
+}
+
+variable "network_mtu" {
+  type        = number
+  default     = 1460
+  description = "MTU for a managed network, or the caller-attested MTU of an existing/Shared VPC network. Cloud Run Direct VPC egress requires 1460."
+
+  validation {
+    condition     = var.network_mtu >= 1300 && var.network_mtu <= 8896 && floor(var.network_mtu) == var.network_mtu
+    error_message = "network_mtu must be a whole number from 1300 through 8896."
   }
 }
 
@@ -408,13 +553,73 @@ variable "volume_names" {
 variable "users" {
   type        = map(list(string))
   default     = {}
-  description = "Map of usernames to lists of SSH public keys. Users will be created with docker group membership. Example: { \"alice\" = [\"ssh-rsa AAAA...\"], \"bob\" = [\"ssh-ed25519 AAAA...\", \"ssh-rsa BBBB...\"] }"
+  description = "Map of safe Linux usernames to lists of single-line SSH public keys. Example: { \"alice\" = [\"ssh-rsa AAAA...\"], \"bob\" = [\"ssh-ed25519 AAAA...\", \"ssh-rsa BBBB...\"] }"
+
+  validation {
+    condition = alltrue(concat(
+      [for username in keys(var.users) : can(regex("^[a-z_][a-z0-9_-]{0,31}\\$?$", username))],
+      flatten([
+        for _, keys in var.users : [
+          for key in keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
+        ]
+      ]),
+    ))
+    error_message = "users names must be safe Linux usernames and SSH keys must be non-empty single-line values."
+  }
 }
 
 variable "rootfs" {
   type        = string
   default     = ""
   description = "Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs'"
+}
+
+variable "rootfs_archive_url" {
+  type        = string
+  default     = ""
+  description = "Optional HTTPS tar.gz URL containing a rootfs directory to fetch during boot instead of embedding the packaged rootfs. Must be set with rootfs_archive_sha256."
+
+  validation {
+    condition = (
+      trimspace(var.rootfs_archive_url) == "" ||
+      can(regex("^https://[^[:space:]]+$", trimspace(var.rootfs_archive_url)))
+    )
+    error_message = "rootfs_archive_url must be empty or an HTTPS URL without whitespace."
+  }
+}
+
+variable "rootfs_archive_sha256" {
+  type        = string
+  default     = ""
+  description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
+}
+
+variable "extra_env" {
+  type        = map(string)
+  default     = {}
+  description = "Application-only Compose environment values written as JSON data and reconciled into every project .env."
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.extra_env) :
+      can(regex("^[A-Za-z_][A-Za-z0-9_]*$", name)) &&
+      !contains(["HOME", "PATH"], name) &&
+      alltrue([
+        for prefix in [
+          "CLOUD_COMPOSE_",
+          "COMPOSE_",
+          "DOCKER_",
+          "SITECTL_",
+          "LIBOPS_",
+          "GCP_",
+          "VAULT_",
+          "ROLLOUT_",
+          "POWER_MANAGEMENT_",
+        ] : !startswith(name, prefix)
+      ])
+    ])
+    error_message = "extra_env names must be valid environment names and must not override cloud-compose control-plane keys (HOME, PATH, or CLOUD_COMPOSE_/COMPOSE_/DOCKER_/SITECTL_/LIBOPS_/GCP_/VAULT_/ROLLOUT_/POWER_MANAGEMENT_ prefixes)."
+  }
 }
 
 variable "runcmd" {
@@ -456,6 +661,15 @@ variable "frontend" {
     memory = optional(string, "1Gi")
   })
   default = null
+
+  validation {
+    condition = var.frontend == null ? true : (
+      var.frontend.port >= 1 &&
+      var.frontend.port <= 65535 &&
+      floor(var.frontend.port) == var.frontend.port
+    )
+    error_message = "frontend.port must be a whole number between 1 and 65535."
+  }
 }
 
 variable "rollout_enabled" {
@@ -468,6 +682,11 @@ variable "rollout_release_url" {
   description = "HTTPS URL for the pinned rollout Linux binary."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.rollout_release_url == "" || can(regex("^https://[^[:space:]]+$", var.rollout_release_url))
+    error_message = "rollout_release_url must be empty or an HTTPS URL."
+  }
 }
 
 variable "rollout_release_sha256" {
@@ -485,8 +704,8 @@ variable "rollout_port" {
   type        = number
   default     = 8081
   validation {
-    condition     = var.rollout_port > 0 && var.rollout_port <= 65535
-    error_message = "rollout_port must be between 1 and 65535."
+    condition     = var.rollout_port >= 1 && var.rollout_port <= 65535 && floor(var.rollout_port) == var.rollout_port
+    error_message = "rollout_port must be a whole number between 1 and 65535."
   }
 }
 
@@ -494,6 +713,11 @@ variable "rollout_jwks_uri" {
   description = "JWKS URI used by the rollout service to validate bearer JWTs."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.rollout_jwks_uri == "" || can(regex("^https://[^[:space:]]+$", var.rollout_jwks_uri))
+    error_message = "rollout_jwks_uri must be empty or an HTTPS URL."
+  }
 }
 
 variable "rollout_jwt_audience" {
@@ -506,12 +730,28 @@ variable "rollout_custom_claims" {
   description = "Optional JSON object of additional JWT claims required by the rollout service."
   type        = string
   default     = ""
+
+  validation {
+    condition = (
+      trimspace(var.rollout_custom_claims) == "" ||
+      can(keys(jsondecode(var.rollout_custom_claims)))
+    )
+    error_message = "rollout_custom_claims must be empty or a JSON object."
+  }
 }
 
 variable "rollout_allowed_ipv4" {
   description = "CIDR IPv4 ranges allowed to reach the rollout service port."
   type        = list(string)
   default     = ["10.0.0.0/8"]
+
+  validation {
+    condition = alltrue([
+      for cidr in var.rollout_allowed_ipv4 :
+      can(cidrhost(cidr, 0)) && length(regexall(":", cidr)) == 0
+    ])
+    error_message = "rollout_allowed_ipv4 entries must be valid IPv4 CIDR ranges."
+  }
 }
 
 variable "vault_addr" {
@@ -533,7 +773,7 @@ variable "vault_role" {
 }
 
 variable "vault_agent_enabled" {
-  description = "Write Vault Agent configuration and start vault-agent.service when Vault is configured."
+  description = "Write Vault Agent configuration and start cloud-compose-vault-agent.service when Vault is configured."
   type        = bool
   default     = false
 }

@@ -27,7 +27,7 @@ safe_name() {
 
 validate_root() {
   local root="$1" data_root="$2"
-  local rel data_dir lockfile created_lock init_status validate_status
+  local rel data_dir lockfile created_lock init_status validate_status test_status
   local -a init_args
 
   rel="${root#"$repo_root"/}"
@@ -53,8 +53,9 @@ validate_root() {
     if TF_DATA_DIR="$data_dir" terraform -chdir="$root" init "${init_args[@]}" >/dev/null; then
       init_status=0
       break
+    else
+      init_status=$?
     fi
-    init_status=$?
     if [[ "$attempt" -lt 3 ]]; then
       echo "terraform init failed in ${rel}; retrying in $((attempt * 10))s (attempt ${attempt}/3)" >&2
       sleep $((attempt * 10))
@@ -66,6 +67,11 @@ validate_root() {
     TF_DATA_DIR="$data_dir" terraform -chdir="$root" validate -no-color || validate_status=$?
   fi
 
+  test_status=0
+  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 ]] && find "$root" -maxdepth 1 -name '*.tftest.hcl' -print -quit | grep -q .; then
+    TF_DATA_DIR="$data_dir" terraform -chdir="$root" test -no-color || test_status=$?
+  fi
+
   if [[ "$created_lock" == "true" ]]; then
     rm -f "$lockfile"
   fi
@@ -73,7 +79,10 @@ validate_root() {
   if [[ "$init_status" -ne 0 ]]; then
     return "$init_status"
   fi
-  return "$validate_status"
+  if [[ "$validate_status" -ne 0 ]]; then
+    return "$validate_status"
+  fi
+  return "$test_status"
 }
 
 main() {

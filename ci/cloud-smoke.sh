@@ -380,7 +380,7 @@ gcp_smoke_residuals() {
 
   if ! output="$(gcloud compute firewall-rules list \
     --project "$project" \
-    --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-)${name_filter#^}'" \
+    --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-|allow-cloud-run-)${name_filter#^}'" \
     --format='value(name)')"; then
     echo "Could not verify GCP firewall cleanup" >&2
     return 1
@@ -709,7 +709,7 @@ provider_tag_cleanup() {
 
       if ! firewall_names="$(gcloud compute firewall-rules list \
         --project "$project" \
-        --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-)${name_filter#^}'" \
+        --filter="name~'^(allow-ssh-ipv4-|allow-ssh-ipv6-|allow-rollout-ipv4-|allow-cloud-run-)${name_filter#^}'" \
         --format='value(name)')"; then
         cleanup_status=1
         firewall_names=""
@@ -859,6 +859,7 @@ target_workdir() {
 
 target_var_args() {
   local root="$1" key_path="$2" target="$3" public_key provider template
+  local source_ref source_sha256 source_cache_key checksum_dir checksum_file archive_tmp
 
   provider="$(target_provider "$target")"
   template="$(target_template "$target")"
@@ -877,7 +878,34 @@ target_var_args() {
     printf '%s\0%s\0' "-var" "template=${template}"
   fi
   if grep -q 'variable "cloud_compose_source_ref"' "$root/variables.tf"; then
-    printf '%s\0%s\0' "-var" "cloud_compose_source_ref=${CLOUD_COMPOSE_SOURCE_REF:-${GITHUB_SHA:-main}}"
+    source_ref="${CLOUD_COMPOSE_SOURCE_REF:-${GITHUB_SHA:-main}}"
+    printf '%s\0%s\0' "-var" "cloud_compose_source_ref=${source_ref}"
+  fi
+  if grep -q 'variable "cloud_compose_source_sha256"' "$root/variables.tf"; then
+    source_sha256="${CLOUD_COMPOSE_SOURCE_SHA256:-}"
+    if [[ -z "$source_sha256" ]]; then
+      checksum_dir="$(target_workdir "$target")"
+      source_cache_key="$(printf '%s' "$source_ref" | sha256sum | awk '{print $1}')"
+      checksum_file="${checksum_dir}/cloud-compose-source-${source_cache_key}.sha256"
+      mkdir -p "$checksum_dir"
+      if [[ -s "$checksum_file" ]]; then
+        source_sha256="$(<"$checksum_file")"
+      else
+        archive_tmp="$(mktemp "${checksum_dir}/cloud-compose-source.XXXXXX.tar.gz")"
+        echo "Calculating SHA-256 for cloud-compose source archive ${source_ref}" >&2
+        curl -fsSL --retry 3 \
+          "https://github.com/libops/cloud-compose/archive/${source_ref}.tar.gz" \
+          -o "$archive_tmp"
+        source_sha256="$(sha256sum "$archive_tmp" | awk '{print $1}')"
+        rm -f "$archive_tmp"
+        printf '%s\n' "$source_sha256" > "$checksum_file"
+      fi
+    fi
+    if [[ ! "$source_sha256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      echo "CLOUD_COMPOSE_SOURCE_SHA256 must be a 64-character SHA-256 digest" >&2
+      return 1
+    fi
+    printf '%s\0%s\0' "-var" "cloud_compose_source_sha256=${source_sha256}"
   fi
   if grep -q 'variable "smoke_run_id"' "$root/variables.tf" && [[ -n "$(smoke_run_id)" ]]; then
     printf '%s\0%s\0' "-var" "smoke_run_id=$(smoke_run_id)"
@@ -1040,6 +1068,8 @@ echo \"--- /home/cloud-compose/run.log ---\"
 sudo tail -n 400 /home/cloud-compose/run.log
 echo \"--- cloud-compose unit ---\"
 sudo journalctl -u cloud-compose --no-pager -n 300
+echo \"--- lifecycle lock permissions ---\"
+sudo stat -Lc '%A %a %U:%G %u:%g %n' /run/lock/cloud-compose /run/lock/cloud-compose/lifecycle.lock
 echo \"--- docker ps ---\"
 sudo docker ps -a
 echo \"--- docker compose ps ---\"
@@ -1356,4 +1386,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

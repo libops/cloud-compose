@@ -1,5 +1,16 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
+
+  required_providers {
+    cloudinit = {
+      source  = "hashicorp/cloudinit"
+      version = "~> 2.3"
+    }
+    digitalocean = {
+      source  = "digitalocean/digitalocean"
+      version = "~> 2.0"
+    }
+  }
 }
 
 locals {
@@ -12,6 +23,16 @@ locals {
 
   input_compose = var.runtime.compose
   input_sitectl = var.runtime.sitectl
+
+  sitectl_packages = distinct(concat(
+    ["sitectl"],
+    local.input_sitectl.packages == null ? local.template.packages : local.input_sitectl.packages,
+  ))
+  template_sitectl_package_versions = {
+    for package in local.sitectl_packages :
+    package => local.template.package_versions[package]
+    if contains(keys(local.template.package_versions), package)
+  }
 
   runtime = merge(var.runtime, {
     compose = merge(local.input_compose, {
@@ -27,11 +48,8 @@ locals {
       )
     })
     sitectl = merge(local.input_sitectl, {
-      packages = (
-        local.template_name != "" && length(local.input_sitectl.packages) == 1 && local.input_sitectl.packages[0] == "sitectl"
-        ? local.template.packages
-        : local.input_sitectl.packages
-      )
+      packages         = local.sitectl_packages
+      package_versions = merge(local.template_sitectl_package_versions, local.input_sitectl.package_versions)
       plugin = (
         local.template_name != "" && local.input_sitectl.plugin == "core"
         ? local.template.plugin

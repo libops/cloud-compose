@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.2.4"
+  required_version = ">= 1.3.0"
 
   required_providers {
     linode = {
@@ -27,7 +27,7 @@ locals {
   name         = substr(join("-", compact(["cc-cm-ln", local.method, "dr", local.smoke_run_id, random_id.suffix.hex])), 0, 46)
 
   firewall_label = substr("${local.name}-fw", 0, 32)
-  project_dir    = "/opt/${local.template}"
+  project_dir    = "/mnt/disks/data/libops/${local.template}/main"
   target_tag     = "config-management-${local.method}-${local.template}"
   tags           = distinct(concat(var.tags, ["cloud-compose-smoke", "config-management-smoke", local.target_tag], local.run_tag != "" ? [local.run_tag] : []))
 }

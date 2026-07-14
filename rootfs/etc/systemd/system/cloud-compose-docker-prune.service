@@ -1,0 +1,12 @@
+[Unit]
+Description=Prune old unused Cloud Compose Docker data
+Requires=docker.service
+RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/bin/bash /home/cloud-compose/docker-prune.sh
+TimeoutStartSec=30min

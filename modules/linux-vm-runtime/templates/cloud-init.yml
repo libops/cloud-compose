@@ -13,15 +13,15 @@ users:
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
-  - ${key}
+  - ${jsonencode(key)}
 %{ endfor ~}
 %{ endif ~}
 %{ for username, ssh_keys in SSH_USERS ~}
-- name: ${username}
+- name: ${jsonencode(username)}
   shell: /bin/bash
   ssh_authorized_keys:
 %{ for key in ssh_keys ~}
-  - ${key}
+  - ${jsonencode(key)}
 %{ endfor ~}
 %{ endfor ~}
 
@@ -30,6 +30,7 @@ ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
 ${ENV_FILE_CONTENT}
+${APPLICATION_ENV_FILE_CONTENT}
 ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
@@ -58,34 +59,39 @@ runcmd:
     chmod 0440 /etc/sudoers.d/90-cloud-compose
   }
 
-  mount_cloud_compose_disk() {
-    device_path="$1"
-    mount_path="$2"
-    device="$(readlink -f "$device_path" 2>/dev/null || true)"
-    until [ -n "$device" ] && [ -b "$device" ]; do
-      echo "Waiting for $device_path"
-      sleep 2
-      device="$(readlink -f "$device_path" 2>/dev/null || true)"
-    done
-    mkdir -p "$mount_path"
-    if ! blkid "$device" >/dev/null 2>&1; then
-      mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$device"
-    fi
-    if ! mountpoint -q "$mount_path"; then
-      mount -o defaults,nofail "$device" "$mount_path"
-    fi
-    chmod a+w "$mount_path"
-  }
-
   ensure_cloud_compose_user
-  mount_cloud_compose_disk '${DATA_DEVICE}' /mnt/disks/data
-  mount_cloud_compose_disk '${VOLUMES_DEVICE}' /mnt/disks/volumes
+  filesystem_prep=/run/cloud-compose-prepare-filesystem
+  filesystem_persist=/run/cloud-compose-persist-filesystems
+%{ if ROOTFS_ARCHIVE_ENABLED }
+  ${indent(2, ROOTFS_ARCHIVE_PREPARE_COMMAND)}
+%{ else }
+  printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
+  printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
+  chmod 0600 "$filesystem_prep" "$filesystem_persist"
+%{ endif }
+  bash "$filesystem_prep" '${DATA_DEVICE}' /mnt/disks/data
+  bash "$filesystem_prep" '${VOLUMES_DEVICE}' /mnt/disks/volumes
   mkdir -p /mnt/disks/data/docker/volumes
   if ! mountpoint -q /mnt/disks/data/docker/volumes; then
     mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
   fi
-${ROOTFS_ARCHIVE_COMMAND}
+  for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do
+    if ! mountpoint -q -- "$required_mount"; then
+      echo "Required cloud-compose mount is unavailable: $required_mount" >&2
+      exit 1
+    fi
+  done
+  bash "$filesystem_persist" '${DATA_DEVICE}' '${VOLUMES_DEVICE}'
+%{ if ROOTFS_ARCHIVE_ENABLED }
+  ${indent(2, ROOTFS_ARCHIVE_INSTALL_COMMAND)}
+  ${indent(2, ARCHIVE_ADDITIONAL_ROOTFS)}
+%{ else }
+  if [ -d /var/lib/cloud-compose/mounted-rootfs/mnt/disks ]; then
+    cp -a /var/lib/cloud-compose/mounted-rootfs/mnt/disks/. /mnt/disks/
+  fi
+%{ endif }
   chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
   chmod 0775 /mnt/disks/data /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
-- bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
+  rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
+  bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1

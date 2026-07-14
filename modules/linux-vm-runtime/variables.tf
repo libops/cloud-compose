@@ -22,23 +22,52 @@ variable "zone" {
 variable "data_device" {
   type        = string
   description = "Stable device path for the persistent data disk."
+
+  validation {
+    condition     = can(regex("^/dev/[A-Za-z0-9._/+:-]+$", var.data_device))
+    error_message = "data_device must be a safe absolute /dev path without whitespace."
+  }
 }
 
 variable "volumes_device" {
   type        = string
   description = "Stable device path for the persistent Docker volumes disk."
+
+  validation {
+    condition     = can(regex("^/dev/[A-Za-z0-9._/+:-]+$", var.volumes_device))
+    error_message = "volumes_device must be a safe absolute /dev path without whitespace."
+  }
 }
 
 variable "ssh_users" {
   type        = map(list(string))
   default     = {}
   description = "Additional Linux users and authorized SSH keys to create through cloud-init."
+
+  validation {
+    condition = alltrue(concat(
+      [for username in keys(var.ssh_users) : can(regex("^[a-z_][a-z0-9_-]{0,31}\\$?$", username))],
+      flatten([
+        for _, keys in var.ssh_users : [
+          for key in keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
+        ]
+      ]),
+    ))
+    error_message = "ssh_users names must be safe Linux usernames and SSH keys must be non-empty single-line values."
+  }
 }
 
 variable "cloud_compose_ssh_keys" {
   type        = list(string)
   default     = []
   description = "Authorized SSH keys for the cloud-compose Linux user."
+
+  validation {
+    condition = alltrue([
+      for key in var.cloud_compose_ssh_keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
+    ])
+    error_message = "cloud_compose_ssh_keys entries must be non-empty single-line values."
+  }
 }
 
 variable "rootfs" {
@@ -50,19 +79,32 @@ variable "rootfs" {
 variable "rootfs_archive_url" {
   type        = string
   default     = ""
-  description = "Optional tar.gz URL containing a rootfs directory to fetch during boot instead of embedding the packaged rootfs in cloud-init."
+  description = "Optional HTTPS tar.gz URL containing a rootfs directory to fetch during boot instead of embedding the packaged rootfs in cloud-init. Must be set with rootfs_archive_sha256."
+
+  validation {
+    condition = (
+      trimspace(var.rootfs_archive_url) == "" ||
+      can(regex("^https://[^[:space:]]+$", trimspace(var.rootfs_archive_url)))
+    )
+    error_message = "rootfs_archive_url must be empty or an HTTPS URL without whitespace."
+  }
 }
 
 variable "rootfs_archive_sha256" {
   type        = string
   default     = ""
-  description = "Optional SHA-256 checksum for rootfs_archive_url."
+  description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
 }
 
 variable "ingress_port" {
   type        = number
   default     = 80
   description = "Default TCP port exposed by a compose project on the VM."
+
+  validation {
+    condition     = var.ingress_port >= 1 && var.ingress_port <= 65535 && floor(var.ingress_port) == var.ingress_port
+    error_message = "ingress_port must be a whole number between 1 and 65535."
+  }
 }
 
 variable "primary_compose_project" {
@@ -119,8 +161,8 @@ variable "compose_projects" {
     sitectl_context_name   = optional(string)
     sitectl_plugin         = optional(string)
     sitectl_environment    = optional(string)
-    sitectl_packages       = optional(list(string), [])
-    sitectl_verify_args    = optional(list(string), [])
+    sitectl_packages       = optional(list(string))
+    sitectl_verify_args    = optional(list(string))
     docker_compose_init    = optional(list(string))
     docker_compose_up      = optional(list(string))
     docker_compose_down    = optional(list(string))
@@ -133,10 +175,11 @@ variable "compose_projects" {
       for name, app in var.compose_projects :
       can(regex("^[a-z][a-z0-9-]*$", name)) &&
       trimspace(app.docker_compose_repo) != "" &&
-      try(app.ingress_port, 80) > 0 &&
-      try(app.ingress_port, 80) <= 65535
+      coalesce(try(app.ingress_port, null), var.ingress_port) >= 1 &&
+      coalesce(try(app.ingress_port, null), var.ingress_port) <= 65535 &&
+      floor(coalesce(try(app.ingress_port, null), var.ingress_port)) == coalesce(try(app.ingress_port, null), var.ingress_port)
     ])
-    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be between 1 and 65535."
+    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be a whole number between 1 and 65535."
   }
 }
 
@@ -172,23 +215,58 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist"
+    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-}}\"",
+    "if [ -n \"$TARGET_REF\" ]; then sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --ref \"$TARGET_REF\"; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git; fi",
+    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
+    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
   ]
   nullable    = false
-  description = "Commands used by rollout triggers."
+  description = "Commands used by rollout triggers. GIT_REF/GIT_BRANCH selects a source ref; without one, sitectl reconciles the current checkout."
 }
 
 variable "sitectl_packages" {
   type        = list(string)
   default     = ["sitectl"]
   description = "sitectl release packages to install."
+
+  validation {
+    condition = alltrue([
+      for package in var.sitectl_packages :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package))
+    ])
+    error_message = "sitectl_packages entries must be release package names such as sitectl, sitectl-isle, or sitectl-wp."
+  }
 }
 
 variable "sitectl_version" {
   type        = string
   default     = "latest"
-  description = "sitectl release tag to install, or latest."
+  description = "Legacy fallback sitectl release tag for packages without a package-specific override."
+
+  validation {
+    condition = (
+      var.sitectl_version == "latest" ||
+      can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", var.sitectl_version))
+    )
+    error_message = "sitectl_version must be latest or an exact semantic-version release tag such as v0.38.0."
+  }
+}
+
+variable "sitectl_package_versions" {
+  type        = map(string)
+  default     = {}
+  description = "Per-package release tags that override sitectl_version."
+
+  validation {
+    condition = alltrue([
+      for package, version in var.sitectl_package_versions :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package)) && (
+        version == "latest" ||
+        can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", version))
+      )
+    ])
+    error_message = "sitectl_package_versions keys must be sitectl package names and values must be latest or exact semantic-version release tags."
+  }
 }
 
 variable "sitectl_context_name" {
@@ -283,24 +361,18 @@ variable "vault_role" {
 variable "vault_agent_enabled" {
   type        = bool
   default     = false
-  description = "Write Vault Agent configuration and start vault-agent.service when Vault is configured."
+  description = "Write Vault Agent configuration and start cloud-compose-vault-agent.service when Vault is configured."
 }
 
 variable "vault_auth_method" {
   type        = string
   default     = "consumer-managed"
-  description = "Vault Agent auth method contract. Non-GCP providers default to consumer-managed."
+  description = "Vault Agent auth method contract. Linux VM providers require caller-owned consumer-managed auth configuration."
 
   validation {
-    condition     = contains(["gcp-iam", "consumer-managed"], var.vault_auth_method)
-    error_message = "vault_auth_method must be gcp-iam or consumer-managed."
+    condition     = var.vault_auth_method == "consumer-managed"
+    error_message = "vault_auth_method must be consumer-managed for the Linux VM runtime; GCP IAM auth is implemented by modules/gcp."
   }
-}
-
-variable "vault_gcp_auth_mount_path" {
-  type        = string
-  default     = "auth/gcp"
-  description = "Vault GCP auth mount path used by Vault Agent for gcp-iam auth."
 }
 
 variable "vault_agent_token_path" {
@@ -329,5 +401,27 @@ variable "vault_agent_additional_config" {
 variable "extra_env" {
   type        = map(string)
   default     = {}
-  description = "Additional shell environment variables written to /home/cloud-compose/.env."
+  description = "Application-only Compose environment values written as JSON data and reconciled into every project .env."
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.extra_env) :
+      can(regex("^[A-Za-z_][A-Za-z0-9_]*$", name)) &&
+      !contains(["HOME", "PATH"], name) &&
+      alltrue([
+        for prefix in [
+          "CLOUD_COMPOSE_",
+          "COMPOSE_",
+          "DOCKER_",
+          "SITECTL_",
+          "LIBOPS_",
+          "GCP_",
+          "VAULT_",
+          "ROLLOUT_",
+          "POWER_MANAGEMENT_",
+        ] : !startswith(name, prefix)
+      ])
+    ])
+    error_message = "extra_env names must be valid environment names and must not override cloud-compose control-plane keys (HOME, PATH, or CLOUD_COMPOSE_/COMPOSE_/DOCKER_/SITECTL_/LIBOPS_/GCP_/VAULT_/ROLLOUT_/POWER_MANAGEMENT_ prefixes)."
+  }
 }

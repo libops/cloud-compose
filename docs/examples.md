@@ -22,7 +22,7 @@ module path and supplies the template:
 
 ```hcl
 module "app" {
-  source = "github.com/libops/cloud-compose//providers/do"
+  source = "github.com/libops/cloud-compose//providers/do?ref=1.0.0"
 
   name     = "cc-wp"
   template = "wp"
@@ -34,11 +34,105 @@ module "app" {
 }
 ```
 
+The examples pin the reviewed `1.0.0` release. Replace that ref only with the
+exact release or full commit your organization has reviewed; omitting `?ref=`
+makes future plans consume a moving module source.
+
+## GCP foundation and application states
+
+Apply the GCP foundation once from a long-lived state, not once per site:
+
+```hcl
+module "cloud_compose_foundation" {
+  source = "github.com/libops/cloud-compose//modules/gcp-foundation?ref=1.0.0"
+
+  service_project_id = "library-production"
+}
+
+output "cloud_compose_start_role" {
+  value = module.cloud_compose_foundation.cloud_compose_start_role_name
+}
+
+output "cloud_compose_suspend_role" {
+  value = module.cloud_compose_foundation.cloud_compose_suspend_role_name
+}
+```
+
+Publish those output values through your reviewed remote-state or deployment
+configuration boundary. A separate application state consumes them; it does not
+own the foundation:
+
+```hcl
+module "wp" {
+  source = "github.com/libops/cloud-compose//providers/gcp?ref=1.0.0"
+
+  name     = "cc-wp"
+  template = "wp"
+  gcp = {
+    project_id = "library-production"
+    region     = "us-east5"
+    zone       = "us-east5-b"
+    network = {
+      power_button_allowed_ips = var.operator_cidrs
+      power_button_ip_depth    = 0 # direct public Cloud Run URL
+    }
+    power_management = {
+      enabled      = true
+      start_role   = var.cloud_compose_start_role
+      suspend_role = var.cloud_compose_suspend_role
+    }
+  }
+}
+```
+
+The application module derives the project number. Do not duplicate that
+identity as caller configuration. It binds the two power principals to this
+application's VM instance only.
+
+For Shared VPC, configure the foundation with the service project, host
+project, and each permitted regional subnet first. Then select that network in
+the application with full resource names:
+
+```hcl
+gcp = {
+  project_id = "library-production"
+  region     = "us-east5"
+  zone       = "us-east5-b"
+  network = {
+    create     = false
+    project_id = "organization-network"
+    name       = "projects/organization-network/global/networks/library"
+    subnetwork = "projects/organization-network/regions/us-east5/subnetworks/cloud-run-us-east5"
+    mtu        = 1460 # attests the reviewed network's real MTU
+    power_button_allowed_ips = var.operator_cidrs
+    power_button_ip_depth    = 0 # direct public Cloud Run URL
+  }
+  power_management = {
+    enabled      = true
+    start_role   = var.cloud_compose_start_role
+    suspend_role = var.cloud_compose_suspend_role
+  }
+}
+```
+
+The subnet must be in the Cloud Run region, use a supported IPv4 `/26` or larger
+range, and have enough free addresses for allocation blocks and overlapping
+revisions. The foundation grants the Cloud Run service agent Network Viewer on
+the host project and Network User on the explicit subnet. The application
+deployment identity separately needs permission to inspect and use the network
+and to manage its app-specific firewall rules.
+
 Use `runtime` only for overrides such as branch, ingress, Vault Agent, or
 healthcheck settings:
 
 ```hcl
 runtime = {
+  sitectl = {
+    package_versions = {
+      sitectl      = "v0.39.0"
+      sitectl-wp   = "v0.5.0"
+    }
+  }
   compose = {
     branch = "main"
     ingress = {
@@ -52,7 +146,9 @@ runtime = {
 ```
 
 The same template defaults are stored in `templates/apps.json` and are reused by
-the Ansible role and Salt formula for existing Debian/Ubuntu hosts.
+the Ansible role and Salt formula for existing Debian/Ubuntu hosts. Terraform
+presets also consume the registry's exact `package_versions`; an explicit
+`runtime.sitectl.package_versions` entry replaces the matching preset selector.
 
 ## Bin packing
 
@@ -81,4 +177,10 @@ runtime = {
 ```
 
 `cloud-compose` provides the VM/runtime primitives for bin packing. Placement
-policy is intentionally left to consumers for now.
+policy is intentionally left to consumers for now. Every project in one GCP
+application state shares the host, Docker daemon and kernel boundary, app
+service account, managed Vault workload identity, and—when legacy file
+credentials are explicitly enabled—the same app JSON credential. Bin-pack only
+applications that belong to the same IAM and secret trust boundary. Use
+separate application states and VMs when an app needs an independent workload
+identity, credential, or host isolation boundary.

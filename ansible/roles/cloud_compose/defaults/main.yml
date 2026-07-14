@@ -12,9 +12,10 @@ cloud_compose_home: /home/cloud-compose
 cloud_compose_data_dir: /mnt/disks/data
 cloud_compose_volumes_dir: /mnt/disks/volumes
 
-cloud_compose_docker_compose_version: v5.3.0
+cloud_compose_docker_compose_version: v5.3.1
 cloud_compose_docker_buildx_version: v0.35.0
 cloud_compose_sitectl_version: latest
+cloud_compose_sitectl_package_versions: {}
 
 cloud_compose_managed_runtime_enabled: true
 cloud_compose_internal_services_enabled: false
@@ -25,6 +26,7 @@ cloud_compose_install_packages: true
 cloud_compose_reload_systemd: true
 cloud_compose_run_bootstrap: true
 cloud_compose_force_bootstrap: false
+cloud_compose_dedicated_host_acknowledged: false
 cloud_compose_bootstrap_timeout: 3600
 cloud_compose_bootstrap_poll_interval: 15
 
@@ -50,7 +52,7 @@ cloud_compose_default_up:
 cloud_compose_default_down:
   - 'sitectl compose --context "${SITECTL_CONTEXT_NAME}" down'
 cloud_compose_default_rollout:
-  - 'TARGET_REF="${GIT_REF:-${GIT_BRANCH:-${DOCKER_COMPOSE_BRANCH:-main}}}"'
-  - 'if [ -x ./scripts/rollout.sh ]; then ./scripts/rollout.sh; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --branch "$TARGET_REF"; fi'
+  - 'TARGET_REF="${GIT_REF:-${GIT_BRANCH:-}}"'
+  - 'if [ -n "$TARGET_REF" ]; then sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --ref "$TARGET_REF"; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --skip-git; fi'
   - 'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist'
   - 'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'

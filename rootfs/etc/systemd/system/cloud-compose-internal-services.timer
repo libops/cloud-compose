@@ -1,0 +1,10 @@
+[Unit]
+Description=Delay Cloud Compose internal services until 20m after initial boot
+
+[Timer]
+# If no traffic follows creation, this machine may suspend after 21m30s.
+OnBootSec=20min
+Unit=cloud-compose-internal-services.service
+
+[Install]
+WantedBy=timers.target

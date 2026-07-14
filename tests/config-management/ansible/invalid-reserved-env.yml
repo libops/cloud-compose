@@ -1,0 +1,14 @@
+- name: Reject reserved cloud-compose environment names
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-reserved-env
+    cloud_compose_template: wp
+    cloud_compose_dedicated_host_acknowledged: true
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_extra_env:
+      LIBOPS_FUTURE_CONTROL: "true"
+  roles:
+    - role: cloud_compose

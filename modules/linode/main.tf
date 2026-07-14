@@ -21,7 +21,7 @@ module "runtime" {
   region                  = local.linode.region
   data_device             = "/dev/disk/by-id/scsi-0Linode_Volume_${local.data_volume_label}"
   volumes_device          = "/dev/disk/by-id/scsi-0Linode_Volume_${local.docker_volumes_volume_label}"
-  ssh_users               = local.linode.ssh.users
+  ssh_users               = merge(local.runtime.users, local.linode.ssh.users)
   cloud_compose_ssh_keys  = local.linode.ssh.cloud_compose_keys
   rootfs                  = local.runtime.rootfs
   rootfs_archive_url      = local.runtime.rootfs_archive_url
@@ -37,14 +37,15 @@ module "runtime" {
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
 
-  sitectl_packages       = local.sitectl.packages
-  sitectl_version        = local.sitectl.version
-  sitectl_context_name   = local.sitectl.context_name
-  sitectl_plugin         = local.sitectl.plugin
-  sitectl_environment    = local.sitectl.environment
-  sitectl_verify_args    = local.sitectl.verify_args
-  docker_compose_version = local.docker.compose_version
-  docker_buildx_version  = local.docker.buildx_version
+  sitectl_packages         = local.sitectl.packages
+  sitectl_version          = local.sitectl.version
+  sitectl_package_versions = local.sitectl.package_versions
+  sitectl_context_name     = local.sitectl.context_name
+  sitectl_plugin           = local.sitectl.plugin
+  sitectl_environment      = local.sitectl.environment
+  sitectl_verify_args      = local.sitectl.verify_args
+  docker_compose_version   = local.docker.compose_version
+  docker_buildx_version    = local.docker.buildx_version
 
   libops_managed_runtime_enabled       = local.managed.enabled
   libops_internal_services_enabled     = local.managed.internal_services_enabled
@@ -104,7 +105,7 @@ resource "linode_instance" "cloud_compose" {
     }
     precondition {
       condition     = length(base64gzip(module.runtime.cloud_init)) <= 16384
-      error_message = "Linode metadata.user_data is limited to 16 KiB. Set runtime.rootfs_archive_url so cloud-compose rootfs is fetched during boot instead of embedded in cloud-init."
+      error_message = "Linode metadata.user_data is limited to 16 KiB after gzip and base64 encoding. Use a verified runtime.rootfs_archive_url for the managed rootfs and reduce unusually large SSH or runtime inputs."
     }
     precondition {
       condition     = !local.vault.agent_enabled || trimspace(local.vault.addr) != ""
@@ -113,6 +114,10 @@ resource "linode_instance" "cloud_compose" {
     precondition {
       condition     = !local.vault.agent_enabled || local.vault.auth_method != "consumer-managed" || trimspace(local.vault.agent_additional_config) != ""
       error_message = "vault_agent_additional_config is required when vault_agent_enabled uses consumer-managed auth."
+    }
+    precondition {
+      condition     = !local.managed.internal_services_enabled
+      error_message = "Linode does not support the GCP-specific privileged internal-services stack. Leave runtime.managed_runtime.internal_services_enabled false."
     }
   }
 }

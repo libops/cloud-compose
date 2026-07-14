@@ -20,7 +20,7 @@ variable "template" {
 }
 
 variable "linode" {
-  description = "Linode infrastructure settings."
+  description = "Linode infrastructure settings. instance.backups_enabled covers only the instance disk; attached application and Docker Block Storage volumes require a separate offsite backup policy."
   type = object({
     region = optional(string, "us-east")
     tags   = optional(list(string), ["cloud-compose"])
@@ -55,6 +55,15 @@ variable "linode" {
     }), {})
   })
   default = {}
+
+  validation {
+    condition = alltrue([
+      for key in var.linode.instance.authorized_keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
+      ]) && alltrue([
+      for username in var.linode.instance.authorized_users : can(regex("^[A-Za-z0-9._-]+$", username))
+    ])
+    error_message = "linode.instance authorized_keys must be non-empty single-line values and authorized_users must contain safe single-line usernames."
+  }
 }
 
 variable "runtime" {
@@ -63,6 +72,7 @@ variable "runtime" {
     rootfs                = optional(string, "")
     rootfs_archive_url    = optional(string, "")
     rootfs_archive_sha256 = optional(string, "")
+    users                 = optional(map(list(string)), {})
 
     compose = optional(object({
       primary      = optional(string, "")
@@ -98,8 +108,8 @@ variable "runtime" {
         sitectl_context_name   = optional(string)
         sitectl_plugin         = optional(string)
         sitectl_environment    = optional(string)
-        sitectl_packages       = optional(list(string), [])
-        sitectl_verify_args    = optional(list(string), [])
+        sitectl_packages       = optional(list(string))
+        sitectl_verify_args    = optional(list(string))
         docker_compose_init    = optional(list(string))
         docker_compose_up      = optional(list(string))
         docker_compose_down    = optional(list(string))
@@ -112,12 +122,13 @@ variable "runtime" {
     }), {})
 
     sitectl = optional(object({
-      packages     = optional(list(string), ["sitectl"])
-      version      = optional(string, "latest")
-      context_name = optional(string, "")
-      plugin       = optional(string, "core")
-      environment  = optional(string, "production")
-      verify_args  = optional(list(string), [])
+      packages         = optional(list(string))
+      version          = optional(string, "latest")
+      package_versions = optional(map(string), {})
+      context_name     = optional(string, "")
+      plugin           = optional(string, "core")
+      environment      = optional(string, "production")
+      verify_args      = optional(list(string), [])
     }), {})
 
     docker = optional(object({
@@ -164,18 +175,81 @@ variable "runtime" {
   default = {}
 
   validation {
-    condition = alltrue([
-      for name, app in var.runtime.compose.projects :
-      can(regex("^[a-z][a-z0-9-]*$", name)) &&
-      trimspace(app.docker_compose_repo) != "" &&
-      try(app.ingress_port, var.runtime.compose.ingress_port) > 0 &&
-      try(app.ingress_port, var.runtime.compose.ingress_port) <= 65535
-    ])
-    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be between 1 and 65535."
+    condition = (
+      (trimspace(var.runtime.rootfs_archive_url) == "") == (trimspace(var.runtime.rootfs_archive_sha256) == "") &&
+      (trimspace(var.runtime.rootfs_archive_sha256) == "" || can(regex("^[0-9a-fA-F]{64}$", trimspace(var.runtime.rootfs_archive_sha256))))
+    )
+    error_message = "runtime.rootfs_archive_url and a 64-character runtime.rootfs_archive_sha256 must be supplied together."
   }
 
   validation {
-    condition     = contains(["gcp-iam", "consumer-managed"], var.runtime.vault.auth_method)
-    error_message = "runtime.vault.auth_method must be gcp-iam or consumer-managed."
+    condition = alltrue([
+      for name in keys(var.runtime.extra_env) :
+      can(regex("^[A-Za-z_][A-Za-z0-9_]*$", name)) &&
+      !contains(["HOME", "PATH"], name) &&
+      alltrue([
+        for prefix in [
+          "CLOUD_COMPOSE_",
+          "COMPOSE_",
+          "DOCKER_",
+          "SITECTL_",
+          "LIBOPS_",
+          "GCP_",
+          "VAULT_",
+          "ROLLOUT_",
+          "POWER_MANAGEMENT_",
+        ] : !startswith(name, prefix)
+      ])
+    ])
+    error_message = "runtime.extra_env names must be valid environment names and must not override cloud-compose control-plane keys (HOME, PATH, or CLOUD_COMPOSE_/COMPOSE_/DOCKER_/SITECTL_/LIBOPS_/GCP_/VAULT_/ROLLOUT_/POWER_MANAGEMENT_ prefixes)."
+  }
+
+  validation {
+    condition = (
+      var.runtime.compose.ingress_port >= 1 &&
+      var.runtime.compose.ingress_port <= 65535 &&
+      floor(var.runtime.compose.ingress_port) == var.runtime.compose.ingress_port &&
+      alltrue([
+        for name, app in var.runtime.compose.projects :
+        can(regex("^[a-z][a-z0-9-]*$", name)) &&
+        trimspace(app.docker_compose_repo) != "" &&
+        coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port) >= 1 &&
+        coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port) <= 65535 &&
+        floor(coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)) == coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)
+      ])
+    )
+    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress ports must be whole numbers between 1 and 65535."
+  }
+
+  validation {
+    condition = alltrue([
+      for package in coalesce(var.runtime.sitectl.packages, []) :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package))
+    ])
+    error_message = "runtime.sitectl.packages entries must be release package names such as sitectl, sitectl-isle, or sitectl-wp."
+  }
+
+  validation {
+    condition = (
+      var.runtime.sitectl.version == "latest" ||
+      can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", var.runtime.sitectl.version))
+    )
+    error_message = "runtime.sitectl.version must be latest or an exact semantic-version release tag such as v0.38.0."
+  }
+
+  validation {
+    condition = alltrue([
+      for package, version in var.runtime.sitectl.package_versions :
+      can(regex("^sitectl(-[a-z0-9]+)*$", package)) && (
+        version == "latest" ||
+        can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$", version))
+      )
+    ])
+    error_message = "runtime.sitectl.package_versions keys must be sitectl package names and values must be latest or exact semantic-version release tags."
+  }
+
+  validation {
+    condition     = var.runtime.vault.auth_method == "consumer-managed"
+    error_message = "runtime.vault.auth_method must be consumer-managed on Linode."
   }
 }

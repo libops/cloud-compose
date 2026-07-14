@@ -2,6 +2,7 @@ cloud_compose:
   name: wp-prod
   provider: onprem
   template: wp
+  dedicated_host_acknowledged: true
   runtime:
     compose:
       ingress:

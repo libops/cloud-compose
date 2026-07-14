@@ -1,0 +1,17 @@
+- name: Reject non-string global lifecycle commands
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-lifecycle
+    cloud_compose_template: wp
+    cloud_compose_dedicated_host_acknowledged: true
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_runtime:
+      compose:
+        init:
+          - valid-command
+          - 42
+  roles:
+    - role: cloud_compose

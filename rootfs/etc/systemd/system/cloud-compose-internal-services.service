@@ -1,9 +1,9 @@
 [Unit]
-Description=Internal Services (Ping, Metrics, Power Management)
+Description=Cloud Compose Internal Services (Ping, Metrics, Power Management)
 BindsTo=docker.service
-After=cloud-compose.service
-Requires=internal-services.timer
-After=internal-services.timer
+Requires=cloud-compose.service cloud-compose-metadata-firewall.service
+RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
+After=docker.service cloud-compose-metadata-firewall.service cloud-compose.service
 StartLimitIntervalSec=120
 StartLimitBurst=3
 
@@ -16,6 +16,7 @@ ExecStart=/usr/bin/docker compose up
 ExecStop=/usr/bin/docker compose down
 Restart=on-failure
 RestartSec=30s
+TimeoutStopSec=10min
 
 [Install]
 WantedBy=multi-user.target

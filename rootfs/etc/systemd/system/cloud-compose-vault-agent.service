@@ -3,14 +3,19 @@ Description=Cloud Compose Vault Agent
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/vault-agent.d/cloud-compose.hcl
+RequiresMountsFor=/mnt/disks/data
 
 [Service]
 User=root
 Group=root
 EnvironmentFile=-/etc/default/vault-agent
+ExecStartPre=/bin/bash /home/cloud-compose/vault-agent-readiness.sh prepare
 ExecStart=/usr/local/bin/vault agent -config=/etc/vault-agent.d/cloud-compose.hcl
+ExecStartPost=/bin/bash /home/cloud-compose/vault-agent-readiness.sh wait
+ExecStopPost=/bin/bash /home/cloud-compose/vault-agent-readiness.sh clear
 Restart=on-failure
 RestartSec=10s
+TimeoutStartSec=2min
 
 [Install]
 WantedBy=multi-user.target

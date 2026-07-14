@@ -5,32 +5,39 @@ set -eou pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
-if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
-  # block metadata server from docker and non-root
-  /sbin/iptables -I FORWARD -d 169.254.169.254/32 -i docker0 -j DROP || true
-  /sbin/iptables -A OUTPUT -m owner ! --uid-owner 0 -d 169.254.169.254/32 -p tcp --dport 80 -j DROP || true
+if [ -z "${CLOUD_COMPOSE_PROVIDER:-}" ]; then
+  echo "CLOUD_COMPOSE_PROVIDER is required" >&2
+  exit 1
 fi
 
 if systemctl list-unit-files fluent-bit.service >/dev/null 2>&1; then
   systemctl restart fluent-bit || true
 fi
 
+# COS already has a running Docker daemon. Install the metadata deny policy
+# before any bootstrap container is allowed to execute third-party image or
+# package content. Debian-family images install Docker below and receive the
+# same policy immediately after that daemon is restarted.
+if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ] && command -v docker >/dev/null 2>&1; then
+  bash /home/cloud-compose/configure-metadata-firewall.sh
+fi
+
 bash /home/cloud-compose/install-dependencies.sh
 
-if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
-  # Docker build containers cannot use GCE metadata DNS after we block metadata
-  # access from docker0, so give Docker explicit external resolvers.
-  install -d /etc/docker
-  cat >/etc/docker/daemon.json <<'EOF'
-{
-  "data-root": "/mnt/disks/data/docker",
-  "dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
-}
-EOF
-fi
+for required_command in curl flock gzip jq openssl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Required cloud-compose host dependency is missing: $required_command" >&2
+    exit 1
+  fi
+done
 
 # restart services we've overwritten files for
 systemctl restart docker
+if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ]; then
+  # Docker may reprogram its chains during restart. Reassert the deny policy
+  # before any persistent application container is allowed to proceed.
+  bash /home/cloud-compose/configure-metadata-firewall.sh
+fi
 
 # wait until our data-root /etc/docker/daemon.json setting is applied
 deadline=$((SECONDS + 120))
@@ -47,6 +54,18 @@ while [ "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)" != "/
   sleep 2
 done
 
-bash /home/cloud-compose/libops-managed-runtime.sh install-tools
+bash /home/cloud-compose/migrate-legacy-systemd-units.sh
 systemctl daemon-reload
-systemctl enable libops-managed-runtime.timer
+if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ]; then
+  # Gate later Docker starts behind the early guard on stateful hosts, and make
+  # the dependency available after each COS cloud-init reconstruction. Reapply
+  # the Docker-specific layer after the daemon creates DOCKER-USER.
+  systemctl enable --now cloud-compose-metadata-firewall-pre.service
+  systemctl enable --now cloud-compose-metadata-firewall.service
+else
+  systemctl disable --now \
+    cloud-compose-metadata-firewall-pre.service \
+    cloud-compose-metadata-firewall.service >/dev/null 2>&1 || true
+fi
+
+bash /home/cloud-compose/libops-managed-runtime.sh install-tools

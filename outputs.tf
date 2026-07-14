@@ -48,13 +48,19 @@ output "internal_ip" {
   description = "Selected provider VM private IPv4 address."
 }
 
+output "network" {
+  value       = try(module.gcp[0].network, null)
+  description = "Resolved GCP network and regional subnetwork, or null for non-GCP providers."
+}
+
 output "volumes" {
   value = try(
+    module.gcp[0].volumes,
     module.digitalocean[0].volumes,
     module.linode[0].volumes,
     null,
   )
-  description = "Selected provider persistent volume details where available."
+  description = "Selected provider persistent application-data and Docker-volume details."
 }
 
 output "serviceGsa" {
@@ -100,4 +106,14 @@ output "primary_compose_project" {
     null,
   )
   description = "Normalized primary compose project."
+}
+
+output "sitectl_package_versions" {
+  value = try(
+    module.gcp[0].sitectl_package_versions,
+    module.digitalocean[0].sitectl_package_versions,
+    module.linode[0].sitectl_package_versions,
+    {},
+  )
+  description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
 }
