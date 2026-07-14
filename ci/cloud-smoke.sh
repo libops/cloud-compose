@@ -165,12 +165,18 @@ api_request() {
       ;;
   esac
 
-  if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${token}" -w $'\n%{http_code}' "${base_url}${path}")"; then
+  if response="$(curl -sS \
+    --connect-timeout 10 \
+    --max-time 45 \
+    -X "$method" \
+    -H "Authorization: Bearer ${token}" \
+    -w $'\n%{http_code}' \
+    "${base_url}${path}")"; then
     http_code="${response##*$'\n'}"
     body="${response%$'\n'"$http_code"}"
   else
     echo "${provider} API request failed for ${method} ${path}; check ${token_name} and network access." >&2
-    return 1
+    return 75
   fi
 
   case "$http_code" in
@@ -183,6 +189,37 @@ api_request() {
       ;;
     403)
       echo "${provider} API rejected ${token_name} with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
+      return 22
+      ;;
+    404 | 410)
+      if [[ "$method" == "DELETE" ]]; then
+        return 0
+      fi
+      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
+      ;;
+    408 | 425 | 429 | 5??)
+      echo "${provider} API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 75
+      ;;
+    409 | 423)
+      if [[ "$method" == "DELETE" ]]; then
+        echo "${provider} API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
+        if [[ -n "$body" ]]; then
+          printf '%s\n' "$body" >&2
+        fi
+        return 75
+      fi
+      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
       return 22
       ;;
     *)
@@ -200,7 +237,25 @@ api_delete() {
 }
 
 api_get() {
-  api_request "$1" GET "$2"
+  local provider="$1" path="$2" attempt=1 delay=2 status
+
+  while true; do
+    if api_request "$provider" GET "$path"; then
+      return 0
+    else
+      status=$?
+    fi
+    if [[ "$status" -ne 75 || "$attempt" -ge 6 ]]; then
+      return "$status"
+    fi
+    echo "Retrying ${provider} API GET ${path} in ${delay}s (attempt $((attempt + 1)) of 6)" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [[ "$delay" -gt 30 ]]; then
+      delay=30
+    fi
+  done
 }
 
 gcp_region() {
@@ -212,7 +267,7 @@ gcp_zone() {
 }
 
 delete_ids() {
-  local provider="$1" path_prefix="$2" id attempt
+  local provider="$1" path_prefix="$2" id attempt status
   local failed=0 deleted
 
   while IFS= read -r id; do
@@ -225,11 +280,18 @@ delete_ids() {
       if api_delete "$provider" "${path_prefix}/${id}"; then
         deleted=true
         break
+      else
+        status=$?
       fi
-      sleep 10
+      if [[ "$status" -ne 75 ]]; then
+        break
+      fi
+      if [[ "$attempt" -lt 12 ]]; then
+        sleep 10
+      fi
     done
     if [[ "$deleted" != "true" ]]; then
-      echo "Failed to delete ${provider} ${path_prefix}/${id} after 12 attempts" >&2
+      echo "Failed to delete ${provider} ${path_prefix}/${id} after ${attempt} attempt(s)" >&2
       failed=1
     fi
   done
@@ -453,9 +515,9 @@ target_name_prefix() {
   printf 'cc-%s-%s\n' "$(provider_slug "$provider")" "$(template_slug "$template")"
 }
 
-provider_tag_cleanup() {
-  local target="$1" run_id="${2:-}" run_tag run_fragment provider name_prefix
-  local cleanup_status=0
+provider_resource_ids() {
+  local target="$1" run_id="${2:-}" kind="$3"
+  local run_tag run_fragment provider name_prefix
 
   run_tag="$(smoke_run_tag "$run_id")"
   run_fragment=""
@@ -465,30 +527,107 @@ provider_tag_cleanup() {
   provider="$(target_provider "$target")"
   name_prefix="$(target_name_prefix "$target")"
 
+  case "${provider}:${kind}" in
+    digitalocean:firewalls)
+      api_get digitalocean "/firewalls?per_page=200" |
+        jq -r --arg name_prefix "${name_prefix}-" --arg run_fragment "$run_fragment" 'if (.firewalls | type) != "array" then error("DigitalOcean firewalls response is not an array") else .firewalls[] | select(.name | startswith($name_prefix)) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id end'
+      ;;
+    digitalocean:droplets)
+      api_get digitalocean "/droplets?tag_name=cloud-compose-smoke&per_page=200" |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.droplets | type) != "array" then error("DigitalOcean droplets response is not an array") else .droplets[] | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    digitalocean:volumes)
+      api_get digitalocean "/volumes?tag_name=cloud-compose-smoke&per_page=200" |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.volumes | type) != "array" then error("DigitalOcean volumes response is not an array") else .volumes[] | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    linode:firewalls)
+      api_get linode "/networking/firewalls?page_size=500" |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode firewalls response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    linode:instances)
+      api_get linode "/linode/instances?page_size=500" |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode instances response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    linode:volumes)
+      api_get linode "/volumes?page_size=500" |
+        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode volumes response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    *)
+      echo "Unknown provider resource kind: ${provider}:${kind}" >&2
+      return 2
+      ;;
+  esac
+}
+
+provider_cleanup_residuals() {
+  local target="$1" run_id="${2:-}" provider kind ids id index
+  local -a kinds path_prefixes
+
+  provider="$(target_provider "$target")"
   case "$provider" in
     digitalocean)
-      api_get digitalocean "/firewalls?per_page=200" |
-        jq -r --arg name_prefix "${name_prefix}-" --arg run_fragment "$run_fragment" '.firewalls[]? | select(.name | startswith($name_prefix)) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id' |
-        delete_ids digitalocean "/firewalls" || cleanup_status=1
-      api_get digitalocean "/droplets?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" '.droplets[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids digitalocean "/droplets" || cleanup_status=1
-      sleep 10
-      api_get digitalocean "/volumes?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" '.volumes[]? | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids digitalocean "/volumes" || cleanup_status=1
+      kinds=(firewalls droplets volumes)
+      path_prefixes=(/firewalls /droplets /volumes)
       ;;
     linode)
-      api_get linode "/networking/firewalls?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/networking/firewalls" || cleanup_status=1
-      api_get linode "/linode/instances?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/linode/instances" || cleanup_status=1
+      kinds=(firewalls instances volumes)
+      path_prefixes=(/networking/firewalls /linode/instances /volumes)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  for index in "${!kinds[@]}"; do
+    kind="${kinds[$index]}"
+    if ! ids="$(provider_resource_ids "$target" "$run_id" "$kind")"; then
+      return 1
+    fi
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      printf '%s%s\n' "${path_prefixes[$index]}/" "$id"
+    done <<<"$ids"
+  done
+}
+
+verify_no_provider_resources() {
+  local target="$1" run_id="${2:-}" attempt residuals
+
+  for attempt in {1..6}; do
+    if ! residuals="$(provider_cleanup_residuals "$target" "$run_id")"; then
+      echo "Could not verify provider cleanup for ${target}" >&2
+      return 1
+    fi
+    if [[ -z "$residuals" ]]; then
+      echo "Verified that no matching ${target} smoke resources remain"
+      return 0
+    fi
+    echo "Matching ${target} smoke resources remain after cleanup verification attempt ${attempt}:" >&2
+    printf '%s\n' "$residuals" >&2
+    if [[ "$attempt" -lt 6 ]]; then
       sleep 10
-      api_get linode "/volumes?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-        delete_ids linode "/volumes" || cleanup_status=1
+    fi
+  done
+
+  echo "Provider cleanup left matching ${target} smoke resources" >&2
+  return 1
+}
+
+provider_tag_cleanup() {
+  local target="$1" run_id="${2:-}" provider kind index name_prefix
+  local cleanup_status=0
+  local -a kinds path_prefixes
+
+  provider="$(target_provider "$target")"
+  name_prefix="$(target_name_prefix "$target")"
+  case "$provider" in
+    digitalocean)
+      kinds=(firewalls droplets volumes)
+      path_prefixes=(/firewalls /droplets /volumes)
+      ;;
+    linode)
+      kinds=(firewalls instances volumes)
+      path_prefixes=(/networking/firewalls /linode/instances /volumes)
       ;;
     gcp)
       local project name_filter region cloud_run_services instance_rows firewall_names disk_rows
@@ -673,6 +812,20 @@ provider_tag_cleanup() {
       fi
       ;;
   esac
+
+  if [[ "$provider" == "digitalocean" || "$provider" == "linode" ]]; then
+    for index in "${!kinds[@]}"; do
+      kind="${kinds[$index]}"
+      provider_resource_ids "$target" "$run_id" "$kind" |
+        delete_ids "$provider" "${path_prefixes[$index]}" || cleanup_status=1
+      if [[ "$kind" == "droplets" || "$kind" == "instances" ]]; then
+        sleep 10
+      fi
+    done
+    if [[ "$cleanup_status" -eq 0 ]] && ! verify_no_provider_resources "$target" "$run_id"; then
+      cleanup_status=1
+    fi
+  fi
 
   return "$cleanup_status"
 }
@@ -967,7 +1120,7 @@ run_target() (
   set -euo pipefail
 
   local target="$1"
-  local root workdir key_path home_dir output_json public_key
+  local root workdir key_path home_dir output_json public_key run_id
   local -a auto_args var_args
 
   root="$(target_root "$target")"
@@ -981,6 +1134,7 @@ run_target() (
   chmod 0700 "$home_dir/.ssh"
 
   ensure_key "$key_path"
+  run_id="$(smoke_run_id)"
   mapfile -d '' -t var_args < <(target_var_args "$root" "$key_path" "$target")
 
   auto_args=()
@@ -991,7 +1145,7 @@ run_target() (
   cleanup_started=false
   # shellcheck disable=SC2317
   cleanup() {
-    local status=$?
+    local status="$1"
     local destroy_status destroy_timeout cleanup_status
 
     trap - EXIT INT TERM HUP
@@ -1020,14 +1174,18 @@ run_target() (
     fi
     if [[ "$destroy_status" -ne 0 ]]; then
       echo "Terraform destroy failed for ${target}; attempting provider tag cleanup"
-      provider_tag_cleanup "$target" || cleanup_status=$?
+      provider_tag_cleanup "$target" "$run_id" || cleanup_status=$?
     fi
     if [[ "$status" -eq 0 && "$destroy_status" -ne 0 && "$cleanup_status" -ne 0 ]]; then
+      echo "Terraform destroy and provider tag cleanup both failed for ${target}" >&2
       exit "$destroy_status"
     fi
     exit "$status"
   }
-  trap cleanup EXIT INT TERM HUP
+  trap 'cleanup "$?"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   echo "Initializing ${target}"
   TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" init -input=false

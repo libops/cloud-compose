@@ -1,4 +1,4 @@
-.PHONY: lint lint-check shell-lint config-management-smoke
+.PHONY: lint lint-check shell-lint hosted-cleanup-retry-contract config-management-smoke
 .PHONY: terraform-fmt terraform-fmt-check terraform-validate terraform-lint-check terraform-docs
 .PHONY: config-management-cloud-smoke config-management-cloud-smoke-ansible-drupal config-management-cloud-smoke-salt-drupal
 .PHONY: destroy-config-management-cloud-smoke destroy-config-management-cloud-smoke-ansible-drupal destroy-config-management-cloud-smoke-salt-drupal
@@ -10,9 +10,9 @@ DOCS_IMAGE ?= cloud-compose-docs
 DOCS_PORT ?= 8888
 DOCS_DOCKER_USER ?= $(shell id -u):$(shell id -g)
 
-lint: terraform-fmt shell-lint terraform-validate
+lint: terraform-fmt shell-lint hosted-cleanup-retry-contract terraform-validate
 
-lint-check: terraform-fmt-check shell-lint terraform-validate
+lint-check: terraform-fmt-check shell-lint hosted-cleanup-retry-contract terraform-validate
 
 terraform-fmt:
 	terraform fmt -recursive
@@ -30,6 +30,9 @@ shell-lint:
 		-path "./.terraform" -prune -o \
 		-path "./docs/site" -prune -o \
 		-type f -name "*.sh" -print0 | xargs -0 shellcheck
+
+hosted-cleanup-retry-contract:
+	bash ci/hosted-cleanup-retry-contract.sh
 
 config-management-smoke:
 	ci/config-management-smoke.sh

@@ -31,7 +31,9 @@ jobs:
         run: make terraform-lint-check
 
       - name: Validate fallback cleanup behavior
-        run: bash ci/cloud-smoke-cleanup-contract.sh
+        run: |
+          bash ci/cloud-smoke-cleanup-contract.sh
+          make hosted-cleanup-retry-contract
 
   config-management-lint:
     name: Ansible and Salt lint

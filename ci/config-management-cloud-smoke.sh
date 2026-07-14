@@ -130,12 +130,18 @@ api_request() {
   local method="$1" path="$2"
   local body http_code response
 
-  if response="$(curl -sS -X "$method" -H "Authorization: Bearer ${LINODE_TOKEN}" -w $'\n%{http_code}' "https://api.linode.com/v4${path}")"; then
+  if response="$(curl -sS \
+    --connect-timeout 10 \
+    --max-time 45 \
+    -X "$method" \
+    -H "Authorization: Bearer ${LINODE_TOKEN}" \
+    -w $'\n%{http_code}' \
+    "https://api.linode.com/v4${path}")"; then
     http_code="${response##*$'\n'}"
     body="${response%$'\n'$http_code}"
   else
     echo "linode API request failed for ${method} ${path}; check LINODE_TOKEN and network access." >&2
-    return 1
+    return 75
   fi
 
   case "$http_code" in
@@ -150,6 +156,37 @@ api_request() {
       echo "linode API rejected LINODE_TOKEN with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
       return 22
       ;;
+    404 | 410)
+      if [[ "$method" == "DELETE" ]]; then
+        return 0
+      fi
+      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
+      ;;
+    408 | 425 | 429 | 5??)
+      echo "linode API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 75
+      ;;
+    409 | 423)
+      if [[ "$method" == "DELETE" ]]; then
+        echo "linode API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
+        if [[ -n "$body" ]]; then
+          printf '%s\n' "$body" >&2
+        fi
+        return 75
+      fi
+      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
+      if [[ -n "$body" ]]; then
+        printf '%s\n' "$body" >&2
+      fi
+      return 22
+      ;;
     *)
       echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
       if [[ -n "$body" ]]; then
@@ -161,7 +198,25 @@ api_request() {
 }
 
 api_get() {
-  api_request GET "$1"
+  local path="$1" attempt=1 delay=2 status
+
+  while true; do
+    if api_request GET "$path"; then
+      return 0
+    else
+      status=$?
+    fi
+    if [[ "$status" -ne 75 || "$attempt" -ge 6 ]]; then
+      return "$status"
+    fi
+    echo "Retrying linode API GET ${path} in ${delay}s (attempt $((attempt + 1)) of 6)" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [[ "$delay" -gt 30 ]]; then
+      delay=30
+    fi
+  done
 }
 
 api_delete() {
@@ -169,36 +224,121 @@ api_delete() {
 }
 
 delete_ids() {
-  local path_prefix="$1" id attempt
+  local path_prefix="$1" id attempt status
+  local failed=0 deleted
 
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
+    deleted=false
     for attempt in {1..12}; do
       echo "Deleting Linode resource ${path_prefix}/${id} (attempt ${attempt})"
       if api_delete "${path_prefix}/${id}"; then
+        deleted=true
+        break
+      else
+        status=$?
+      fi
+      if [[ "$status" -ne 75 ]]; then
         break
       fi
-      sleep 10
+      if [[ "$attempt" -lt 12 ]]; then
+        sleep 10
+      fi
     done
+    if [[ "$deleted" != "true" ]]; then
+      echo "Failed to delete Linode resource ${path_prefix}/${id} after ${attempt} attempt(s)" >&2
+      failed=1
+    fi
   done
+
+  return "$failed"
 }
 
-provider_tag_cleanup() {
-  local target="$1" run_id="${2:-}" run_tag tag
+provider_resource_ids() {
+  local target="$1" run_id="${2:-}" kind="$3" run_tag tag
 
   run_tag="$(smoke_run_tag "$run_id")"
   tag="$(target_tag "$target")"
 
-  api_get "/networking/firewalls?page_size=500" |
-    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-    delete_ids "/networking/firewalls"
-  api_get "/linode/instances?page_size=500" |
-    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-    delete_ids "/linode/instances"
-  sleep 10
-  api_get "/volumes?page_size=500" |
-    jq -r --arg tag "$tag" --arg run_tag "$run_tag" '.data[]? | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id' |
-    delete_ids "/volumes"
+  case "$kind" in
+    firewalls)
+      api_get "/networking/firewalls?page_size=500" |
+        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode firewalls response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    instances)
+      api_get "/linode/instances?page_size=500" |
+        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode instances response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    volumes)
+      api_get "/volumes?page_size=500" |
+        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode volumes response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
+      ;;
+    *)
+      echo "Unknown Linode resource kind: ${kind}" >&2
+      return 2
+      ;;
+  esac
+}
+
+provider_cleanup_residuals() {
+  local target="$1" run_id="${2:-}" kind ids id index
+  local -a kinds=(firewalls instances volumes)
+  local -a path_prefixes=(/networking/firewalls /linode/instances /volumes)
+
+  for index in "${!kinds[@]}"; do
+    kind="${kinds[$index]}"
+    if ! ids="$(provider_resource_ids "$target" "$run_id" "$kind")"; then
+      return 1
+    fi
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      printf '%s%s\n' "${path_prefixes[$index]}/" "$id"
+    done <<<"$ids"
+  done
+}
+
+verify_no_provider_resources() {
+  local target="$1" run_id="${2:-}" attempt residuals
+
+  for attempt in {1..6}; do
+    if ! residuals="$(provider_cleanup_residuals "$target" "$run_id")"; then
+      echo "Could not verify provider cleanup for config-management ${target}" >&2
+      return 1
+    fi
+    if [[ -z "$residuals" ]]; then
+      echo "Verified that no matching config-management ${target} smoke resources remain"
+      return 0
+    fi
+    echo "Matching config-management ${target} smoke resources remain after cleanup verification attempt ${attempt}:" >&2
+    printf '%s\n' "$residuals" >&2
+    if [[ "$attempt" -lt 6 ]]; then
+      sleep 10
+    fi
+  done
+
+  echo "Provider cleanup left matching config-management ${target} smoke resources" >&2
+  return 1
+}
+
+provider_tag_cleanup() {
+  local target="$1" run_id="${2:-}" kind index
+  local cleanup_status=0
+  local -a kinds=(firewalls instances volumes)
+  local -a path_prefixes=(/networking/firewalls /linode/instances /volumes)
+
+  for index in "${!kinds[@]}"; do
+    kind="${kinds[$index]}"
+    provider_resource_ids "$target" "$run_id" "$kind" |
+      delete_ids "${path_prefixes[$index]}" || cleanup_status=1
+    if [[ "$kind" == "instances" ]]; then
+      sleep 10
+    fi
+  done
+  if [[ "$cleanup_status" -eq 0 ]] && ! verify_no_provider_resources "$target" "$run_id"; then
+    cleanup_status=1
+  fi
+
+  return "$cleanup_status"
 }
 
 scan_host_key() {
@@ -366,7 +506,7 @@ require_sweep_commands() {
 run_target() (
   set -euo pipefail
 
-  local target="$1" root workdir key_path home_dir output_json host
+  local target="$1" root workdir key_path home_dir output_json host run_id
   local -a auto_args var_args
 
   valid_target "$target" || {
@@ -384,6 +524,7 @@ run_target() (
   chmod 0700 "$home_dir/.ssh"
 
   ensure_key "$key_path"
+  run_id="$(smoke_run_id)"
   mapfile -d '' -t var_args < <(target_var_args "$key_path" "$target")
 
   auto_args=()
@@ -392,9 +533,10 @@ run_target() (
   fi
 
   cleanup_started=false
+  # shellcheck disable=SC2317
   cleanup() {
-    local status=$?
-    local destroy_status=0 destroy_timeout
+    local status="$1"
+    local cleanup_status=0 destroy_status=0 destroy_timeout
 
     trap - EXIT INT TERM HUP
     if [[ "$cleanup_started" == "true" ]]; then
@@ -420,11 +562,18 @@ run_target() (
       destroy_status=$?
     fi
     if [[ "$destroy_status" -ne 0 ]]; then
-      provider_tag_cleanup "$target" || true
+      provider_tag_cleanup "$target" "$run_id" || cleanup_status=$?
+    fi
+    if [[ "$status" -eq 0 && "$destroy_status" -ne 0 && "$cleanup_status" -ne 0 ]]; then
+      echo "Terraform destroy and provider tag cleanup both failed for ${target}" >&2
+      exit "$destroy_status"
     fi
     exit "$status"
   }
-  trap cleanup EXIT INT TERM HUP
+  trap 'cleanup "$?"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   echo "Initializing ${target} raw Linode smoke"
   TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" init -input=false
@@ -455,7 +604,7 @@ run_target() (
 destroy_target() (
   set -euo pipefail
 
-  local target="$1" root workdir key_path destroy_status=0 destroy_timeout
+  local target="$1" root workdir key_path cleanup_status=0 destroy_status=0 destroy_timeout
   local -a auto_args var_args
 
   valid_target "$target" || exit 2
@@ -491,8 +640,16 @@ destroy_target() (
     set -e
   fi
 
-  provider_tag_cleanup "$target" "$(smoke_run_id)"
-  return "$destroy_status"
+  provider_tag_cleanup "$target" "$(smoke_run_id)" || cleanup_status=$?
+
+  if [[ "$destroy_status" -ne 0 && "$cleanup_status" -eq 0 ]]; then
+    echo "Provider tag cleanup completed for ${target} after Terraform destroy failed"
+    return 0
+  fi
+  if [[ "$destroy_status" -ne 0 ]]; then
+    return "$destroy_status"
+  fi
+  return "$cleanup_status"
 )
 
 main() {
