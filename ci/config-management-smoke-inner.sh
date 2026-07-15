@@ -262,7 +262,7 @@ assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
 assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-    "sitectl": "v0.39.0",
+    "sitectl": "v0.40.0",
     "sitectl-drupal": "v0.11.0",
     "sitectl-isle": "v0.12.0",
 }
@@ -441,7 +441,7 @@ assert Path(expected_project_dir).is_dir()
 
 if expected_name == "wp-prod":
     assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v0.39.0",
+        "sitectl": "v0.40.0",
         "sitectl-wp": "v0.10.0",
     }
     assert "BASH_ENV" not in env
