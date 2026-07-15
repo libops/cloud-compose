@@ -6,11 +6,11 @@ variable "name" {
 variable "cloud_provider" {
   type        = string
   default     = "gcp"
-  description = "Cloud provider to deploy to. Supported values are gcp, digitalocean, and linode."
+  description = "Compatibility selector for the root GCP entrypoint. Use providers/do or providers/linode for other clouds."
 
   validation {
-    condition     = contains(["gcp", "digitalocean", "linode"], lower(trimspace(var.cloud_provider)))
-    error_message = "cloud_provider must be gcp, digitalocean, or linode."
+    condition     = lower(trimspace(var.cloud_provider)) == "gcp"
+    error_message = "The root module supports only gcp; use //providers/do or //providers/linode for another cloud."
   }
 }
 
@@ -187,88 +187,6 @@ variable "gcp" {
       floor(var.gcp.network.power_button_ip_depth) == var.gcp.network.power_button_ip_depth
     )
     error_message = "gcp.network.power_button_ip_depth must be null or a whole number from 0 through 10."
-  }
-}
-
-variable "digitalocean" {
-  description = "DigitalOcean infrastructure settings. droplet.backups covers only the Droplet boot disk; attached application and Docker volumes require a separate offsite backup policy."
-  type = object({
-    region = optional(string, "tor1")
-    tags   = optional(list(string), ["cloud-compose"])
-
-    droplet = optional(object({
-      size       = optional(string, "s-2vcpu-4gb")
-      image      = optional(string, "ubuntu-24-04-x64")
-      ssh_keys   = optional(list(string), [])
-      vpc_uuid   = optional(string, null)
-      monitoring = optional(bool, true)
-      ipv6       = optional(bool, true)
-      backups    = optional(bool, false)
-    }), {})
-
-    ssh = optional(object({
-      cloud_compose_keys = optional(list(string), [])
-      users              = optional(map(list(string)), {})
-    }), {})
-
-    volumes = optional(object({
-      data_size_gb           = optional(number, 50)
-      docker_volumes_size_gb = optional(number, 100)
-    }), {})
-
-    firewall = optional(object({
-      enabled              = optional(bool, true)
-      ssh_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
-      web_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
-    }), {})
-  })
-  default = {}
-}
-
-variable "linode" {
-  description = "Linode infrastructure settings. instance.backups_enabled covers only the instance disk; attached application and Docker Block Storage volumes require a separate offsite backup policy."
-  type = object({
-    region = optional(string, "us-east")
-    tags   = optional(list(string), ["cloud-compose"])
-
-    instance = optional(object({
-      type             = optional(string, "g6-standard-2")
-      image            = optional(string, "linode/ubuntu22.04")
-      authorized_keys  = optional(list(string), [])
-      authorized_users = optional(list(string), [])
-      root_pass        = optional(string, null)
-      private_ip       = optional(bool, true)
-      backups_enabled  = optional(bool, false)
-      watchdog_enabled = optional(bool, true)
-    }), {})
-
-    ssh = optional(object({
-      cloud_compose_keys = optional(list(string), [])
-      users              = optional(map(list(string)), {})
-    }), {})
-
-    volumes = optional(object({
-      data_size_gb           = optional(number, 50)
-      docker_volumes_size_gb = optional(number, 100)
-    }), {})
-
-    firewall = optional(object({
-      enabled         = optional(bool, true)
-      ssh_source_ipv4 = optional(list(string), ["0.0.0.0/0"])
-      ssh_source_ipv6 = optional(list(string), ["::/0"])
-      web_source_ipv4 = optional(list(string), ["0.0.0.0/0"])
-      web_source_ipv6 = optional(list(string), ["::/0"])
-    }), {})
-  })
-  default = {}
-
-  validation {
-    condition = alltrue([
-      for key in var.linode.instance.authorized_keys : trimspace(key) != "" && !can(regex("[\\r\\n]", key))
-      ]) && alltrue([
-      for username in var.linode.instance.authorized_users : can(regex("^[A-Za-z0-9._-]+$", username))
-    ])
-    error_message = "linode.instance authorized_keys must be non-empty single-line values and authorized_users must contain safe single-line usernames."
   }
 }
 

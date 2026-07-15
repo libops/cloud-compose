@@ -74,6 +74,10 @@ grep -Fq 'capture_state_resource_attribute "$state_json" "$vm_address" instance_
 
 grep -Fq 'backend "local" {}' "$fixture" ||
   fail "upgrade fixture does not declare the shared local backend"
+grep -Fq 'source = "../../.."' "$fixture" ||
+  fail "upgrade fixture does not exercise the GCP-only compatibility root"
+grep -Fq 'readonly resource_prefix="module.app.module.gcp[0]"' "$script" ||
+  fail "upgrade runner does not preserve the root GCP module's indexed state address"
 grep -Fq 'create                   = false' "$fixture" ||
   fail "upgrade fixture still owns an ephemeral network"
 grep -Fq 'project_id               = var.gcp_network_project_id' "$fixture" ||
@@ -306,72 +310,72 @@ cat >"$tmp/good-plan.json" <<'EOF'
   "format_version": "1.2",
   "resource_changes": [
     {
-      "address": "module.app.module.gcp.google_service_account.internal-services[0]",
-      "previous_address": "module.app.module.gcp.google_service_account.internal-services",
+      "address": "module.app.module.gcp[0].google_service_account.internal-services[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account.internal-services",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_service_account_iam_member.internal-services-keys[0]",
-      "previous_address": "module.app.module.gcp.google_service_account_iam_member.internal-services-keys",
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_project_iam_member.stackdriver[0]",
-      "previous_address": "module.app.module.gcp.google_project_iam_member.stackdriver",
+      "address": "module.app.module.gcp[0].google_project_iam_member.stackdriver[0]",
+      "previous_address": "module.app.module.gcp[0].google_project_iam_member.stackdriver",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_project_iam_member.gce-start[0]",
+      "address": "module.app.module.gcp[0].google_project_iam_member.gce-start[0]",
       "change": {"actions": ["delete"]}
     },
     {
-      "address": "module.app.module.gcp.google_project_iam_member.gce-suspend",
+      "address": "module.app.module.gcp[0].google_project_iam_member.gce-suspend",
       "change": {"actions": ["delete"]}
     },
     {
-      "address": "module.app.module.gcp.google_service_account_iam_member.gsa-user",
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.gsa-user",
       "change": {"actions": ["delete"]}
     },
     {
-      "address": "module.app.module.gcp.google_service_account_iam_member.token-creator",
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.token-creator",
       "change": {"actions": ["delete"]}
     },
     {
-      "address": "module.app.module.gcp.google_service_account_iam_member.vault_agent_jwt_signer_policy[0]",
-      "previous_address": "module.app.module.gcp.google_service_account_iam_member.self_jwt_signer_policy",
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.vault_agent_jwt_signer_policy[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.self_jwt_signer_policy",
       "change": {"actions": ["delete"]}
     },
     {
-      "address": "module.app.module.gcp.google_service_account_iam_member.app-keys[0]",
-      "previous_address": "module.app.module.gcp.google_service_account_iam_member.app-keys",
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.app-keys[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.app-keys",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_instance_iam_member.gce-start[0]",
+      "address": "module.app.module.gcp[0].google_compute_instance_iam_member.gce-start[0]",
       "change": {"actions": ["create"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_instance_iam_member.gce-suspend[0]",
+      "address": "module.app.module.gcp[0].google_compute_instance_iam_member.gce-suspend[0]",
       "change": {"actions": ["create"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_disk.data",
+      "address": "module.app.module.gcp[0].google_compute_disk.data",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_disk.docker-volumes",
+      "address": "module.app.module.gcp[0].google_compute_disk.docker-volumes",
       "change": {"actions": ["no-op"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_disk.boot",
+      "address": "module.app.module.gcp[0].google_compute_disk.boot",
       "change": {"actions": ["delete", "create"]}
     },
     {
-      "address": "module.app.module.gcp.google_compute_instance.cloud-compose",
+      "address": "module.app.module.gcp[0].google_compute_instance.cloud-compose",
       "change": {"actions": ["delete", "create"]}
     },
     {
-      "address": "module.app.module.gcp.data.google_project_iam_custom_role.gce-suspend",
+      "address": "module.app.module.gcp[0].data.google_project_iam_custom_role.gce-suspend",
       "mode": "data",
       "change": {"actions": ["delete"]}
     }
@@ -487,23 +491,23 @@ cat >"$tmp/new-ids.json" <<'EOF'
 }
 EOF
 cat >"$tmp/old-state.txt" <<'EOF'
-module.app.module.gcp.google_service_account.internal-services
-module.app.module.gcp.google_service_account_iam_member.internal-services-keys
-module.app.module.gcp.google_project_iam_member.stackdriver
-module.app.module.gcp.google_project_iam_member.gce-start[0]
-module.app.module.gcp.google_project_iam_member.gce-suspend
-module.app.module.gcp.google_service_account_iam_member.gsa-user
-module.app.module.gcp.google_service_account_iam_member.token-creator
-module.app.module.gcp.google_service_account_iam_member.self_jwt_signer_policy
-module.app.module.gcp.google_service_account_iam_member.app-keys
+module.app.module.gcp[0].google_service_account.internal-services
+module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys
+module.app.module.gcp[0].google_project_iam_member.stackdriver
+module.app.module.gcp[0].google_project_iam_member.gce-start[0]
+module.app.module.gcp[0].google_project_iam_member.gce-suspend
+module.app.module.gcp[0].google_service_account_iam_member.gsa-user
+module.app.module.gcp[0].google_service_account_iam_member.token-creator
+module.app.module.gcp[0].google_service_account_iam_member.self_jwt_signer_policy
+module.app.module.gcp[0].google_service_account_iam_member.app-keys
 EOF
 cat >"$tmp/new-state.txt" <<'EOF'
-module.app.module.gcp.google_service_account.internal-services[0]
-module.app.module.gcp.google_service_account_iam_member.internal-services-keys[0]
-module.app.module.gcp.google_project_iam_member.stackdriver[0]
-module.app.module.gcp.google_compute_instance_iam_member.gce-start[0]
-module.app.module.gcp.google_compute_instance_iam_member.gce-suspend[0]
-module.app.module.gcp.google_service_account_iam_member.app-keys[0]
+module.app.module.gcp[0].google_service_account.internal-services[0]
+module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys[0]
+module.app.module.gcp[0].google_project_iam_member.stackdriver[0]
+module.app.module.gcp[0].google_compute_instance_iam_member.gce-start[0]
+module.app.module.gcp[0].google_compute_instance_iam_member.gce-suspend[0]
+module.app.module.gcp[0].google_service_account_iam_member.app-keys[0]
 EOF
 
 bash "$script" check-transition \
@@ -516,34 +520,34 @@ if bash "$script" check-transition \
 fi
 
 cp "$tmp/new-state.txt" "$tmp/bad-new-state.txt"
-printf '%s\n' 'module.app.module.gcp.google_service_account.internal-services' >>"$tmp/bad-new-state.txt"
+printf '%s\n' 'module.app.module.gcp[0].google_service_account.internal-services' >>"$tmp/bad-new-state.txt"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/new-ids.json" "$tmp/old-state.txt" "$tmp/bad-new-state.txt" >/dev/null 2>&1; then
   fail "state checker accepted a retained legacy resource address"
 fi
 
 cp "$tmp/new-state.txt" "$tmp/bad-legacy-power-state.txt"
-printf '%s\n' 'module.app.module.gcp.google_project_iam_member.gce-start[0]' >>"$tmp/bad-legacy-power-state.txt"
+printf '%s\n' 'module.app.module.gcp[0].google_project_iam_member.gce-start[0]' >>"$tmp/bad-legacy-power-state.txt"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/new-ids.json" "$tmp/old-state.txt" "$tmp/bad-legacy-power-state.txt" >/dev/null 2>&1; then
   fail "state checker accepted a retained legacy project-wide power binding"
 fi
 
 cp "$tmp/new-state.txt" "$tmp/bad-legacy-gsa-state.txt"
-printf '%s\n' 'module.app.module.gcp.google_service_account_iam_member.gsa-user' >>"$tmp/bad-legacy-gsa-state.txt"
+printf '%s\n' 'module.app.module.gcp[0].google_service_account_iam_member.gsa-user' >>"$tmp/bad-legacy-gsa-state.txt"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/new-ids.json" "$tmp/old-state.txt" "$tmp/bad-legacy-gsa-state.txt" >/dev/null 2>&1; then
   fail "state checker accepted the legacy default Compute service-account impersonation grant"
 fi
 
 cp "$tmp/new-state.txt" "$tmp/bad-legacy-token-state.txt"
-printf '%s\n' 'module.app.module.gcp.google_service_account_iam_member.token-creator' >>"$tmp/bad-legacy-token-state.txt"
+printf '%s\n' 'module.app.module.gcp[0].google_service_account_iam_member.token-creator' >>"$tmp/bad-legacy-token-state.txt"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/new-ids.json" "$tmp/old-state.txt" "$tmp/bad-legacy-token-state.txt" >/dev/null 2>&1; then
   fail "state checker accepted the unused VM self token-creator grant"
 fi
 
-grep -Fvx 'module.app.module.gcp.google_compute_instance_iam_member.gce-suspend[0]' \
+grep -Fvx 'module.app.module.gcp[0].google_compute_instance_iam_member.gce-suspend[0]' \
   "$tmp/new-state.txt" >"$tmp/bad-missing-scoped-state.txt"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/new-ids.json" "$tmp/old-state.txt" "$tmp/bad-missing-scoped-state.txt" >/dev/null 2>&1; then

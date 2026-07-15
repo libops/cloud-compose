@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/libops/cloud-compose/internal/gcpcleanup"
+	"github.com/libops/cloud-compose/internal/providercleanup"
 )
 
 type emptyGCloud struct {
@@ -39,7 +42,7 @@ func TestRunGCPSweepUsesEnvironmentOwnership(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	status := run(context.Background(), []string{"gcp", "sweep"}, environmentGetter(environment), &stdout, &stderr, command, gcpcleanup.NewRedactor())
+	status := run(context.Background(), []string{"gcp", "sweep"}, environmentGetter(environment), &stdout, &stderr, command, gcpcleanup.NewRedactor(), nil)
 	if status != 0 {
 		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
 	}
@@ -73,6 +76,7 @@ func TestRunGCPSweepRequiresRunID(t *testing.T) {
 		&stderr,
 		command,
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 2 {
 		t.Errorf("run() status = %d; want 2", status)
@@ -98,6 +102,7 @@ func TestRunGCPSweepAllowsExplicitOrphanSweep(t *testing.T) {
 		&stderr,
 		command,
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 0 {
 		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
@@ -120,6 +125,7 @@ func TestRunGCPSweepAllRunsOverridesInheritedRunID(t *testing.T) {
 		&stderr,
 		command,
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 0 {
 		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
@@ -144,6 +150,7 @@ func TestRunGCPSweepRejectsExplicitRunIDWithAllRuns(t *testing.T) {
 		&stderr,
 		command,
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 2 {
 		t.Errorf("run() status = %d; want 2", status)
@@ -170,6 +177,7 @@ func TestRunGCPNamespaceWritesOnlyNamespaceToStdout(t *testing.T) {
 		&stderr,
 		command,
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 0 {
 		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
@@ -201,6 +209,7 @@ func TestRunGCPNamespaceRejectsInvalidRunIDs(t *testing.T) {
 				&stderr,
 				&emptyGCloud{},
 				gcpcleanup.NewRedactor(),
+				nil,
 			)
 			if status != 2 {
 				t.Errorf("run() status = %d; want 2", status)
@@ -226,12 +235,206 @@ func TestRunGCPNamespaceReportsOutputFailure(t *testing.T) {
 		&stderr,
 		&emptyGCloud{},
 		gcpcleanup.NewRedactor(),
+		nil,
 	)
 	if status != 1 {
 		t.Errorf("run() status = %d; want 1", status)
 	}
 	if !strings.Contains(stderr.String(), "write namespace") {
 		t.Errorf("stderr omits output failure: %s", stderr.String())
+	}
+}
+
+func TestRunIDValidateRequiresCanonicalRunIDWithoutOutput(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name       string
+		runID      string
+		wantStatus int
+	}{
+		{name: "canonical", runID: "123456789", wantStatus: 0},
+		{name: "empty", runID: "", wantStatus: 2},
+		{name: "noncanonical", runID: "0123", wantStatus: 2},
+		{name: "nonnumeric", runID: "run-123", wantStatus: 2},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			status := run(
+				context.Background(),
+				[]string{"run", "validate", "--run-id", test.runID},
+				environmentGetter(nil),
+				&stdout,
+				&stderr,
+				&emptyGCloud{},
+				gcpcleanup.NewRedactor(),
+				nil,
+			)
+			if status != test.wantStatus {
+				t.Fatalf("run() status = %d; want %d, stderr = %s", status, test.wantStatus, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q; want empty", stdout.String())
+			}
+		})
+	}
+}
+
+type recordingProviderSweeper struct {
+	config providercleanup.Config
+	err    error
+}
+
+func (s *recordingProviderSweeper) Sweep(_ context.Context, config providercleanup.Config) error {
+	s.config = config
+	return s.err
+}
+
+func TestRunProviderSweepUsesEnvironmentTokenAndExactOwnership(t *testing.T) {
+	t.Parallel()
+	const token = "digitalocean-secret"
+	environment := map[string]string{
+		"CLOUD_COMPOSE_SMOKE_RUN_ID": "123456789",
+		"DIGITALOCEAN_TOKEN":         token,
+	}
+	sweeper := &recordingProviderSweeper{}
+	var factoryProvider providercleanup.Provider
+	var factoryToken string
+	factory := func(provider providercleanup.Provider, suppliedToken string, _ *slog.Logger) (providerSweeper, error) {
+		factoryProvider = provider
+		factoryToken = suppliedToken
+		return sweeper, nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := run(
+		context.Background(),
+		[]string{"digitalocean", "sweep", "--target", "digitalocean-isle"},
+		environmentGetter(environment),
+		&stdout,
+		&stderr,
+		&emptyGCloud{},
+		gcpcleanup.NewRedactor(token),
+		factory,
+	)
+	if status != 0 {
+		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
+	}
+	if factoryProvider != providercleanup.DigitalOcean || factoryToken != token {
+		t.Fatalf("factory input = (%q, %q)", factoryProvider, factoryToken)
+	}
+	if sweeper.config.Provider != providercleanup.DigitalOcean ||
+		sweeper.config.Scope != providercleanup.ApplicationScope ||
+		sweeper.config.Target != "digitalocean-isle" ||
+		sweeper.config.RunID != "123456789" ||
+		sweeper.config.AllowAllRuns {
+		t.Fatalf("sweep config = %+v", sweeper.config)
+	}
+	if strings.Contains(stderr.String(), token) {
+		t.Fatalf("stderr leaked token: %s", stderr.String())
+	}
+}
+
+func TestRunProviderSweepSupportsConfigManagementAndExplicitAllRuns(t *testing.T) {
+	t.Parallel()
+	environment := map[string]string{
+		"CLOUD_COMPOSE_SMOKE_RUN_ID": "123456789",
+		"LINODE_TOKEN":               "linode-secret",
+	}
+	sweeper := &recordingProviderSweeper{}
+	factory := func(_ providercleanup.Provider, _ string, _ *slog.Logger) (providerSweeper, error) {
+		return sweeper, nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := run(
+		context.Background(),
+		[]string{"linode", "sweep", "--scope", "config-management", "--target", "ansible-drupal", "--all-runs"},
+		environmentGetter(environment),
+		&stdout,
+		&stderr,
+		&emptyGCloud{},
+		gcpcleanup.NewRedactor("linode-secret"),
+		factory,
+	)
+	if status != 0 {
+		t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
+	}
+	if sweeper.config.Scope != providercleanup.ConfigManagementScope || sweeper.config.RunID != "" || !sweeper.config.AllowAllRuns {
+		t.Fatalf("sweep config = %+v", sweeper.config)
+	}
+}
+
+func TestRunProviderSweepFailsBeforeAPIAccessWithoutOwnershipOrToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		environment map[string]string
+		want        string
+	}{
+		{name: "missing ownership", environment: map[string]string{"LINODE_TOKEN": "secret"}, want: "run-id"},
+		{name: "missing token", environment: map[string]string{"CLOUD_COMPOSE_SMOKE_RUN_ID": "123456789"}, want: "LINODE_TOKEN"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			called := false
+			factory := func(_ providercleanup.Provider, _ string, _ *slog.Logger) (providerSweeper, error) {
+				called = true
+				return &recordingProviderSweeper{}, nil
+			}
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			status := run(
+				context.Background(),
+				[]string{"linode", "sweep", "--target", "linode-wp"},
+				environmentGetter(test.environment),
+				&stdout,
+				&stderr,
+				&emptyGCloud{},
+				gcpcleanup.NewRedactor("secret"),
+				factory,
+			)
+			if status != 2 {
+				t.Fatalf("run() status = %d; want 2", status)
+			}
+			if called {
+				t.Fatal("run() constructed provider client before validating inputs")
+			}
+			if !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("stderr = %q; want %q", stderr.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestRunProviderSweepRedactsDefensiveErrorPath(t *testing.T) {
+	t.Parallel()
+	const token = "linode-secret"
+	sweeper := &recordingProviderSweeper{err: fmt.Errorf("provider echoed %s", token)}
+	factory := func(_ providercleanup.Provider, _ string, _ *slog.Logger) (providerSweeper, error) {
+		return sweeper, nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := run(
+		context.Background(),
+		[]string{"linode", "sweep", "--target", "linode-wp", "--run-id", "123456789"},
+		environmentGetter(map[string]string{"LINODE_TOKEN": token}),
+		&stdout,
+		&stderr,
+		&emptyGCloud{},
+		gcpcleanup.NewRedactor(token),
+		factory,
+	)
+	if status != 1 {
+		t.Fatalf("run() status = %d; want 1", status)
+	}
+	if strings.Contains(stderr.String(), token) || !strings.Contains(stderr.String(), "[REDACTED]") {
+		t.Fatalf("stderr was not redacted: %s", stderr.String())
 	}
 }
 

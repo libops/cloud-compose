@@ -6,17 +6,9 @@ terraform {
       source  = "hashicorp/cloudinit"
       version = "~> 2.3"
     }
-    digitalocean = {
-      source  = "digitalocean/digitalocean"
-      version = "~> 2.0"
-    }
     google = {
       source  = "hashicorp/google"
       version = "~> 7.0"
-    }
-    linode = {
-      source  = "linode/linode"
-      version = "~> 4.0"
     }
     time = {
       source  = "hashicorp/time"
@@ -78,7 +70,7 @@ locals {
   vault = merge(local.runtime.vault, {
     auth_method = (
       local.runtime.vault.auth_method == "auto"
-      ? (local.cloud_provider == "gcp" ? "gcp-iam" : "consumer-managed")
+      ? "gcp-iam"
       : local.runtime.vault.auth_method
     )
   })
@@ -94,32 +86,6 @@ locals {
   gcp_power_management  = var.gcp.power_management
   gcp_rollout           = var.gcp.rollout
 
-  linux_runtime = {
-    rootfs                = local.runtime.rootfs
-    rootfs_archive_url    = local.runtime.rootfs_archive_url
-    rootfs_archive_sha256 = local.runtime.rootfs_archive_sha256
-    users                 = local.runtime.users
-    compose               = local.compose
-    sitectl               = local.sitectl
-    docker                = local.docker
-    managed_runtime = {
-      enabled                       = local.managed.enabled
-      internal_services_enabled     = local.managed.internal_services_enabled
-      internal_services_auto_update = local.managed.internal_services_auto_update
-      artifacts                     = module.managed_artifacts.artifacts
-    }
-    vault = {
-      addr                    = local.vault.addr
-      namespace               = local.vault.namespace
-      role                    = local.vault.role
-      agent_enabled           = local.vault.agent_enabled
-      auth_method             = local.vault.auth_method
-      agent_token_path        = local.vault.agent_token_path
-      agent_additional_config = local.vault.agent_additional_config
-      agent_templates         = local.vault.agent_templates
-    }
-    extra_env = local.runtime.extra_env
-  }
 }
 
 module "managed_artifacts" {
@@ -129,7 +95,8 @@ module "managed_artifacts" {
 }
 
 module "gcp" {
-  count  = local.cloud_provider == "gcp" ? 1 : 0
+  # Keep the historical indexed address so existing GCP state remains stable.
+  count  = 1
   source = "./modules/gcp"
 
   name           = var.name
@@ -226,22 +193,4 @@ module "gcp" {
   vault_agent_token_path        = local.vault.agent_token_path
   vault_agent_templates         = local.vault.agent_templates
   vault_agent_additional_config = local.vault.agent_additional_config
-}
-
-module "digitalocean" {
-  count  = local.cloud_provider == "digitalocean" ? 1 : 0
-  source = "./modules/digitalocean"
-
-  name         = var.name
-  digitalocean = var.digitalocean
-  runtime      = local.linux_runtime
-}
-
-module "linode" {
-  count  = local.cloud_provider == "linode" ? 1 : 0
-  source = "./modules/linode"
-
-  name    = var.name
-  linode  = var.linode
-  runtime = local.linux_runtime
 }

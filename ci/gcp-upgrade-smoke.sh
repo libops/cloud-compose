@@ -11,7 +11,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 source "$script_dir/cloud-smoke.sh"
 
 readonly upgrade_base_sha="f33117cdbbf4a9c7d59006a4db986baef118e6bb"
-readonly resource_prefix="module.app.module.gcp"
+readonly resource_prefix="module.app.module.gcp[0]"
 readonly data_disk_address="${resource_prefix}.google_compute_disk.data"
 readonly docker_disk_address="${resource_prefix}.google_compute_disk.docker-volumes"
 readonly boot_disk_address="${resource_prefix}.google_compute_disk.boot"

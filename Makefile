@@ -117,13 +117,13 @@ artifact-install-contract:
 	bash ci/docker-plugin-install-contract.sh
 	bash ci/cos-bootstrap-contract.sh
 
-hosted-cleanup-retry-contract:
+hosted-cleanup-retry-contract: go-contracts
 	bash ci/hosted-cleanup-retry-contract.sh
 
 config-management-smoke: runtime-config-contract artifact-install-contract
 	ci/config-management-smoke.sh
 
-config-management-cloud-smoke:
+config-management-cloud-smoke: cloud-compose-ci
 	@test -n "$(METHOD)" || { echo "METHOD is required"; exit 2; }
 	ci/config-management-cloud-smoke.sh $(METHOD)-drupal
 
@@ -133,7 +133,7 @@ config-management-cloud-smoke-ansible-drupal:
 config-management-cloud-smoke-salt-drupal:
 	$(MAKE) config-management-cloud-smoke METHOD=salt
 
-destroy-config-management-cloud-smoke:
+destroy-config-management-cloud-smoke: cloud-compose-ci
 	@test -n "$(METHOD)" || { echo "METHOD is required"; exit 2; }
 	ci/config-management-cloud-smoke.sh destroy-$(METHOD)-drupal
 
@@ -152,10 +152,9 @@ terraform-docs-check:
 smoke-test-clouds: cloud-compose-ci
 	ci/cloud-smoke.sh all
 
-smoke-test:
+smoke-test: cloud-compose-ci
 	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
 	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
-	@if [ "$(PROVIDER)" = "gcp" ]; then $(MAKE) --no-print-directory cloud-compose-ci; fi
 	ci/cloud-smoke.sh $(PROVIDER)-$(TEMPLATE)
 
 smoke-test-digitalocean-isle:
@@ -167,10 +166,9 @@ smoke-test-linode-wp:
 smoke-test-gcp-wp:
 	$(MAKE) smoke-test PROVIDER=gcp TEMPLATE=wp
 
-destroy-smoke:
+destroy-smoke: cloud-compose-ci
 	@test -n "$(PROVIDER)" || { echo "PROVIDER is required"; exit 2; }
 	@test -n "$(TEMPLATE)" || { echo "TEMPLATE is required"; exit 2; }
-	@if [ "$(PROVIDER)" = "gcp" ]; then $(MAKE) --no-print-directory cloud-compose-ci; fi
 	ci/cloud-smoke.sh destroy-$(PROVIDER)-$(TEMPLATE)
 
 destroy-smoke-digitalocean-isle:

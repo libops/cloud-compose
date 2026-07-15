@@ -13,6 +13,7 @@ type templateRegistry struct {
 }
 
 type templateDefinition struct {
+	Branch          string            `json:"branch"`
 	Packages        []string          `json:"packages"`
 	PackageVersions map[string]string `json:"package_versions"`
 }
@@ -28,36 +29,36 @@ func TestTemplateVersionContract(t *testing.T) {
 
 	expectedVersions := map[string]map[string]string{
 		"default": {
-			"sitectl": "v0.39.0",
+			"sitectl": "v0.40.0",
 		},
 		"archivesspace": {
-			"sitectl":               "v0.39.0",
-			"sitectl-archivesspace": "v0.6.0",
+			"sitectl":               "v0.40.0",
+			"sitectl-archivesspace": "v0.7.0",
 		},
 		"drupal": {
-			"sitectl":        "v0.39.0",
-			"sitectl-drupal": "v0.11.0",
+			"sitectl":        "v0.40.0",
+			"sitectl-drupal": "v0.12.0",
 		},
 		"isle": {
-			"sitectl":        "v0.39.0",
-			"sitectl-drupal": "v0.11.0",
-			"sitectl-isle":   "v0.18.0",
+			"sitectl":        "v0.40.0",
+			"sitectl-drupal": "v0.12.0",
+			"sitectl-isle":   "v0.19.0",
 		},
 		"ojs": {
-			"sitectl":     "v0.39.0",
-			"sitectl-ojs": "v0.6.0",
+			"sitectl":     "v0.40.0",
+			"sitectl-ojs": "v0.7.0",
 		},
 		"omeka-classic": {
-			"sitectl":               "v0.39.0",
-			"sitectl-omeka-classic": "v0.6.0",
+			"sitectl":               "v0.40.0",
+			"sitectl-omeka-classic": "v0.7.0",
 		},
 		"omeka-s": {
-			"sitectl":         "v0.39.0",
-			"sitectl-omeka-s": "v0.6.0",
+			"sitectl":         "v0.40.0",
+			"sitectl-omeka-s": "v0.7.0",
 		},
 		"wp": {
-			"sitectl":    "v0.39.0",
-			"sitectl-wp": "v0.5.0",
+			"sitectl":    "v0.40.0",
+			"sitectl-wp": "v0.6.0",
 		},
 	}
 
@@ -77,6 +78,9 @@ func TestTemplateVersionContract(t *testing.T) {
 		}
 		if !maps.Equal(definition.PackageVersions, expected) {
 			t.Errorf("template %q package versions diverged:\nexpected %s\nactual   %s", name, prettyJSON(t, expected), prettyJSON(t, definition.PackageVersions))
+		}
+		if definition.Branch != "v1.0.0" {
+			t.Errorf("template %q branch = %q, want stable contract v1.0.0", name, definition.Branch)
 		}
 	}
 

@@ -1,5 +1,4 @@
 mock_provider "cloudinit" {}
-mock_provider "digitalocean" {}
 mock_provider "google" {
   mock_data "google_project" {
     defaults = {
@@ -7,7 +6,6 @@ mock_provider "google" {
     }
   }
 }
-mock_provider "linode" {}
 mock_provider "time" {}
 
 run "template_uses_released_package_set" {
@@ -15,8 +13,12 @@ run "template_uses_released_package_set" {
 
   variables {
     name           = "template-versions"
-    cloud_provider = "digitalocean"
+    cloud_provider = "gcp"
     template       = "isle"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
     runtime = {
       rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -25,9 +27,9 @@ run "template_uses_released_package_set" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl        = "v0.39.0"
-      sitectl-drupal = "v0.11.0"
-      sitectl-isle   = "v0.18.0"
+      sitectl        = "v0.40.0"
+      sitectl-drupal = "v0.12.0"
+      sitectl-isle   = "v0.19.0"
     }
     error_message = "The Isle template must select its reviewed core and plugin release set by default."
   }
@@ -38,15 +40,19 @@ run "explicit_package_versions_override_template_defaults" {
 
   variables {
     name           = "template-versions"
-    cloud_provider = "digitalocean"
+    cloud_provider = "gcp"
     template       = "isle"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
     runtime = {
       rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         package_versions = {
-          sitectl      = "v0.40.0"
-          sitectl-isle = "v0.19.0"
+          sitectl      = "v0.40.1"
+          sitectl-isle = "v0.19.1"
         }
       }
     }
@@ -54,9 +60,9 @@ run "explicit_package_versions_override_template_defaults" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl        = "v0.40.0"
-      sitectl-drupal = "v0.11.0"
-      sitectl-isle   = "v0.19.0"
+      sitectl        = "v0.40.1"
+      sitectl-drupal = "v0.12.0"
+      sitectl-isle   = "v0.19.1"
     }
     error_message = "Explicit per-package selectors must override only their matching template defaults."
   }
@@ -67,15 +73,19 @@ run "custom_package_set_filters_template_versions" {
 
   variables {
     name           = "template-versions"
-    cloud_provider = "digitalocean"
+    cloud_provider = "gcp"
     template       = "isle"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
     runtime = {
       rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
-          sitectl-wp = "v0.5.1"
+          sitectl-wp = "v0.6.1"
         }
       }
     }
@@ -83,8 +93,8 @@ run "custom_package_set_filters_template_versions" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v0.39.0"
-      sitectl-wp = "v0.5.1"
+      sitectl    = "v0.40.0"
+      sitectl-wp = "v0.6.1"
     }
     error_message = "Template selectors for packages omitted by a custom package set must not reach the runtime."
   }
@@ -95,8 +105,12 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   variables {
     name           = "template-versions"
-    cloud_provider = "digitalocean"
+    cloud_provider = "gcp"
     template       = "isle"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
     runtime = {
       rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -108,7 +122,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.sitectl.packages == tolist(["sitectl"]) && local.sitectl.package_versions == {
-      sitectl = "v0.39.0"
+      sitectl = "v0.40.0"
     }
     error_message = "An explicit core-only package set must not be mistaken for an omitted template package selection."
   }

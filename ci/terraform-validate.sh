@@ -25,9 +25,45 @@ safe_name() {
   printf '%s\n' "$value"
 }
 
+validate_public_provider_graph() {
+  local root="$1" data_dir="$2" rel="$3"
+  local expected_sources provider_graph actual_sources
+
+  case "$rel" in
+    . | providers/gcp)
+      expected_sources=$'hashicorp/cloudinit\nhashicorp/google\nhashicorp/time'
+      ;;
+    providers/do)
+      expected_sources=$'digitalocean/digitalocean\nhashicorp/cloudinit'
+      ;;
+    providers/linode)
+      expected_sources=$'hashicorp/cloudinit\nlinode/linode'
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if ! provider_graph="$(TF_DATA_DIR="$data_dir" terraform -chdir="$root" providers)"; then
+    echo "Failed to read Terraform provider graph in ${rel}" >&2
+    return 1
+  fi
+  actual_sources="$({
+    sed -n 's/.*provider\[registry\.terraform\.io\/\([^]]*\)\].*/\1/p' <<<"$provider_graph"
+  } | sort -u)"
+  if [[ "$actual_sources" != "$expected_sources" ]]; then
+    echo "Unexpected Terraform provider graph in ${rel}" >&2
+    echo "Expected:" >&2
+    printf '%s\n' "$expected_sources" >&2
+    echo "Actual:" >&2
+    printf '%s\n' "$actual_sources" >&2
+    return 1
+  fi
+}
+
 validate_root() {
   local root="$1" data_root="$2"
-  local rel data_dir lockfile created_lock init_status validate_status test_status
+  local rel data_dir lockfile created_lock init_status validate_status provider_status test_status
   local -a init_args
 
   rel="${root#"$repo_root"/}"
@@ -67,8 +103,13 @@ validate_root() {
     TF_DATA_DIR="$data_dir" terraform -chdir="$root" validate -no-color || validate_status=$?
   fi
 
+  provider_status=0
+  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 ]]; then
+    validate_public_provider_graph "$root" "$data_dir" "$rel" || provider_status=$?
+  fi
+
   test_status=0
-  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 ]] && find "$root" -maxdepth 1 -name '*.tftest.hcl' -print -quit | grep -q .; then
+  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 && "$provider_status" -eq 0 ]] && find "$root" -maxdepth 1 -name '*.tftest.hcl' -print -quit | grep -q .; then
     TF_DATA_DIR="$data_dir" terraform -chdir="$root" test -no-color || test_status=$?
   fi
 
@@ -81,6 +122,9 @@ validate_root() {
   fi
   if [[ "$validate_status" -ne 0 ]]; then
     return "$validate_status"
+  fi
+  if [[ "$provider_status" -ne 0 ]]; then
+    return "$provider_status"
   fi
   return "$test_status"
 }

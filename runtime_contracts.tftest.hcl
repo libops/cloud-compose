@@ -1,5 +1,4 @@
 mock_provider "cloudinit" {}
-mock_provider "digitalocean" {}
 mock_provider "google" {
   mock_data "google_project" {
     defaults = {
@@ -7,26 +6,22 @@ mock_provider "google" {
     }
   }
 }
-mock_provider "linode" {}
 mock_provider "time" {}
 
-run "provider_neutral_vault_auth_defaults_follow_provider" {
+run "root_rejects_non_gcp_provider_selection" {
   command = plan
 
   variables {
     name           = "root-contract"
     cloud_provider = "digitalocean"
     template       = "wp"
-    runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
     }
   }
 
-  assert {
-    condition     = local.vault.auth_method == "consumer-managed"
-    error_message = "The provider-neutral Vault default must resolve to consumer-managed outside GCP."
-  }
+  expect_failures = [var.cloud_provider]
 }
 
 run "gcp_vault_auth_default_uses_gcp_iam" {
@@ -43,7 +38,7 @@ run "gcp_vault_auth_default_uses_gcp_iam" {
 
   assert {
     condition     = local.vault.auth_method == "gcp-iam"
-    error_message = "The provider-neutral Vault default must resolve to gcp-iam on GCP."
+    error_message = "The root GCP entrypoint must resolve the automatic Vault method to gcp-iam."
   }
 }
 

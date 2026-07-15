@@ -34,7 +34,9 @@ locals {
 }
 
 module "app" {
-  source = "../../../providers/gcp"
+  # Exercise the GCP-only compatibility root across the real pre-1.0 state
+  # boundary. New deployments should use ../../../providers/gcp instead.
+  source = "../../.."
 
   name     = var.name
   template = "wp"

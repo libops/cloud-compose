@@ -57,7 +57,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v0.39.0"
+      sitectl = "v0.40.0"
     }
     error_message = "The GCP entrypoint must preserve an explicit core-only package set."
   }
