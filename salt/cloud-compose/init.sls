@@ -1,4 +1,20 @@
 {% import_json "templates/apps.json" as app_registry %}
+{% macro normalize_compose_project_name(repo_path, ref) -%}
+{%- set candidate = (repo_path | replace('.git', '')) ~ '-' ~ ref -%}
+{%- set normalized = namespace(value='', separator=False) -%}
+{%- for character in candidate | lower -%}
+{%- if character in 'abcdefghijklmnopqrstuvwxyz0123456789' -%}
+{%- if normalized.separator and normalized.value -%}
+{%- set normalized.value = normalized.value ~ '-' -%}
+{%- endif -%}
+{%- set normalized.value = normalized.value ~ character -%}
+{%- set normalized.separator = False -%}
+{%- elif normalized.value -%}
+{%- set normalized.separator = True -%}
+{%- endif -%}
+{%- endfor -%}
+{{- normalized.value -}}
+{%- endmacro %}
 {% set invalid_runtime_inputs = [] %}
 {% set raw_cc = salt['pillar.get']('cloud_compose', {}) %}
 {% if raw_cc is mapping %}
@@ -246,7 +262,7 @@
 {% set repo_path_source = repo | replace('https://github.com/', '') | replace('http://github.com/', '') | replace('git@github.com:', '') %}
 {% set repo_path = compose.get('repo_path') or (repo_path_source.strip('/') if repo_path_source else name) %}
 {% set project_dir = compose.get('project_dir') or data_dir ~ '/' ~ repo_path ~ '/' ~ branch %}
-{% set compose_project_name = compose.get('compose_project_name') or ((repo_path ~ '-' ~ branch) | lower | replace('.git', '') | replace('/', '-') | replace('_', '-')) %}
+{% set compose_project_name = compose.get('compose_project_name') or normalize_compose_project_name(repo_path, branch) %}
 {% set raw_explicit_projects = compose.get('projects', {}) %}
 {% if raw_explicit_projects is mapping %}
 {% set explicit_projects = raw_explicit_projects %}
@@ -327,7 +343,7 @@
   'docker_compose_branch': app_branch,
   'repo_path': app_repo_path,
   'project_dir': app.get('project_dir') or data_dir ~ '/' ~ app_repo_path ~ '/' ~ app_branch,
-  'compose_project_name': app.get('compose_project_name') or ((app_repo_path ~ '-' ~ app_branch) | lower | replace('.git', '') | replace('/', '-') | replace('_', '-')),
+  'compose_project_name': app.get('compose_project_name') or normalize_compose_project_name(app_repo_path, app_branch),
   'ingress_port': app_ingress_port,
   'ingress': app_ingress,
   'sitectl_context_name': app.get('sitectl_context_name', app_name),

@@ -38,7 +38,8 @@ run "normalizes_minimal_compose_project" {
     volumes_device = "/dev/test-volumes"
     compose_projects = {
       wordpress = {
-        docker_compose_repo = "https://github.com/libops/wp.git"
+        docker_compose_repo   = "https://github.com/libops/wp.git"
+        docker_compose_branch = "v1.0.0"
       }
     }
     sitectl_verify_args = ["--route", "/"]
@@ -48,10 +49,10 @@ run "normalizes_minimal_compose_project" {
     condition = (
       local.compose_projects.wordpress.name == "wordpress" &&
       local.compose_projects.wordpress.docker_compose_repo == "https://github.com/libops/wp.git" &&
-      local.compose_projects.wordpress.docker_compose_branch == "main" &&
+      local.compose_projects.wordpress.docker_compose_branch == "v1.0.0" &&
       local.compose_projects.wordpress.repo_path == "libops/wp.git" &&
-      local.compose_projects.wordpress.project_dir == "/mnt/disks/data/libops/wp.git/main" &&
-      local.compose_projects.wordpress.compose_project_name == "libops-wp-main" &&
+      local.compose_projects.wordpress.project_dir == "/mnt/disks/data/libops/wp.git/v1.0.0" &&
+      local.compose_projects.wordpress.compose_project_name == "libops-wp-v1-0-0" &&
       local.compose_projects.wordpress.ingress_port == 80 &&
       local.compose_projects.wordpress.ingress.letsencrypt == var.sitectl_ingress.letsencrypt &&
       local.compose_projects.wordpress.sitectl_context_name == "wordpress" &&
