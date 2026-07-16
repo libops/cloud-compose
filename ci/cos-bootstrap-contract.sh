@@ -17,10 +17,18 @@ mkdir -p "$BIN_DIR" "$CLOUD_HOME" "$DATA_DIR" "$DOCKER_CONFIG_DIR"
 
 # Static trust contract: the build environment is an immutable multi-platform
 # image, and the GNU Make archive is verified before any extraction occurs.
-if ! grep -Eq '^ALPINE_BUILD_IMAGE="alpine:3\.22@sha256:[0-9a-f]{64}"$' "$INSTALLER"; then
+if ! grep -Fqx 'ALPINE_BUILD_IMAGE="alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"' "$INSTALLER"; then
     echo "COS bootstrap Alpine image is not digest pinned" >&2
     exit 1
 fi
+grep -Fq '"${alpine_mirror}/v3.22/main"' "$INSTALLER" || {
+    echo "COS bootstrap Alpine main repository does not match the pinned image release" >&2
+    exit 1
+}
+grep -Fq '"${alpine_mirror}/v3.22/community"' "$INSTALLER" || {
+    echo "COS bootstrap Alpine community repository does not match the pinned image release" >&2
+    exit 1
+}
 # Assert the literal command in the bootstrap script.
 # shellcheck disable=SC2016
 if ! grep -Fq 'echo "${MAKE_SHA256}  /tmp/make.tar.gz" | sha256sum -c -' "$INSTALLER"; then
@@ -154,7 +162,7 @@ PATH="${BIN_DIR}:$PATH" \
 
 grep -Fq "plugin:${DOCKER_CONFIG_DIR}/cli-plugins:${CLOUD_HOME}/install-docker-plugins.sh" "$CALL_LOG"
 grep -Fq "plugin:${CLOUD_HOME}/.docker/cli-plugins:${CLOUD_HOME}/install-docker-plugins.sh" "$CALL_LOG"
-grep -Eq 'docker: .*alpine:3\.22@sha256:[0-9a-f]{64}' "$CALL_LOG"
+grep -Fq 'alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce' "$CALL_LOG"
 [[ -x "${DATA_DIR}/make" ]]
 "${DATA_DIR}/make" --version | grep -Fq 'GNU Make 4.4.1'
 [[ -f "${DATA_DIR}/make.state" ]]
