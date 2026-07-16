@@ -20,13 +20,15 @@ Usage:
 
 Required environment:
   LINODE_TOKEN
+  CLOUD_COMPOSE_SMOKE_RUN_ID           Canonical GitHub Actions run id for every apply and scoped cleanup.
 
 Optional environment:
   CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true
   CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1200
   CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT=1800
   CLOUD_COMPOSE_SMOKE_KEEP=true
-  CLOUD_COMPOSE_SMOKE_RUN_ID
+  CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true
+                                      Permit an explicit sweep to remove every run for a target.
   CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS=true
   CLOUD_COMPOSE_SMOKE_WORKDIR=.cloud-compose-smoke
   CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE=${CONFIG_MANAGEMENT_IMAGE_DEFAULT}
@@ -97,19 +99,19 @@ smoke_run_id() {
   printf '%s\n' "${CLOUD_COMPOSE_SMOKE_RUN_ID:-${GITHUB_RUN_ID:-}}"
 }
 
-smoke_run_tag() {
-  local run_id="$1"
+validate_smoke_run_id() {
+  local run_id="$1" runner
 
   if [[ -z "$run_id" ]]; then
-    return 0
+    echo "CLOUD_COMPOSE_SMOKE_RUN_ID is required for every config-management smoke apply" >&2
+    return 1
   fi
-  run_id="$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-16)"
-  printf 'gha-run-%s\n' "$run_id"
-}
-
-target_tag() {
-  local target="$1"
-  printf 'config-management-%s-%s\n' "$(target_method "$target")" "$(target_template "$target")"
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    echo "Missing compiled CI runner: ${runner}; run 'make cloud-compose-ci' first" >&2
+    return 1
+  fi
+  "$runner" run validate --run-id "$run_id"
 }
 
 target_workdir() {
@@ -137,219 +139,31 @@ ensure_key() {
   chmod 0600 "$key_path"
 }
 
-api_request() {
-  local method="$1" path="$2"
-  local body http_code response
-
-  if response="$(curl -sS \
-    --connect-timeout 10 \
-    --max-time 45 \
-    -X "$method" \
-    -H "Authorization: Bearer ${LINODE_TOKEN}" \
-    -w $'\n%{http_code}' \
-    "https://api.linode.com/v4${path}")"; then
-    http_code="${response##*$'\n'}"
-    body="${response%$'\n'"$http_code"}"
-  else
-    echo "linode API request failed for ${method} ${path}; check LINODE_TOKEN and network access." >&2
-    return 75
-  fi
-
-  case "$http_code" in
-    2??)
-      printf '%s' "$body"
-      ;;
-    401)
-      echo "linode API rejected LINODE_TOKEN with HTTP 401 for ${method} ${path}; verify the GitHub secret is current and valid for Linode." >&2
-      return 22
-      ;;
-    403)
-      echo "linode API rejected LINODE_TOKEN with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
-      return 22
-      ;;
-    404 | 410)
-      if [[ "$method" == "DELETE" ]]; then
-        return 0
-      fi
-      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-    408 | 425 | 429 | 5??)
-      echo "linode API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 75
-      ;;
-    409 | 423)
-      if [[ "$method" == "DELETE" ]]; then
-        echo "linode API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
-        if [[ -n "$body" ]]; then
-          printf '%s\n' "$body" >&2
-        fi
-        return 75
-      fi
-      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-    *)
-      echo "linode API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-  esac
-}
-
-api_get() {
-  local path="$1" attempt=1 delay=2 status
-
-  while true; do
-    if api_request GET "$path"; then
-      return 0
-    else
-      status=$?
-    fi
-    if [[ "$status" -ne 75 || "$attempt" -ge 6 ]]; then
-      return "$status"
-    fi
-    echo "Retrying linode API GET ${path} in ${delay}s (attempt $((attempt + 1)) of 6)" >&2
-    sleep "$delay"
-    attempt=$((attempt + 1))
-    delay=$((delay * 2))
-    if [[ "$delay" -gt 30 ]]; then
-      delay=30
-    fi
-  done
-}
-
-api_delete() {
-  api_request DELETE "$1" >/dev/null
-}
-
-delete_ids() {
-  local path_prefix="$1" id attempt status
-  local failed=0 deleted
-
-  while IFS= read -r id; do
-    [[ -n "$id" ]] || continue
-    deleted=false
-    for attempt in {1..12}; do
-      echo "Deleting Linode resource ${path_prefix}/${id} (attempt ${attempt})"
-      if api_delete "${path_prefix}/${id}"; then
-        deleted=true
-        break
-      else
-        status=$?
-      fi
-      if [[ "$status" -ne 75 ]]; then
-        break
-      fi
-      if [[ "$attempt" -lt 12 ]]; then
-        sleep 10
-      fi
-    done
-    if [[ "$deleted" != "true" ]]; then
-      echo "Failed to delete Linode resource ${path_prefix}/${id} after ${attempt} attempt(s)" >&2
-      failed=1
-    fi
-  done
-
-  return "$failed"
-}
-
-provider_resource_ids() {
-  local target="$1" run_id="${2:-}" kind="$3" run_tag tag
-
-  run_tag="$(smoke_run_tag "$run_id")"
-  tag="$(target_tag "$target")"
-
-  case "$kind" in
-    firewalls)
-      api_get "/networking/firewalls?page_size=500" |
-        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode firewalls response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    instances)
-      api_get "/linode/instances?page_size=500" |
-        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode instances response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    volumes)
-      api_get "/volumes?page_size=500" |
-        jq -r --arg tag "$tag" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode volumes response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index("config-management-smoke") and index($tag)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    *)
-      echo "Unknown Linode resource kind: ${kind}" >&2
-      return 2
-      ;;
-  esac
-}
-
-provider_cleanup_residuals() {
-  local target="$1" run_id="${2:-}" kind ids id index
-  local -a kinds=(firewalls instances volumes)
-  local -a path_prefixes=(/networking/firewalls /linode/instances /volumes)
-
-  for index in "${!kinds[@]}"; do
-    kind="${kinds[$index]}"
-    if ! ids="$(provider_resource_ids "$target" "$run_id" "$kind")"; then
-      return 1
-    fi
-    while IFS= read -r id; do
-      [[ -n "$id" ]] || continue
-      printf '%s%s\n' "${path_prefixes[$index]}/" "$id"
-    done <<<"$ids"
-  done
-}
-
-verify_no_provider_resources() {
-  local target="$1" run_id="${2:-}" attempt residuals
-
-  for attempt in {1..6}; do
-    if ! residuals="$(provider_cleanup_residuals "$target" "$run_id")"; then
-      echo "Could not verify provider cleanup for config-management ${target}" >&2
-      return 1
-    fi
-    if [[ -z "$residuals" ]]; then
-      echo "Verified that no matching config-management ${target} smoke resources remain"
-      return 0
-    fi
-    echo "Matching config-management ${target} smoke resources remain after cleanup verification attempt ${attempt}:" >&2
-    printf '%s\n' "$residuals" >&2
-    if [[ "$attempt" -lt 6 ]]; then
-      sleep 10
-    fi
-  done
-
-  echo "Provider cleanup left matching config-management ${target} smoke resources" >&2
-  return 1
-}
-
 provider_tag_cleanup() {
-  local target="$1" run_id="${2:-}" kind index
-  local cleanup_status=0
-  local -a kinds=(firewalls instances volumes)
-  local -a path_prefixes=(/networking/firewalls /linode/instances /volumes)
+  local target="$1" run_id="${2:-}" allow_all_runs="${3:-false}" cleanup_binary
+  local -a cleanup_args
 
-  for index in "${!kinds[@]}"; do
-    kind="${kinds[$index]}"
-    provider_resource_ids "$target" "$run_id" "$kind" |
-      delete_ids "${path_prefixes[$index]}" || cleanup_status=1
-    if [[ "$kind" == "instances" ]]; then
-      sleep 10
-    fi
-  done
-  if [[ "$cleanup_status" -eq 0 ]] && ! verify_no_provider_resources "$target" "$run_id"; then
-    cleanup_status=1
+  cleanup_binary="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$cleanup_binary" ]]; then
+    echo "Missing compiled CI runner: ${cleanup_binary}; run 'make cloud-compose-ci' first" >&2
+    return 1
   fi
 
-  return "$cleanup_status"
+  cleanup_args=(
+    linode sweep
+    --scope config-management
+    --target "$target"
+  )
+  if [[ -n "$run_id" ]]; then
+    cleanup_args+=(--run-id "$run_id")
+  elif [[ "$allow_all_runs" == "true" ]]; then
+    cleanup_args+=(--all-runs)
+  else
+    echo "Provider cleanup requires CLOUD_COMPOSE_SMOKE_RUN_ID; set CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true only for an intentional target-wide orphan sweep" >&2
+    return 1
+  fi
+
+  "$cleanup_binary" "${cleanup_args[@]}"
 }
 
 scan_host_key() {
@@ -498,7 +312,6 @@ deploy_config_management() {
 }
 
 require_run_commands() {
-  require_cmd curl
   require_cmd docker
   require_cmd git
   require_cmd jq
@@ -509,15 +322,18 @@ require_run_commands() {
 }
 
 require_destroy_commands() {
-  require_cmd curl
-  require_cmd jq
   require_cmd ssh-keygen
   require_cmd terraform
 }
 
 require_sweep_commands() {
-  require_cmd curl
-  require_cmd jq
+  local cleanup_binary
+
+  cleanup_binary="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$cleanup_binary" ]]; then
+    echo "Missing compiled CI runner: ${cleanup_binary}; run 'make cloud-compose-ci' first" >&2
+    return 1
+  fi
 }
 
 run_target() (
@@ -542,6 +358,7 @@ run_target() (
 
   ensure_key "$key_path"
   run_id="$(smoke_run_id)"
+  validate_smoke_run_id "$run_id"
   mapfile -d '' -t var_args < <(target_var_args "$key_path" "$target")
 
   auto_args=()
@@ -597,7 +414,7 @@ run_target() (
   TF_DATA_DIR="$workdir/.terraform" terraform -chdir="$root" validate
 
   if [[ "${CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS:-}" == "true" ]]; then
-    provider_tag_cleanup "$target"
+    provider_tag_cleanup "$target" "" true
   fi
 
   echo "Applying ${target} raw Linode smoke"
@@ -687,13 +504,13 @@ main() {
       require_env LINODE_TOKEN
       require_sweep_commands
       for target in $(default_targets); do
-        provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+        provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}" "${CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS:-false}"
       done
       ;;
     sweep-*)
       require_env LINODE_TOKEN
       require_sweep_commands
-      provider_tag_cleanup "${1#sweep-}" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}"
+      provider_tag_cleanup "${1#sweep-}" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}" "${CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS:-false}"
       ;;
     destroy-*)
       require_destroy_commands

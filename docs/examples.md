@@ -129,12 +129,12 @@ healthcheck settings:
 runtime = {
   sitectl = {
     package_versions = {
-      sitectl      = "v0.39.0"
-      sitectl-wp   = "v0.5.0"
+      sitectl      = "v0.40.0"
+      sitectl-wp   = "v0.6.0"
     }
   }
   compose = {
-    branch = "main"
+    branch = "v1.0.0"
     ingress = {
       letsencrypt    = true
       bot_mitigation = true

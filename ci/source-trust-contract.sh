@@ -48,7 +48,7 @@ printf 'one\n' > "$source_repo/version.txt"
 git -C "$source_repo" add version.txt
 git -C "$source_repo" commit -m one >/dev/null
 commit_one="$(git -C "$source_repo" rev-parse HEAD)"
-git -C "$source_repo" tag release-one
+git -C "$source_repo" tag -a -m 'release one' release-one
 printf 'two\n' > "$source_repo/version.txt"
 git -C "$source_repo" commit -am two >/dev/null
 git -C "$source_repo" remote add origin "$remote"

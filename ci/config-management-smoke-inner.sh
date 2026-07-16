@@ -262,7 +262,7 @@ assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
 assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-    "sitectl": "v0.39.0",
+    "sitectl": "v0.40.0",
     "sitectl-drupal": "v0.11.0",
     "sitectl-isle": "v0.12.0",
 }
@@ -341,7 +341,7 @@ MINION
 }
 
 run_salt_case() {
-  local minion_id="$1" expected_name="$2" expected_repo="$3" expected_plugin="$4" expected_package="$5" expected_domain="$6" expected_project_dir="$7"
+  local minion_id="$1" expected_name="$2" expected_repo="$3" expected_plugin="$4" expected_package="$5" expected_domain="$6" expected_project_dir="$7" expected_compose_project_name="$8"
 
   rm -rf /home/cloud-compose /mnt/disks
   write_salt_config "$minion_id"
@@ -393,7 +393,7 @@ assert lock_states[0]["changes"] == {}, lock_states[0]
 PY
 
   python -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
-  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" "$expected_project_dir" <<'PY'
+  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" "$expected_project_dir" "$expected_compose_project_name" <<'PY'
 import json
 import grp
 import os
@@ -402,7 +402,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-expected_name, expected_repo, expected_plugin, expected_package, expected_domain, expected_project_dir = sys.argv[1:]
+expected_name, expected_repo, expected_plugin, expected_package, expected_domain, expected_project_dir, expected_compose_project_name = sys.argv[1:]
 
 def load_runtime_env(path):
     result = subprocess.run(
@@ -431,17 +431,23 @@ assert env["CLOUD_COMPOSE_APPS"] == expected_name
 assert env["CLOUD_COMPOSE_PRIMARY_APP"] == expected_name
 assert env["DOCKER_COMPOSE_DIR"] == expected_project_dir
 assert env["DOCKER_COMPOSE_REPO"] == expected_repo
+assert env["COMPOSE_PROJECT_NAME"] == expected_compose_project_name, (
+    env["COMPOSE_PROJECT_NAME"], expected_compose_project_name
+)
 assert env["SITECTL_PLUGIN"] == expected_plugin
 assert expected_package in env["SITECTL_PACKAGES"].split()
 assert project["docker_compose_repo"] == expected_repo
 assert project["project_dir"] == expected_project_dir
+assert project["compose_project_name"] == expected_compose_project_name, (
+    project["compose_project_name"], expected_compose_project_name
+)
 assert project["sitectl_plugin"] == expected_plugin
 assert project["ingress"]["domain"] == expected_domain
 assert Path(expected_project_dir).is_dir()
 
 if expected_name == "wp-prod":
     assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v0.39.0",
+        "sitectl": "v0.40.0",
         "sitectl-wp": "v0.10.0",
     }
     assert "BASH_ENV" not in env
@@ -504,7 +510,8 @@ run_salt_case \
   wp \
   sitectl-wp \
   wp.example.edu \
-  /mnt/disks/data/libops/wp/main
+  /mnt/disks/data/libops/wp/main \
+  libops-wp-v1-0-0
 
 run_salt_case \
   drupal-prod \
@@ -513,7 +520,8 @@ run_salt_case \
   drupal \
   sitectl-drupal \
   drupal.example.edu \
-  /mnt/disks/data/libops/drupal/main
+  /mnt/disks/data/libops/drupal/main \
+  libops-drupal-v1-0-0
 
 run_invalid_salt_case() {
   local invalid_case="$1" expected="$2"

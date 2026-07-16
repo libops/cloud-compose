@@ -1,12 +1,65 @@
 # Provider Entrypoints And On-Prem
 
 Provider-specific Terraform entrypoint modules keep downstream consumers from
-loading unused cloud providers. Use these paths instead of the root module when
-the caller already knows the target cloud:
+loading unused cloud providers. New callers should always select one of these
+paths:
 
 - `providers/gcp`
 - `providers/do`
 - `providers/linode`
+
+The repository root remains a GCP-only compatibility entrypoint for existing
+GCP state. It intentionally has no DigitalOcean or Linode provider dependency.
+DigitalOcean and Linode callers that previously selected `cloud_provider` on
+the root module must move to their provider-specific source path as a separately
+reviewed state migration. Terraform cannot conditionally load a statically
+declared child module's provider, even when that module has `count = 0`.
+
+## Migrating A 1.x Root Deployment
+
+GCP callers can keep the root source path and module block name unchanged. The
+root retains its historical `module.gcp[0]` address and now loads only GCP-
+related providers. A GCP caller can move to `providers/gcp` later, but that is a
+separate state refactor and is not required to remove DigitalOcean or Linode.
+
+DigitalOcean and Linode callers must change the module source at 2.0.0 while
+keeping the caller's module block name unchanged. For example:
+
+```hcl
+module "site" {
+  source = "github.com/libops/cloud-compose//providers/do?ref=2.0.0"
+
+  # Keep the existing name, template, digitalocean, and runtime values.
+}
+
+moved {
+  from = module.site.module.digitalocean[0]
+  to   = module.site.module.digitalocean
+}
+```
+
+The Linode equivalent is:
+
+```hcl
+module "site" {
+  source = "github.com/libops/cloud-compose//providers/linode?ref=2.0.0"
+
+  # Keep the existing name, template, linode, and runtime values.
+}
+
+moved {
+  from = module.site.module.linode[0]
+  to   = module.site.module.linode
+}
+```
+
+Place the `moved` block in the caller's root module, not inside a downstream
+fork of cloud-compose. Back up remote state, initialize the new exact source,
+and review the plan before applying. The plan must show the existing VM,
+firewall, and both durable volumes moving addresses without replacement or
+deletion. If the caller's block is not named `site`, substitute its actual name
+in both addresses. Keep the `moved` block in version control for at least one
+complete rollout across every workspace that shares the configuration.
 
 DigitalOcean and Linode share the same Linux runtime contract as the GCP module:
 
@@ -58,11 +111,10 @@ the apt installer path. Both paths install the same minimum runtime surface:
 - `sitectl` and selected plugins
 
 DigitalOcean and Linode do not currently have a cloud-compose workload identity
-contract equivalent to GCP IAM for Vault Agent. The provider-neutral root module
-resolves `runtime.vault.auth_method = "auto"` to `gcp-iam` on GCP and
-`consumer-managed` on DigitalOcean and Linode. Provider-specific entrypoints
-default directly to their corresponding method. When the Terraform-managed
-agent is enabled with `consumer-managed`, supply the auth stanza through
+contract equivalent to GCP IAM for Vault Agent. The GCP entrypoints resolve
+`runtime.vault.auth_method = "auto"` to `gcp-iam`; the DigitalOcean and Linode
+entrypoints resolve it to `consumer-managed`. When the Terraform-managed agent
+is enabled with `consumer-managed`, supply the auth stanza through
 `runtime.vault.agent_additional_config` or a rootfs overlay.
 
 Provider-neutral `runtime.users` applies on every cloud. DigitalOcean and Linode

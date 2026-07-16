@@ -171,9 +171,10 @@ into an ambiguous shell scalar.
 `cloud-compose` defines the Vault contract and leaves product-specific Vault
 roles, policies, mounts, and secret paths to consumers.
 
-The provider-neutral root defaults `runtime.vault.auth_method` to `auto`, which
-resolves to GCP IAM on GCP and consumer-managed auth elsewhere. GCP IAM uses the
-app GSA identity, not the VM GSA. Vault Agent uses the VM's attached identity
+Each provider-specific entrypoint defaults `runtime.vault.auth_method` to
+`auto`. The GCP entrypoint and GCP-only compatibility root resolve it to GCP
+IAM; DigitalOcean and Linode resolve it to consumer-managed auth. GCP IAM uses
+the app GSA identity, not the VM GSA. Vault Agent uses the VM's attached identity
 through Application Default Credentials to call the IAM Credentials `signJwt`
 API for that app identity. Terraform grants the VM GSA Token Creator on that
 one app GSA only while managed GCP IAM auto-auth is enabled; it does not create
@@ -637,7 +638,7 @@ the app Key Admin member, and the legacy app self-signing member. The first four
 preserve identity when their corresponding compatibility features remain
 enabled. The fifth gives Terraform explicit deletion provenance when the new,
 more narrowly scoped managed Vault signer grant is disabled. These moves cannot
-migrate state between the provider-neutral root and `providers/gcp`
+migrate state between the GCP compatibility root and `providers/gcp`
 entrypoints, or between differently named caller module blocks. Treat either
 refactor as a separate reviewed state migration using caller-owned `moved`
 blocks or explicit `terraform state mv` commands. If old state records a
@@ -664,7 +665,11 @@ pull-request titles beginning with `[major]`; other pull requests retain the
 fresh-current GCP smoke. The gate provisions the exact `0.10.2` commit
 `f33117cdbbf4a9c7d59006a4db986baef118e6bb` in one detached worktree and the
 tested merge commit in another, with both configurations using one absolute
-local-backend state path. Both phases use a pre-provisioned, same-project CI
+local-backend state path. The fixture deliberately uses the GCP-only
+compatibility root in both phases and asserts the historical
+`module.app.module.gcp[0]` address, so removing non-GCP providers from root
+cannot silently move an existing GCP deployment. New deployments should use
+the explicit `providers/gcp` entrypoint. Both phases use a pre-provisioned, same-project CI
 network and regional subnet that are outside the disposable application state.
 The `0.10.2` baseline predates Shared VPC support, and a persistent subnet also
 prevents Direct VPC's one-to-two-hour address-retention window from turning an
@@ -742,33 +747,40 @@ reviewers**, and set its deployment branch policy to the selected branch
 `main` only. Those environments are consumed solely by the `workflow_run`
 workflow loaded from the default branch. It checks out `github.sha` (the trusted
 default-branch revision for that event), rejects fork-originated runs, and uses
-the originating workflow run ID to constrain the sweep. Only the GCP app-smoke
-cleanup job builds `.bin/cloud-compose-ci`; it builds the binary once from that
-trusted checkout and uses it for GCP discovery, retries, ordered deletion, and
-residual verification. The GCP pull-request job likewise builds one binary
-before apply and reuses that exact workspace binary from its `always()` cleanup
-step. DigitalOcean and Linode app cleanup, plus Ansible and Salt
-config-management cleanup, continue to use their hardened shell drivers; the Go
-runner is not yet a general hosted-provider cleanup implementation. No cleanup
-job executes a pull-request binary or downloads one as an artifact. This
-fallback runs automatically after a failed, cancelled, or timed-out smoke
-workflow, including cases where cancellation prevented the in-job destroy from
-finishing. Never allow pull-request branches in a cleanup environment's
-deployment policy.
+the originating workflow run ID to constrain the sweep. Every cleanup job
+builds `.bin/cloud-compose-ci` once from that trusted checkout. The compiled
+runner owns GCP, DigitalOcean, and Linode discovery, retries, ordered deletion,
+and residual verification for both app and config-management smoke resources.
+It calls DigitalOcean and Linode through `net/http`; provider tokens are added
+only to the credentialed smoke, `always()` destroy, or trusted sweep step and
+sent only as authorization headers, never as process arguments or error text.
+Checkout, setup, and runner-build steps do not receive provider tokens, and
+trusted and provider-job checkouts set `persist-credentials: false`.
+Pull-request smoke jobs also build one binary before apply and reuse that exact
+workspace binary from their `always()` cleanup step. Shell remains responsible
+for Terraform, SSH, cloud-init, diagnostics, and host-runtime black-box checks.
+No privileged fallback executes a pull-request binary or downloads one as an
+artifact. The fallback runs
+automatically after a failed, cancelled, or timed-out smoke workflow, including
+cases where cancellation prevented the in-job destroy from finishing. Never
+allow pull-request branches in a cleanup environment's deployment policy.
 
 GCP smoke writers encode the complete canonical numeric GitHub Actions run ID as
 a fixed-width, nine-character lowercase base36 namespace. The fresh and upgrade
 drivers obtain that value from the compiled `cloud-compose-ci gcp namespace`
 command before Terraform can create resources. A manual fresh GCP smoke apply
 must set `CLOUD_COMPOSE_SMOKE_RUN_ID`; an empty, malformed, noncanonical, or
-greater-than-44-bit value fails before apply. Non-GCP smoke invocation remains
-unchanged. The namespace width preserves both
+greater-than-44-bit value fails before apply. DigitalOcean, Linode, and raw-host
+config-management smoke writers validate that same canonical run ID through
+`cloud-compose-ci run validate` before apply. This ensures every created
+resource has an exact cleanup tag; manual smoke applies on every cloud must now
+set `CLOUD_COMPOSE_SMOKE_RUN_ID`. The namespace width preserves both
 separators and at least one random suffix character for every supported GCP
 template within the 21-character resource-name limit. The original decimal run
-ID remains the cleanup input and the source of compatibility tags; DigitalOcean
-and Linode naming and invocation are unchanged. Manual GCP smoke applies must
-set `CLOUD_COMPOSE_SMOKE_RUN_ID`; the smoke context validates that the supplied
-namespace decodes to that same canonical, at-most-44-bit run ID.
+ID remains the cleanup input and the source of compatibility tags; existing
+DigitalOcean and Linode resource names and tags are unchanged. The GCP smoke
+context additionally validates that the supplied namespace decodes to that same
+canonical, at-most-44-bit run ID.
 
 The privileged fallback always executes the default branch, so its compiled
 runner remains a dual reader: it queries both the legacy first-eight-character
@@ -822,10 +834,30 @@ deletion share a bounded two-hour-ten-minute exponential-backoff window because
 Direct VPC addresses can remain allocated for one to two hours after Cloud Run
 disconnects; exhausting that window still fails the job and reports the leak.
 The workflow fails if a mutation exhausts its retry budget or residual resources
-remain, making leaks visible to operators. The compiled runner requires a run ID
-by default; an operator can sweep every run for one disposable target only by
-supplying the explicit `--all-runs` flag. That explicit flag overrides a run ID
-inherited from `CLOUD_COMPOSE_SMOKE_RUN_ID`; supplying both `--run-id` and
-`--all-runs` explicitly is an error. The compatibility shell exposes the broad
-operation only when `CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true`; a missing run ID
-otherwise fails closed.
+remain, making leaks visible to operators. DigitalOcean and Linode cleanup use
+the same fail-closed contract: app resources must contain the provider target
+and exact `gha-run-*` tags, config-management resources must contain both of
+their scope tags, and tagless DigitalOcean firewalls must match the complete
+generated run-specific name. Provider `404` and `410` delete responses are
+successful idempotent cleanup. Every list is fully materialized before any
+resource from that list can be deleted. DigitalOcean pagination follows only an
+absolute, sequential `links.pages.next` URL on the configured API origin and
+exact list path with its filters intact. Linode requires present, sequential,
+and stable `page`/`pages` metadata. Repeated resources, malformed metadata,
+cycles, origin or path changes, and listings beyond the 100-page safety bound
+fail both deletion and residual verification closed; partial listings are never
+treated as success.
+
+Provider status, timeout, retry/backoff, ordered deletion, idempotency,
+pagination, and residual-consistency behavior is tested against the real Go
+`net/http` client with `httptest`. The `hosted-cleanup-retry-contract` target
+also retains a small, network-disabled shell lifecycle check whose
+`CLOUD_COMPOSE_CI_BIN` is an explicit fake; it does not build or discover
+`.bin/cloud-compose-ci` and does not emulate provider HTTP with curl. The
+compiled runner requires a run ID by default;
+an operator can sweep every run for one disposable target only by supplying the
+explicit `--all-runs` flag. That explicit flag overrides a run ID inherited from
+`CLOUD_COMPOSE_SMOKE_RUN_ID`; supplying both `--run-id` and `--all-runs`
+explicitly is an error. The compatibility shell exposes the broad operation
+only when `CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true`; a missing run ID otherwise
+fails closed.

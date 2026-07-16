@@ -22,6 +22,8 @@ Required environment:
   DIGITALOCEAN_TOKEN  DigitalOcean API token for digitalocean targets.
   LINODE_TOKEN        Linode API token for linode targets.
   GCLOUD_PROJECT      Google Cloud project for gcp targets.
+  CLOUD_COMPOSE_SMOKE_RUN_ID
+                      Canonical GitHub Actions run id for every apply and scoped cleanup.
 
 Optional environment:
   CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true   Pass -auto-approve outside GitHub Actions.
@@ -34,7 +36,6 @@ Optional environment:
                                       Remove prior smoke resources for the same target before apply.
   CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true
                                       Permit an explicit sweep command to remove every run for a target.
-  CLOUD_COMPOSE_SMOKE_RUN_ID          Run id used to target provider cleanup; required for scoped GCP cleanup.
   CLOUD_COMPOSE_SMOKE_TARGETS         Space-separated targets used by "all" and "sweep".
   DIGITALOCEAN_API_TOKEN                  Backward-compatible alias for DIGITALOCEAN_TOKEN.
   GCLOUD_REGION=us-east5              Google Cloud region for gcp targets.
@@ -150,6 +151,21 @@ smoke_run_id() {
   printf '%s\n' "${CLOUD_COMPOSE_SMOKE_RUN_ID:-${GITHUB_RUN_ID:-}}"
 }
 
+validate_smoke_run_id() {
+  local run_id="$1" runner
+
+  if [[ -z "$run_id" ]]; then
+    echo "CLOUD_COMPOSE_SMOKE_RUN_ID is required for every provider smoke apply" >&2
+    return 1
+  fi
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    echo "Missing compiled CI runner: ${runner}; run 'make cloud-compose-ci' first" >&2
+    return 1
+  fi
+  "$runner" run validate --run-id "$run_id"
+}
+
 gcp_run_namespace() {
   local target="$1" run_id="$2" runner
 
@@ -169,116 +185,6 @@ gcp_run_namespace() {
   "$runner" gcp namespace --run-id "$run_id"
 }
 
-api_request() {
-  local provider="$1" method="$2" path="$3"
-  local base_url body http_code response token token_name
-
-  case "$provider" in
-    digitalocean)
-      token="${DIGITALOCEAN_TOKEN:-}"
-      token_name="DIGITALOCEAN_TOKEN"
-      base_url="https://api.digitalocean.com/v2"
-      ;;
-    linode)
-      token="${LINODE_TOKEN:-}"
-      token_name="LINODE_TOKEN"
-      base_url="https://api.linode.com/v4"
-      ;;
-  esac
-
-  if response="$(curl -sS \
-    --connect-timeout 10 \
-    --max-time 45 \
-    -X "$method" \
-    -H "Authorization: Bearer ${token}" \
-    -w $'\n%{http_code}' \
-    "${base_url}${path}")"; then
-    http_code="${response##*$'\n'}"
-    body="${response%$'\n'"$http_code"}"
-  else
-    echo "${provider} API request failed for ${method} ${path}; check ${token_name} and network access." >&2
-    return 75
-  fi
-
-  case "$http_code" in
-    2??)
-      printf '%s' "$body"
-      ;;
-    401)
-      echo "${provider} API rejected ${token_name} with HTTP 401 for ${method} ${path}; verify the GitHub secret is current and valid for this provider." >&2
-      return 22
-      ;;
-    403)
-      echo "${provider} API rejected ${token_name} with HTTP 403 for ${method} ${path}; verify the token has the permissions required by smoke cleanup and Terraform." >&2
-      return 22
-      ;;
-    404 | 410)
-      if [[ "$method" == "DELETE" ]]; then
-        return 0
-      fi
-      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-    408 | 425 | 429 | 5??)
-      echo "${provider} API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 75
-      ;;
-    409 | 423)
-      if [[ "$method" == "DELETE" ]]; then
-        echo "${provider} API returned retryable HTTP ${http_code} for ${method} ${path}." >&2
-        if [[ -n "$body" ]]; then
-          printf '%s\n' "$body" >&2
-        fi
-        return 75
-      fi
-      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-    *)
-      echo "${provider} API returned HTTP ${http_code} for ${method} ${path}." >&2
-      if [[ -n "$body" ]]; then
-        printf '%s\n' "$body" >&2
-      fi
-      return 22
-      ;;
-  esac
-}
-
-api_delete() {
-  api_request "$1" DELETE "$2" >/dev/null
-}
-
-api_get() {
-  local provider="$1" path="$2" attempt=1 delay=2 status
-
-  while true; do
-    if api_request "$provider" GET "$path"; then
-      return 0
-    else
-      status=$?
-    fi
-    if [[ "$status" -ne 75 || "$attempt" -ge 6 ]]; then
-      return "$status"
-    fi
-    echo "Retrying ${provider} API GET ${path} in ${delay}s (attempt $((attempt + 1)) of 6)" >&2
-    sleep "$delay"
-    attempt=$((attempt + 1))
-    delay=$((delay * 2))
-    if [[ "$delay" -gt 30 ]]; then
-      delay=30
-    fi
-  done
-}
-
 gcp_region() {
   printf '%s\n' "${GCLOUD_REGION:-us-east5}"
 }
@@ -287,243 +193,45 @@ gcp_zone() {
   printf '%s\n' "${GCLOUD_ZONE:-$(gcp_region)-b}"
 }
 
-delete_ids() {
-  local provider="$1" path_prefix="$2" id attempt status
-  local failed=0 deleted
-
-  while IFS= read -r id; do
-    if [[ -z "$id" ]]; then
-      continue
-    fi
-    deleted=false
-    for attempt in {1..12}; do
-      echo "Deleting ${provider} ${path_prefix}/${id} (attempt ${attempt})"
-      if api_delete "$provider" "${path_prefix}/${id}"; then
-        deleted=true
-        break
-      else
-        status=$?
-      fi
-      if [[ "$status" -ne 75 ]]; then
-        break
-      fi
-      if [[ "$attempt" -lt 12 ]]; then
-        sleep 10
-      fi
-    done
-    if [[ "$deleted" != "true" ]]; then
-      echo "Failed to delete ${provider} ${path_prefix}/${id} after ${attempt} attempt(s)" >&2
-      failed=1
-    fi
-  done
-
-  return "$failed"
-}
-
-smoke_run_tag() {
-  local run_id="$1"
-
-  if [[ -z "$run_id" ]]; then
-    return 0
-  fi
-  run_id="$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-16)"
-  printf 'gha-run-%s\n' "$run_id"
-}
-
-template_slug() {
-  case "$1" in
-    archivesspace) printf 'as\n' ;;
-    ojs) printf 'ojs\n' ;;
-    isle) printf 'isle\n' ;;
-    drupal) printf 'dr\n' ;;
-    wp) printf 'wp\n' ;;
-    omeka-s) printf 'os\n' ;;
-    omeka-classic) printf 'oc\n' ;;
-    *)
-      echo "Unknown smoke template: $1" >&2
-      exit 2
-      ;;
-  esac
-}
-
-provider_slug() {
-  case "$1" in
-    digitalocean) printf 'do\n' ;;
-    gcp) printf 'g\n' ;;
-    linode) printf 'ln\n' ;;
-    *)
-      echo "Unknown smoke provider: $1" >&2
-      exit 2
-      ;;
-  esac
-}
-
-target_name_prefix() {
-  local target="$1" provider template
-
-  provider="$(target_provider "$target")"
-  template="$(target_template "$target")"
-  printf 'cc-%s-%s\n' "$(provider_slug "$provider")" "$(template_slug "$template")"
-}
-
-provider_resource_ids() {
-  local target="$1" run_id="${2:-}" kind="$3"
-  local run_tag run_fragment provider name_prefix
-
-  run_tag="$(smoke_run_tag "$run_id")"
-  run_fragment=""
-  if [[ -n "$run_id" ]]; then
-    run_fragment="-$(printf '%s' "$run_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-16)-"
-  fi
-  provider="$(target_provider "$target")"
-  name_prefix="$(target_name_prefix "$target")"
-
-  case "${provider}:${kind}" in
-    digitalocean:firewalls)
-      api_get digitalocean "/firewalls?per_page=200" |
-        jq -r --arg name_prefix "${name_prefix}-" --arg run_fragment "$run_fragment" 'if (.firewalls | type) != "array" then error("DigitalOcean firewalls response is not an array") else .firewalls[] | select(.name | startswith($name_prefix)) | select($run_fragment == "" or (.name | contains($run_fragment))) | .id end'
-      ;;
-    digitalocean:droplets)
-      api_get digitalocean "/droplets?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.droplets | type) != "array" then error("DigitalOcean droplets response is not an array") else .droplets[] | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    digitalocean:volumes)
-      api_get digitalocean "/volumes?tag_name=cloud-compose-smoke&per_page=200" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.volumes | type) != "array" then error("DigitalOcean volumes response is not an array") else .volumes[] | select((.tags // []) | index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    linode:firewalls)
-      api_get linode "/networking/firewalls?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode firewalls response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    linode:instances)
-      api_get linode "/linode/instances?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode instances response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    linode:volumes)
-      api_get linode "/volumes?page_size=500" |
-        jq -r --arg target "$target" --arg run_tag "$run_tag" 'if (.data | type) != "array" then error("Linode volumes response data is not an array") else .data[] | select((.tags // []) | index("cloud-compose-smoke") and index($target)) | select($run_tag == "" or ((.tags // []) | index($run_tag))) | .id end'
-      ;;
-    *)
-      echo "Unknown provider resource kind: ${provider}:${kind}" >&2
-      return 2
-      ;;
-  esac
-}
-
-provider_cleanup_residuals() {
-  local target="$1" run_id="${2:-}" provider kind ids id index
-  local -a kinds path_prefixes
-
-  provider="$(target_provider "$target")"
-  case "$provider" in
-    digitalocean)
-      kinds=(firewalls droplets volumes)
-      path_prefixes=(/firewalls /droplets /volumes)
-      ;;
-    linode)
-      kinds=(firewalls instances volumes)
-      path_prefixes=(/networking/firewalls /linode/instances /volumes)
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-
-  for index in "${!kinds[@]}"; do
-    kind="${kinds[$index]}"
-    if ! ids="$(provider_resource_ids "$target" "$run_id" "$kind")"; then
-      return 1
-    fi
-    while IFS= read -r id; do
-      [[ -n "$id" ]] || continue
-      printf '%s%s\n' "${path_prefixes[$index]}/" "$id"
-    done <<<"$ids"
-  done
-}
-
-verify_no_provider_resources() {
-  local target="$1" run_id="${2:-}" attempt residuals
-
-  for attempt in {1..6}; do
-    if ! residuals="$(provider_cleanup_residuals "$target" "$run_id")"; then
-      echo "Could not verify provider cleanup for ${target}" >&2
-      return 1
-    fi
-    if [[ -z "$residuals" ]]; then
-      echo "Verified that no matching ${target} smoke resources remain"
-      return 0
-    fi
-    echo "Matching ${target} smoke resources remain after cleanup verification attempt ${attempt}:" >&2
-    printf '%s\n' "$residuals" >&2
-    if [[ "$attempt" -lt 6 ]]; then
-      sleep 10
-    fi
-  done
-
-  echo "Provider cleanup left matching ${target} smoke resources" >&2
-  return 1
-}
-
 provider_tag_cleanup() {
-  local target="$1" run_id="${2:-}" allow_all_runs="${3:-false}" provider kind index name_prefix
-  local cleanup_status=0
-  local -a kinds path_prefixes
+  local target="$1" run_id="${2:-}" allow_all_runs="${3:-false}" provider cleanup_binary
+  local -a cleanup_args
 
   provider="$(target_provider "$target")"
-  name_prefix="$(target_name_prefix "$target")"
+  cleanup_binary="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$cleanup_binary" ]]; then
+    echo "Missing compiled CI runner: ${cleanup_binary}; run 'make cloud-compose-ci' first" >&2
+    return 1
+  fi
+
   case "$provider" in
-    digitalocean)
-      kinds=(firewalls droplets volumes)
-      path_prefixes=(/firewalls /droplets /volumes)
-      ;;
-    linode)
-      kinds=(firewalls instances volumes)
-      path_prefixes=(/networking/firewalls /linode/instances /volumes)
+    digitalocean | linode)
+      cleanup_args=(
+        "$provider" sweep
+        --scope application
+        --target "$target"
+      )
       ;;
     gcp)
-      local cleanup_binary
-      local -a cleanup_args
-
-      cleanup_binary="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
-      if [[ ! -x "$cleanup_binary" ]]; then
-        echo "Missing compiled CI runner: ${cleanup_binary}; run 'make cloud-compose-ci' first" >&2
-        return 1
-      fi
       cleanup_args=(
         gcp sweep
         --project "$GCLOUD_PROJECT"
         --region "$(gcp_region)"
         --target "$target"
       )
-      if [[ -n "$run_id" ]]; then
-        cleanup_args+=(--run-id "$run_id")
-      elif [[ "$allow_all_runs" == "true" ]]; then
-        cleanup_args+=(--all-runs)
-      else
-        echo "GCP cleanup requires CLOUD_COMPOSE_SMOKE_RUN_ID; set CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true only for an intentional target-wide orphan sweep" >&2
-        return 1
-      fi
-      if ! "$cleanup_binary" "${cleanup_args[@]}"; then
-        cleanup_status=1
-      fi
       ;;
   esac
 
-  if [[ "$provider" == "digitalocean" || "$provider" == "linode" ]]; then
-    for index in "${!kinds[@]}"; do
-      kind="${kinds[$index]}"
-      provider_resource_ids "$target" "$run_id" "$kind" |
-        delete_ids "$provider" "${path_prefixes[$index]}" || cleanup_status=1
-      if [[ "$kind" == "droplets" || "$kind" == "instances" ]]; then
-        sleep 10
-      fi
-    done
-    if [[ "$cleanup_status" -eq 0 ]] && ! verify_no_provider_resources "$target" "$run_id"; then
-      cleanup_status=1
-    fi
+  if [[ -n "$run_id" ]]; then
+    cleanup_args+=(--run-id "$run_id")
+  elif [[ "$allow_all_runs" == "true" ]]; then
+    cleanup_args+=(--all-runs)
+  else
+    echo "Provider cleanup requires CLOUD_COMPOSE_SMOKE_RUN_ID; set CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true only for an intentional target-wide orphan sweep" >&2
+    return 1
   fi
 
-  return "$cleanup_status"
+  "$cleanup_binary" "${cleanup_args[@]}"
 }
 
 maybe_sweep_orphans() {
@@ -865,6 +573,7 @@ run_target() (
 
   ensure_key "$key_path"
   run_id="$(smoke_run_id)"
+  validate_smoke_run_id "$run_id"
   # Compute outside process substitution so an invalid hosted run ID aborts
   # before Terraform can create resources under an undiscoverable namespace.
   run_namespace="$(gcp_run_namespace "$target" "$run_id")"
@@ -1020,15 +729,9 @@ main() {
     sweep)
       for target in $(default_targets); do
         provider="$(target_provider "$target")"
-        case "$provider" in
-          digitalocean | linode)
-            require_cmd curl
-            require_cmd jq
-            ;;
-          gcp)
-            require_cmd gcloud
-            ;;
-        esac
+        if [[ "$provider" == "gcp" ]]; then
+          require_cmd gcloud
+        fi
         target_env "$target"
         provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}" "${CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS:-false}"
       done
@@ -1037,15 +740,9 @@ main() {
     sweep-*)
       target="${1#sweep-}"
       provider="$(target_provider "$target")"
-      case "$provider" in
-        digitalocean | linode)
-          require_cmd curl
-          require_cmd jq
-          ;;
-        gcp)
-          require_cmd gcloud
-          ;;
-      esac
+      if [[ "$provider" == "gcp" ]]; then
+        require_cmd gcloud
+      fi
       target_env "$target"
       provider_tag_cleanup "$target" "${CLOUD_COMPOSE_SMOKE_RUN_ID:-}" "${CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS:-false}"
       exit 0
@@ -1054,15 +751,10 @@ main() {
       target="${1#destroy-}"
       provider="$(target_provider "$target")"
       require_cmd terraform
-      case "$provider" in
-        digitalocean | linode)
-          require_cmd curl
-          require_cmd jq
-          ;;
-        gcp)
-          require_cmd gcloud
-          ;;
-      esac
+      require_cmd curl
+      if [[ "$provider" == "gcp" ]]; then
+        require_cmd gcloud
+      fi
       destroy_target "$target"
       exit 0
       ;;

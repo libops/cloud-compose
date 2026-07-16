@@ -52,6 +52,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Run Ansible and Salt smoke checks
         run: make config-management-smoke
@@ -79,10 +81,20 @@ jobs:
       CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT: "1800"
       CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS: "true"
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
-      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Build provider cloud CI runner
+        run: make cloud-compose-ci
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
@@ -91,10 +103,14 @@ jobs:
           terraform_wrapper: false
 
       - name: Run Linode config-management smoke test
+        env:
+          LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
         run: make config-management-cloud-smoke METHOD=${{ matrix.method }}
 
       - name: Destroy Linode config-management smoke resources
         if: always()
+        env:
+          LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
         run: ci/config-management-cloud-smoke.sh destroy-${{ matrix.method }}-drupal
 
   smoke:
@@ -125,12 +141,21 @@ jobs:
       CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS: "true"
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
       CLOUD_COMPOSE_SOURCE_REF: ${{ github.event.pull_request.head.sha }}
-      DIGITALOCEAN_TOKEN: ${{ matrix.provider == 'digitalocean' && secrets.DIGITALOCEAN_TOKEN || '' }}
-      LINODE_TOKEN: ${{ matrix.provider == 'linode' && secrets.LINODE_TOKEN || '' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Build provider cloud CI runner
+        run: make cloud-compose-ci
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
@@ -142,10 +167,16 @@ jobs:
         run: ci/install-sitectl-apt.sh
 
       - name: Run smoke test
+        env:
+          DIGITALOCEAN_TOKEN: ${{ matrix.provider == 'digitalocean' && secrets.DIGITALOCEAN_TOKEN || '' }}
+          LINODE_TOKEN: ${{ matrix.provider == 'linode' && secrets.LINODE_TOKEN || '' }}
         run: make smoke-test PROVIDER=${{ matrix.provider }} TEMPLATE=${{ matrix.template }}
 
       - name: Destroy smoke resources
         if: always()
+        env:
+          DIGITALOCEAN_TOKEN: ${{ matrix.provider == 'digitalocean' && secrets.DIGITALOCEAN_TOKEN || '' }}
+          LINODE_TOKEN: ${{ matrix.provider == 'linode' && secrets.LINODE_TOKEN || '' }}
         run: ci/cloud-smoke.sh destroy-${{ matrix.provider }}-${{ matrix.template }}
 
   gcp-smoke:

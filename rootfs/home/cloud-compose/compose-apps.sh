@@ -831,7 +831,7 @@ clone_or_update_compose_app() {
                 git merge --ff-only FETCH_HEAD || { popd >/dev/null; return 1; }
             fi
             local_head="$(git rev-parse --verify HEAD)" || { popd >/dev/null; return 1; }
-            fetched_head="$(git rev-parse --verify FETCH_HEAD)" || { popd >/dev/null; return 1; }
+            fetched_head="$(git rev-parse --verify 'FETCH_HEAD^{commit}')" || { popd >/dev/null; return 1; }
             if [[ "$local_head" != "$fetched_head" ]]; then
                 echo "Compose checkout did not converge exactly to fetched origin/$DOCKER_COMPOSE_BRANCH" >&2
                 popd >/dev/null

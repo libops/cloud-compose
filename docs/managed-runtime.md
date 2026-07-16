@@ -45,9 +45,9 @@ runtime = {
       "sitectl-isle",
     ]
     package_versions = {
-      sitectl          = "v0.39.0"
-      sitectl-drupal   = "v0.11.0"
-      sitectl-isle     = "v0.18.0"
+      sitectl          = "v0.40.0"
+      sitectl-drupal   = "v0.12.0"
+      sitectl-isle     = "v0.19.0"
     }
     plugin = "isle"
   }

@@ -28,6 +28,11 @@ output "internal_ip" {
   description = "Selected provider VM private IPv4 address."
 }
 
+output "network" {
+  value       = null
+  description = "GCP network details; always null for Linode."
+}
+
 output "volumes" {
   value       = module.linode.volumes
   description = "Selected provider persistent application-data and Docker-volume details."
