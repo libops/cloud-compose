@@ -1,0 +1,75 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.app.module.gcp[0].google_service_account.internal-services[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account.internal-services",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_project_iam_member.stackdriver[0]",
+      "previous_address": "module.app.module.gcp[0].google_project_iam_member.stackdriver",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_project_iam_member.gce-start[0]",
+      "change": {"actions": ["delete"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_project_iam_member.gce-suspend",
+      "change": {"actions": ["delete"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.gsa-user",
+      "change": {"actions": ["delete"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.token-creator",
+      "change": {"actions": ["delete"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.vault_agent_jwt_signer_policy[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.self_jwt_signer_policy",
+      "change": {"actions": ["delete"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_service_account_iam_member.app-keys[0]",
+      "previous_address": "module.app.module.gcp[0].google_service_account_iam_member.app-keys",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_instance_iam_member.gce-start[0]",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_instance_iam_member.gce-suspend[0]",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_disk.data",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_disk.docker-volumes",
+      "change": {"actions": ["no-op"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_disk.boot",
+      "change": {"actions": ["delete", "create"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].google_compute_instance.cloud-compose",
+      "change": {"actions": ["delete", "create"]}
+    },
+    {
+      "address": "module.app.module.gcp[0].data.google_project_iam_custom_role.gce-suspend",
+      "mode": "data",
+      "change": {"actions": ["delete"]}
+    }
+  ]
+}

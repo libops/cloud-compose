@@ -1,0 +1,52 @@
+{
+  "values": {
+    "root_module": {
+      "child_modules": [
+        {
+          "resources": [
+            {
+              "address": "module.app.module.gcp[0].google_compute_disk.data",
+              "values": {"id": "data-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_compute_disk.docker-volumes",
+              "values": {"id": "docker-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_compute_disk.boot",
+              "values": {"id": "same-boot-name", "disk_id": "boot-old"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_compute_instance.cloud-compose",
+              "values": {"id": "same-vm-name", "instance_id": "vm-old"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_service_account.internal-services",
+              "values": {"id": "sa-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys",
+              "values": {"id": "keys-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_project_iam_member.stackdriver",
+              "values": {"id": "metrics-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_service_account_iam_member.app-keys",
+              "values": {"id": "app-keys-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_project_iam_member.gce-start[0]",
+              "values": {"id": "legacy-start-1"}
+            },
+            {
+              "address": "module.app.module.gcp[0].google_project_iam_member.gce-suspend",
+              "values": {"id": "legacy-suspend-1"}
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

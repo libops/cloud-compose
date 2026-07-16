@@ -1,0 +1,9 @@
+module.app.module.gcp[0].google_service_account.internal-services
+module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys
+module.app.module.gcp[0].google_project_iam_member.stackdriver
+module.app.module.gcp[0].google_project_iam_member.gce-start[0]
+module.app.module.gcp[0].google_project_iam_member.gce-suspend
+module.app.module.gcp[0].google_service_account_iam_member.gsa-user
+module.app.module.gcp[0].google_service_account_iam_member.token-creator
+module.app.module.gcp[0].google_service_account_iam_member.self_jwt_signer_policy
+module.app.module.gcp[0].google_service_account_iam_member.app-keys

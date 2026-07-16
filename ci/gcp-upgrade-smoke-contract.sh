@@ -52,6 +52,15 @@ grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must be set explicitly outside GitHub Actio
   fail "manual upgrade runs can accidentally reuse an implicit cleanup scope"
 grep -Fq '"$runner" gcp namespace --run-id "$run_id"' "$script" ||
   fail "upgrade runner does not use the shared exact run-namespace codec"
+grep -Fq '"$runner" gcp upgrade check-plan --plan "$plan_json"' "$script" ||
+  fail "upgrade runner does not delegate Terraform plan policy to the compiled CI runner"
+grep -Fq '"$runner" gcp upgrade check-transition \' "$script" ||
+  fail "upgrade runner does not delegate state-transition policy to the compiled CI runner"
+grep -Fq '"$runner" gcp upgrade capture-ids --phase "$phase" --state "$state_json"' "$script" ||
+  fail "upgrade runner does not delegate immutable state identity capture to the compiled CI runner"
+if sed -n '/assert_upgrade_plan()/,/^}/p; /assert_state_transition()/,/^}/p; /write_phase_ids()/,/^}/p' "$script" | grep -Fq 'jq '; then
+  fail "upgrade plan, identity capture, or state-transition policy remains implemented in jq"
+fi
 grep -Fq 'name="cc-g-wp-${run_namespace}-up"' "$script" ||
   fail "upgrade resource names do not use the exact run namespace"
 grep -Fq 'cloud-compose-gcp-upgrade-${run_namespace}' "$script" ||
@@ -63,10 +72,6 @@ grep -Fq '/mnt/disks/data/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner omits the persistent data-disk sentinel"
 grep -Fq '/mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner omits the Docker-volume disk sentinel"
-grep -Fq 'capture_state_resource_attribute "$state_json" "$boot_disk_address" disk_id' "$script" ||
-  fail "upgrade runner does not compare the replaced boot disk's immutable numeric identity"
-grep -Fq 'capture_state_resource_attribute "$state_json" "$vm_address" instance_id' "$script" ||
-  fail "upgrade runner does not compare the replaced VM's immutable numeric identity"
 [[ "$(grep -Fc 'sudo tee /mnt/disks/data/.cloud-compose-upgrade-sentinel' "$script")" -eq 1 ]] ||
   fail "upgrade runner must write the data-disk sentinel exactly once"
 [[ "$(grep -Fc 'sudo tee /mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script")" -eq 1 ]] ||
@@ -76,8 +81,6 @@ grep -Fq 'backend "local" {}' "$fixture" ||
   fail "upgrade fixture does not declare the shared local backend"
 grep -Fq 'source = "../../.."' "$fixture" ||
   fail "upgrade fixture does not exercise the GCP-only compatibility root"
-grep -Fq 'readonly resource_prefix="module.app.module.gcp[0]"' "$script" ||
-  fail "upgrade runner does not preserve the root GCP module's indexed state address"
 grep -Fq 'create                   = false' "$fixture" ||
   fail "upgrade fixture still owns an ephemeral network"
 grep -Fq 'project_id               = var.gcp_network_project_id' "$fixture" ||
@@ -384,35 +387,6 @@ cat >"$tmp/good-plan.json" <<'EOF'
 EOF
 
 bash "$script" check-plan "$tmp/good-plan.json"
-
-cat >"$tmp/state-identities.json" <<'EOF'
-{
-  "values": {
-    "root_module": {
-      "resources": [
-        {
-          "address": "module.contract.google_compute_disk.boot",
-          "values": {"id": "projects/p/zones/z/disks/same-name", "disk_id": "111"}
-        },
-        {
-          "address": "module.contract.google_compute_instance.vm",
-          "values": {"id": "projects/p/zones/z/instances/same-name", "instance_id": "222"}
-        }
-      ]
-    }
-  }
-}
-EOF
-[[ "$(bash -c 'source "$1"; state_resource_attribute "$2" "$3" disk_id' _ \
-  "$script" "$tmp/state-identities.json" 'module.contract.google_compute_disk.boot')" == "111" ]] ||
-  fail "state identity reader did not select google_compute_disk.disk_id"
-[[ "$(bash -c 'source "$1"; state_resource_attribute "$2" "$3" instance_id' _ \
-  "$script" "$tmp/state-identities.json" 'module.contract.google_compute_instance.vm')" == "222" ]] ||
-  fail "state identity reader did not select google_compute_instance.instance_id"
-if bash -c 'source "$1"; capture_state_resource_attribute "$2" "$3" disk_id' _ \
-  "$script" "$tmp/state-identities.json" 'module.contract.google_compute_instance.vm' >/dev/null 2>&1; then
-  fail "state identity capture accepted a missing immutable provider attribute"
-fi
 
 jq '(.resource_changes[] | select(.address | endswith("stackdriver[0]")) | .previous_address) = "wrong"' \
   "$tmp/good-plan.json" >"$tmp/bad-move.json"

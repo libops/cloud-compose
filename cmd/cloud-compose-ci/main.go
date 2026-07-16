@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/libops/cloud-compose/internal/gcpcleanup"
 	"github.com/libops/cloud-compose/internal/providercleanup"
 	"github.com/libops/cloud-compose/internal/runnamespace"
+	"github.com/libops/cloud-compose/internal/upgradecheck"
 )
 
 type providerSweeper interface {
@@ -60,6 +62,8 @@ func run(
 			return runGCPNamespace(args[2:], stdout, stderr)
 		case "sweep":
 			return runGCPSweep(ctx, args[2:], getenv, stderr, commander, redactor)
+		case "upgrade":
+			return runGCPUpgradeCheck(args[2:], stdout, stderr)
 		default:
 			printUsage(stderr)
 			return 2
@@ -70,6 +74,123 @@ func run(
 			return 2
 		}
 		return runProviderSweep(ctx, args[0], args[2:], getenv, stderr, redactor, providerFactory)
+	default:
+		printUsage(stderr)
+		return 2
+	}
+}
+
+func runGCPUpgradeCheck(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printUsage(stderr)
+		return 2
+	}
+
+	switch args[0] {
+	case "check-plan":
+		flags := flag.NewFlagSet("cloud-compose-ci gcp upgrade check-plan", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		planPath := flags.String("plan", "", "Terraform plan JSON path")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*planPath) == "" {
+			fmt.Fprintln(stderr, "--plan is required and positional arguments are not accepted")
+			return 2
+		}
+
+		planFile, err := os.Open(*planPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "open Terraform plan JSON: %s\n", err)
+			return 1
+		}
+		defer planFile.Close()
+		if err := upgradecheck.ValidatePlan(planFile); err != nil {
+			fmt.Fprintf(stderr, "GCP upgrade plan check failed: %s\n", err)
+			return 1
+		}
+		return 0
+	case "capture-ids":
+		flags := flag.NewFlagSet("cloud-compose-ci gcp upgrade capture-ids", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		phase := flags.String("phase", "", "state phase: old or new")
+		statePath := flags.String("state", "", "Terraform state JSON path")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*phase) == "" || strings.TrimSpace(*statePath) == "" {
+			fmt.Fprintln(stderr, "--phase and --state are required and positional arguments are not accepted")
+			return 2
+		}
+
+		stateFile, err := os.Open(*statePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "open Terraform state JSON: %s\n", err)
+			return 1
+		}
+		defer stateFile.Close()
+		identities, err := upgradecheck.CaptureIDs(stateFile, *phase)
+		if err != nil {
+			fmt.Fprintf(stderr, "GCP upgrade state capture failed: %s\n", err)
+			return 1
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(identities); err != nil {
+			fmt.Fprintf(stderr, "write GCP upgrade resource identities: %s\n", err)
+			return 1
+		}
+		return 0
+	case "check-transition":
+		flags := flag.NewFlagSet("cloud-compose-ci gcp upgrade check-transition", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		oldIDsPath := flags.String("old-ids", "", "baseline resource-identity JSON path")
+		newIDsPath := flags.String("new-ids", "", "upgraded resource-identity JSON path")
+		oldStatePath := flags.String("old-state", "", "baseline Terraform state-list path")
+		newStatePath := flags.String("new-state", "", "upgraded Terraform state-list path")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if flags.NArg() != 0 ||
+			strings.TrimSpace(*oldIDsPath) == "" ||
+			strings.TrimSpace(*newIDsPath) == "" ||
+			strings.TrimSpace(*oldStatePath) == "" ||
+			strings.TrimSpace(*newStatePath) == "" {
+			fmt.Fprintln(stderr, "--old-ids, --new-ids, --old-state, and --new-state are required and positional arguments are not accepted")
+			return 2
+		}
+
+		files := make([]*os.File, 0, 4)
+		for _, input := range []struct {
+			label string
+			path  string
+		}{
+			{label: "baseline resource identities", path: *oldIDsPath},
+			{label: "upgraded resource identities", path: *newIDsPath},
+			{label: "baseline state list", path: *oldStatePath},
+			{label: "upgraded state list", path: *newStatePath},
+		} {
+			file, err := os.Open(input.path)
+			if err != nil {
+				for _, opened := range files {
+					_ = opened.Close()
+				}
+				fmt.Fprintf(stderr, "open %s: %s\n", input.label, err)
+				return 1
+			}
+			files = append(files, file)
+		}
+		defer func() {
+			for _, file := range files {
+				_ = file.Close()
+			}
+		}()
+
+		if err := upgradecheck.ValidateTransition(files[0], files[1], files[2], files[3]); err != nil {
+			fmt.Fprintf(stderr, "GCP upgrade state-transition check failed: %s\n", err)
+			return 1
+		}
+		return 0
 	default:
 		printUsage(stderr)
 		return 2
@@ -297,4 +418,7 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  cloud-compose-ci linode sweep [--scope application|config-management] --target TARGET (--run-id RUN_ID | --all-runs)")
 	fmt.Fprintln(writer, "  cloud-compose-ci gcp namespace --run-id RUN_ID")
 	fmt.Fprintln(writer, "  cloud-compose-ci gcp sweep [--project PROJECT] [--region REGION] [--target gcp-wp] (--run-id RUN_ID | --all-runs)")
+	fmt.Fprintln(writer, "  cloud-compose-ci gcp upgrade check-plan --plan PLAN_JSON")
+	fmt.Fprintln(writer, "  cloud-compose-ci gcp upgrade capture-ids --phase old|new --state STATE_JSON")
+	fmt.Fprintln(writer, "  cloud-compose-ci gcp upgrade check-transition --old-ids FILE --new-ids FILE --old-state FILE --new-state FILE")
 }
