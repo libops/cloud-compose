@@ -29,36 +29,38 @@ func TestTemplateVersionContract(t *testing.T) {
 
 	expectedVersions := map[string]map[string]string{
 		"default": {
-			"sitectl": "v0.40.0",
+			"sitectl": "v1.0.0",
 		},
 		"archivesspace": {
-			"sitectl":               "v0.40.0",
-			"sitectl-archivesspace": "v0.7.0",
+			"sitectl":               "v1.0.0",
+			"sitectl-archivesspace": "v1.0.0",
 		},
 		"drupal": {
-			"sitectl":        "v0.40.0",
-			"sitectl-drupal": "v0.12.0",
+			"sitectl":        "v1.0.0",
+			"sitectl-drupal": "v1.0.0",
 		},
+		// ISLE remains on its last released pre-v1 compatibility set until
+		// the outstanding ISLE components are ready for a coordinated v1.
 		"isle": {
 			"sitectl":        "v0.40.0",
 			"sitectl-drupal": "v0.12.0",
 			"sitectl-isle":   "v0.19.0",
 		},
 		"ojs": {
-			"sitectl":     "v0.40.0",
-			"sitectl-ojs": "v0.7.0",
+			"sitectl":     "v1.0.0",
+			"sitectl-ojs": "v1.0.0",
 		},
 		"omeka-classic": {
-			"sitectl":               "v0.40.0",
-			"sitectl-omeka-classic": "v0.7.0",
+			"sitectl":               "v1.0.0",
+			"sitectl-omeka-classic": "v1.0.0",
 		},
 		"omeka-s": {
-			"sitectl":         "v0.40.0",
-			"sitectl-omeka-s": "v0.7.0",
+			"sitectl":         "v1.0.0",
+			"sitectl-omeka-s": "v1.0.0",
 		},
 		"wp": {
-			"sitectl":    "v0.40.0",
-			"sitectl-wp": "v0.6.0",
+			"sitectl":    "v1.0.0",
+			"sitectl-wp": "v1.0.0",
 		},
 	}
 
@@ -120,5 +122,15 @@ func TestTemplateVersionContract(t *testing.T) {
 		requireContains(t, content, "if contains(keys(local.template.package_versions), package)", relativePath+" template package-version filter")
 		requireContains(t, content, "package_versions = merge(local.template_sitectl_package_versions, local.input_sitectl.package_versions)", relativePath+" explicit package-version override")
 		requireContains(t, content, "local.input_sitectl.packages == null ? local.template.packages : local.input_sitectl.packages", relativePath+" omitted-package handling")
+	}
+
+	for _, relativePath := range []string{"examples/binpack/main.tf", "docs/examples.md"} {
+		content := readRepositoryFile(t, root, relativePath)
+		for _, packageName := range []string{"sitectl", "sitectl-wp", "sitectl-drupal"} {
+			requireContains(t, content, packageName, relativePath+" bin-pack package")
+		}
+		requireContains(t, content, `sitectl        = "v1.0.0"`, relativePath+" bin-pack core selector")
+		requireContains(t, content, `sitectl-wp     = "v1.0.0"`, relativePath+" bin-pack WordPress selector")
+		requireContains(t, content, `sitectl-drupal = "v1.0.0"`, relativePath+" bin-pack Drupal selector")
 	}
 }

@@ -15,6 +15,12 @@ release set. Override individual selectors with
 `runtime.sitectl.package_versions` when intentionally testing or promoting a
 different compatible release set.
 
+All non-ISLE presets use the coordinated sitectl v1.0.0 core/plugin release.
+ISLE intentionally remains on its last released compatibility set—sitectl
+v0.40.0, sitectl-drupal v0.12.0, and sitectl-isle v0.19.0—until its remaining
+components are ready for a coordinated v1 release. Keep ISLE on that complete
+set rather than mixing its pre-v1 plugin with v1 packages.
+
 GCP deployments have two Terraform ownership layers. Apply
 [`modules/gcp-foundation`](modules/gcp-foundation/README.md) once per service
 project from a small, long-lived state; it owns required APIs, the Cloud Run

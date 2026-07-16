@@ -27,5 +27,12 @@ module "apps" {
         }
       }
     }
+    sitectl = {
+      package_versions = {
+        sitectl        = "v1.0.0"
+        sitectl-wp     = "v1.0.0"
+        sitectl-drupal = "v1.0.0"
+      }
+    }
   }
 }

@@ -263,8 +263,8 @@ assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
 assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
     "sitectl": "v0.40.0",
-    "sitectl-drupal": "v0.11.0",
-    "sitectl-isle": "v0.12.0",
+    "sitectl-drupal": "v0.12.0",
+    "sitectl-isle": "v0.19.0",
 }
 assert project["docker_compose_repo"] == "https://github.com/libops/isle"
 assert project["project_dir"] == "/mnt/disks/data/libops/isle/main"
@@ -447,8 +447,8 @@ assert Path(expected_project_dir).is_dir()
 
 if expected_name == "wp-prod":
     assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v0.40.0",
-        "sitectl-wp": "v0.10.0",
+        "sitectl": "v1.0.0",
+        "sitectl-wp": "v1.0.0",
     }
     assert "BASH_ENV" not in env
     assert "LD_PRELOAD" not in env
@@ -474,6 +474,11 @@ if expected_name == "wp-prod":
     assert "\t/usr/local/bin/contract-agent\t0750\troot\troot\tcloud-compose.service" in artifact_manifest
     assert not Path("/tmp/cloud-compose-salt-backtick-injection").exists()
     assert not Path("/tmp/cloud-compose-salt-command-injection").exists()
+elif expected_name == "drupal-prod":
+    assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
+        "sitectl": "v1.0.0",
+        "sitectl-drupal": "v1.0.0",
+    }
 
 for path in [
     "/home/cloud-compose/init",
