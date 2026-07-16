@@ -47,8 +47,9 @@
       sitectl:
         environment: production
         package_versions:
-          sitectl-drupal: v0.11.0
-          sitectl-isle: v0.12.0
+          sitectl: v0.40.0
+          sitectl-drupal: v0.12.0
+          sitectl-isle: v0.19.0
       managed_runtime:
         enabled: false
         internal_services_enabled: false

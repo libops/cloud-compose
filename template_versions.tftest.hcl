@@ -8,7 +8,60 @@ mock_provider "google" {
 }
 mock_provider "time" {}
 
-run "template_uses_released_package_set" {
+run "default_template_uses_v1_core" {
+  command = plan
+
+  variables {
+    name           = "template-versions"
+    cloud_provider = "gcp"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
+    runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      compose = {
+        repo = "https://github.com/libops/wp.git"
+      }
+    }
+  }
+
+  assert {
+    condition = local.sitectl.package_versions == {
+      sitectl = "v1.0.0"
+    }
+    error_message = "The default template must select the released sitectl v1 core."
+  }
+}
+
+run "non_isle_template_uses_v1_release_set" {
+  command = plan
+
+  variables {
+    name           = "template-versions"
+    cloud_provider = "gcp"
+    template       = "wp"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
+    runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  assert {
+    condition = local.sitectl.package_versions == {
+      sitectl    = "v1.0.0"
+      sitectl-wp = "v1.0.0"
+    }
+    error_message = "Non-ISLE templates must select their coordinated sitectl v1 release set."
+  }
+}
+
+run "isle_template_uses_released_pre_v1_package_set" {
   command = plan
 
   variables {
