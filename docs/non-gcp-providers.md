@@ -22,12 +22,12 @@ root retains its historical `module.gcp[0]` address and now loads only GCP-
 related providers. A GCP caller can move to `providers/gcp` later, but that is a
 separate state refactor and is not required to remove DigitalOcean or Linode.
 
-DigitalOcean and Linode callers must change the module source at 2.0.0 while
+DigitalOcean and Linode callers must change the module source at 1.3.0 while
 keeping the caller's module block name unchanged. For example:
 
 ```hcl
 module "site" {
-  source = "github.com/libops/cloud-compose//providers/do?ref=2.0.0"
+  source = "github.com/libops/cloud-compose//providers/do?ref=1.3.0"
 
   # Keep the existing name, template, digitalocean, and runtime values.
 }
@@ -42,7 +42,7 @@ The Linode equivalent is:
 
 ```hcl
 module "site" {
-  source = "github.com/libops/cloud-compose//providers/linode?ref=2.0.0"
+  source = "github.com/libops/cloud-compose//providers/linode?ref=1.3.0"
 
   # Keep the existing name, template, linode, and runtime values.
 }

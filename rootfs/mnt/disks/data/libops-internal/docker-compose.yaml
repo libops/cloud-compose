@@ -40,7 +40,7 @@ services:
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
   cap:
-    image: ghcr.io/libops/cap:main@sha256:13959cc4c78dec2ffff0c4c45d05d85587d08dc50c0cc40cb6088c4ead381ad4
+    image: ghcr.io/libops/cap:main@sha256:c9d6a6c2ded2d0a72ceff382fd71da9cd161c17c071319b45270b07c0f54a5ed
     command: ["/app/binary"]
     networks:
       - internal
