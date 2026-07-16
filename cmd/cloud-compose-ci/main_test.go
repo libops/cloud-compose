@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -242,6 +243,134 @@ func TestRunGCPNamespaceReportsOutputFailure(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "write namespace") {
 		t.Errorf("stderr omits output failure: %s", stderr.String())
+	}
+}
+
+func TestRunGCPUpgradeChecks(t *testing.T) {
+	t.Parallel()
+
+	fixture := func(name string) string {
+		return filepath.Join("..", "..", "internal", "upgradecheck", "testdata", name)
+	}
+	tests := []struct {
+		name       string
+		args       []string
+		wantOutput bool
+	}{
+		{
+			name: "plan",
+			args: []string{
+				"gcp", "upgrade", "check-plan",
+				"--plan", fixture("good-plan.json"),
+			},
+		},
+		{
+			name: "capture baseline identities",
+			args: []string{
+				"gcp", "upgrade", "capture-ids",
+				"--phase", "old",
+				"--state", fixture("old-state.json"),
+			},
+			wantOutput: true,
+		},
+		{
+			name: "state transition",
+			args: []string{
+				"gcp", "upgrade", "check-transition",
+				"--old-ids", fixture("old-ids.json"),
+				"--new-ids", fixture("new-ids.json"),
+				"--old-state", fixture("old-state.txt"),
+				"--new-state", fixture("new-state.txt"),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			status := run(
+				context.Background(),
+				test.args,
+				environmentGetter(nil),
+				&stdout,
+				&stderr,
+				&emptyGCloud{},
+				gcpcleanup.NewRedactor(),
+				nil,
+			)
+			if status != 0 {
+				t.Fatalf("run() status = %d, stderr = %s", status, stderr.String())
+			}
+			if test.wantOutput && !strings.Contains(stdout.String(), `"boot_disk": "boot-old"`) {
+				t.Fatalf("stdout omits captured identities: %q", stdout.String())
+			}
+			if !test.wantOutput && stdout.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("unexpected output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunGCPUpgradeChecksRequireExplicitFiles(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"gcp", "upgrade"},
+		{"gcp", "upgrade", "check-plan"},
+		{"gcp", "upgrade", "capture-ids"},
+		{"gcp", "upgrade", "check-transition"},
+	} {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			status := run(
+				context.Background(),
+				args,
+				environmentGetter(nil),
+				&stdout,
+				&stderr,
+				&emptyGCloud{},
+				gcpcleanup.NewRedactor(),
+				nil,
+			)
+			if status != 2 {
+				t.Fatalf("run() status = %d; want 2", status)
+			}
+		})
+	}
+}
+
+func TestRunGCPUpgradeCaptureReportsOutputFailure(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	status := run(
+		context.Background(),
+		[]string{
+			"gcp", "upgrade", "capture-ids",
+			"--phase", "old",
+			"--state", filepath.Join("..", "..", "internal", "upgradecheck", "testdata", "old-state.json"),
+		},
+		environmentGetter(nil),
+		failingWriter{},
+		&stderr,
+		&emptyGCloud{},
+		gcpcleanup.NewRedactor(),
+		nil,
+	)
+	if status != 1 {
+		t.Fatalf("run() status = %d; want 1", status)
+	}
+	if !strings.Contains(stderr.String(), "write GCP upgrade resource identities") {
+		t.Fatalf("stderr omits output failure: %s", stderr.String())
 	}
 }
 

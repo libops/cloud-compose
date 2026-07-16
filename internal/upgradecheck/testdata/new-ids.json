@@ -1,0 +1,12 @@
+{
+  "data_disk": "data-1",
+  "docker_disk": "docker-1",
+  "boot_disk": "boot-new",
+  "vm": "vm-new",
+  "internal_service_account": "sa-1",
+  "internal_service_keys": "keys-1",
+  "stackdriver": "metrics-1",
+  "app_key_admin": "app-keys-1",
+  "scoped_start": "scoped-start-1",
+  "scoped_suspend": "scoped-suspend-1"
+}

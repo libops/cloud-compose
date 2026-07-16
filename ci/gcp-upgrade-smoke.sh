@@ -11,46 +11,6 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 source "$script_dir/cloud-smoke.sh"
 
 readonly upgrade_base_sha="f33117cdbbf4a9c7d59006a4db986baef118e6bb"
-readonly resource_prefix="module.app.module.gcp[0]"
-readonly data_disk_address="${resource_prefix}.google_compute_disk.data"
-readonly docker_disk_address="${resource_prefix}.google_compute_disk.docker-volumes"
-readonly boot_disk_address="${resource_prefix}.google_compute_disk.boot"
-readonly vm_address="${resource_prefix}.google_compute_instance.cloud-compose"
-readonly legacy_start_address="${resource_prefix}.google_project_iam_member.gce-start[0]"
-readonly legacy_suspend_address="${resource_prefix}.google_project_iam_member.gce-suspend"
-readonly legacy_gsa_user_address="${resource_prefix}.google_service_account_iam_member.gsa-user"
-readonly legacy_vm_token_creator_address="${resource_prefix}.google_service_account_iam_member.token-creator"
-readonly legacy_app_token_creator_address="${resource_prefix}.google_service_account_iam_member.self_jwt_signer_policy"
-readonly conditional_app_token_creator_address="${resource_prefix}.google_service_account_iam_member.vault_agent_jwt_signer_policy[0]"
-readonly scoped_start_address="${resource_prefix}.google_compute_instance_iam_member.gce-start[0]"
-readonly scoped_suspend_address="${resource_prefix}.google_compute_instance_iam_member.gce-suspend[0]"
-readonly -a legacy_removed_from_addresses=(
-  "$legacy_start_address"
-  "$legacy_suspend_address"
-  "$legacy_gsa_user_address"
-  "$legacy_vm_token_creator_address"
-  "$legacy_app_token_creator_address"
-)
-readonly -a legacy_removed_to_addresses=(
-  "$legacy_start_address"
-  "$legacy_suspend_address"
-  "$legacy_gsa_user_address"
-  "$legacy_vm_token_creator_address"
-  "$conditional_app_token_creator_address"
-)
-
-readonly -a moved_from_addresses=(
-  "${resource_prefix}.google_service_account.internal-services"
-  "${resource_prefix}.google_service_account_iam_member.internal-services-keys"
-  "${resource_prefix}.google_project_iam_member.stackdriver"
-  "${resource_prefix}.google_service_account_iam_member.app-keys"
-)
-readonly -a moved_to_addresses=(
-  "${resource_prefix}.google_service_account.internal-services[0]"
-  "${resource_prefix}.google_service_account_iam_member.internal-services-keys[0]"
-  "${resource_prefix}.google_project_iam_member.stackdriver[0]"
-  "${resource_prefix}.google_service_account_iam_member.app-keys[0]"
-)
 
 usage() {
   cat <<'EOF'
@@ -212,258 +172,40 @@ validate_upgrade_network() {
 }
 
 assert_upgrade_plan() {
-  local plan_json="$1" index previous_address current_address
+  local plan_json="$1" runner
 
-  [[ -s "$plan_json" ]] || fail "plan JSON is missing: $plan_json"
-  jq -e '.format_version and (.resource_changes | type == "array")' "$plan_json" >/dev/null ||
-    fail "Terraform plan JSON is invalid"
-
-  for index in "${!moved_from_addresses[@]}"; do
-    previous_address="${moved_from_addresses[$index]}"
-    current_address="${moved_to_addresses[$index]}"
-    jq -e \
-      --arg previous "$previous_address" \
-      --arg current "$current_address" '
-        any(.resource_changes[]?;
-          .address == $current and
-          .previous_address == $previous and
-          ((.change.actions | index("delete")) == null)
-        )
-      ' "$plan_json" >/dev/null ||
-      fail "plan did not preserve moved resource ${previous_address} -> ${current_address}"
-  done
-
-  for current_address in "$data_disk_address" "$docker_disk_address"; do
-    jq -e --arg address "$current_address" '
-      any(.resource_changes[]?;
-        .address == $address and .change.actions == ["no-op"]
-      )
-    ' "$plan_json" >/dev/null ||
-      fail "persistent disk was not a no-op in the upgrade plan: ${current_address}"
-  done
-
-  for index in "${!legacy_removed_to_addresses[@]}"; do
-    previous_address="${legacy_removed_from_addresses[$index]}"
-    current_address="${legacy_removed_to_addresses[$index]}"
-    jq -e --arg address "$current_address" '
-      any(.resource_changes[]?;
-        .address == $address and .change.actions == ["delete"]
-      )
-    ' "$plan_json" >/dev/null ||
-      fail "upgrade plan did not remove the legacy over-broad IAM binding: ${current_address}"
-    if [[ "$previous_address" != "$current_address" ]]; then
-      jq -e --arg previous "$previous_address" --arg current "$current_address" '
-        any(.resource_changes[]?;
-          .address == $current and .previous_address == $previous
-        )
-      ' "$plan_json" >/dev/null ||
-        fail "plan did not preserve moved-resource provenance before removing ${previous_address}"
-    fi
-  done
-
-  for current_address in "$scoped_start_address" "$scoped_suspend_address"; do
-    jq -e --arg address "$current_address" '
-      any(.resource_changes[]?;
-        .address == $address and .change.actions == ["create"]
-      )
-    ' "$plan_json" >/dev/null ||
-      fail "upgrade plan did not create the instance-scoped power binding: ${current_address}"
-  done
-
-  jq -e \
-    --arg boot "$boot_disk_address" \
-    --arg vm "$vm_address" \
-    --arg legacy_start "$legacy_start_address" \
-    --arg legacy_suspend "$legacy_suspend_address" \
-    --arg legacy_gsa_user "$legacy_gsa_user_address" \
-    --arg legacy_vm_token_creator "$legacy_vm_token_creator_address" \
-    --arg conditional_app_token_creator "$conditional_app_token_creator_address" '
-      def replacement:
-        . == ["delete", "create"] or . == ["create", "delete"];
-
-      ([
-        .resource_changes[]? |
-        select((.mode // "managed") == "managed") |
-        select(.change.actions | index("delete")) |
-        .address
-      ] | sort) == ([$boot, $vm, $legacy_start, $legacy_suspend, $legacy_gsa_user, $legacy_vm_token_creator, $conditional_app_token_creator] | sort) and
-      all(.resource_changes[]?;
-        if (.mode // "managed") == "data" then
-          true
-        elif .address == $boot or .address == $vm then
-          (.change.actions | replacement)
-        elif .address == $legacy_start or
-             .address == $legacy_suspend or
-             .address == $legacy_gsa_user or
-             .address == $legacy_vm_token_creator or
-             .address == $conditional_app_token_creator then
-          .change.actions == ["delete"]
-        else
-          ((.change.actions | index("delete")) == null)
-        end
-      )
-    ' "$plan_json" >/dev/null ||
-    fail "upgrade plan contained a managed-resource deletion beyond the expected VM/boot replacements and legacy IAM removals"
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    fail "compiled CI runner is missing at ${runner}; run 'make cloud-compose-ci' first"
+    return 1
+  fi
+  "$runner" gcp upgrade check-plan --plan "$plan_json"
 }
 
 assert_state_transition() {
-  local old_ids="$1" new_ids="$2" old_state_list="$3" new_state_list="$4"
-  local key address index previous_address current_address
+  local old_ids="$1" new_ids="$2" old_state_list="$3" new_state_list="$4" runner
 
-  for key in data_disk docker_disk internal_service_account internal_service_keys stackdriver app_key_admin; do
-    jq -ne \
-      --slurpfile old "$old_ids" \
-      --slurpfile new "$new_ids" \
-      --arg key "$key" '
-        ($old[0][$key] | type == "string" and length > 0) and
-        $old[0][$key] == $new[0][$key]
-      ' >/dev/null ||
-      fail "resource identity changed across the upgrade: ${key}"
-  done
-
-  for key in boot_disk vm; do
-    jq -ne \
-      --slurpfile old "$old_ids" \
-      --slurpfile new "$new_ids" \
-      --arg key "$key" '
-        ($old[0][$key] | type == "string" and length > 0) and
-        ($new[0][$key] | type == "string" and length > 0) and
-        $old[0][$key] != $new[0][$key]
-      ' >/dev/null ||
-      fail "expected replacement did not change resource identity: ${key}"
-  done
-
-  for key in legacy_start legacy_suspend; do
-    jq -e --arg key "$key" '.[$key] | type == "string" and length > 0' "$old_ids" >/dev/null ||
-      fail "baseline state did not capture the legacy project-wide power binding: ${key}"
-  done
-  for key in scoped_start scoped_suspend; do
-    jq -e --arg key "$key" '.[$key] | type == "string" and length > 0' "$new_ids" >/dev/null ||
-      fail "upgraded state did not capture the instance-scoped power binding: ${key}"
-  done
-
-  for address in "${moved_from_addresses[@]}"; do
-    grep -Fxq "$address" "$old_state_list" ||
-      fail "baseline state did not contain expected legacy address: ${address}"
-    if grep -Fxq "$address" "$new_state_list"; then
-      fail "upgraded state retained legacy address: ${address}"
-    fi
-  done
-  for address in "${moved_to_addresses[@]}"; do
-    grep -Fxq "$address" "$new_state_list" ||
-      fail "upgraded state did not contain moved address: ${address}"
-  done
-  for index in "${!legacy_removed_from_addresses[@]}"; do
-    previous_address="${legacy_removed_from_addresses[$index]}"
-    current_address="${legacy_removed_to_addresses[$index]}"
-    grep -Fxq "$previous_address" "$old_state_list" ||
-      fail "baseline state did not contain expected legacy IAM binding: ${previous_address}"
-    if grep -Fxq "$previous_address" "$new_state_list" || grep -Fxq "$current_address" "$new_state_list"; then
-      fail "upgraded state retained legacy IAM binding: ${previous_address}"
-    fi
-  done
-  for address in "$scoped_start_address" "$scoped_suspend_address"; do
-    if grep -Fxq "$address" "$old_state_list"; then
-      fail "baseline state unexpectedly contained current instance-scoped power binding: ${address}"
-    fi
-    grep -Fxq "$address" "$new_state_list" ||
-      fail "upgraded state did not contain instance-scoped power binding: ${address}"
-  done
-}
-
-state_resource_attribute() {
-  local state_json="$1" address="$2" attribute="${3:-id}"
-
-  jq -er --arg address "$address" --arg attribute "$attribute" '
-    def all_resources:
-      .resources[]?,
-      (.child_modules[]? | all_resources);
-
-    .values.root_module |
-    all_resources |
-    select(.address == $address) |
-    .values[$attribute] |
-    select(type == "string" and length > 0)
-  ' "$state_json"
-}
-
-capture_state_resource_attribute() {
-  local state_json="$1" address="$2" attribute="${3:-id}"
-  local value
-
-  if ! value="$(state_resource_attribute "$state_json" "$address" "$attribute")"; then
-    fail "state did not expose ${attribute} for ${address}"
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    fail "compiled CI runner is missing at ${runner}; run 'make cloud-compose-ci' first"
     return 1
   fi
-  printf '%s\n' "$value"
+  "$runner" gcp upgrade check-transition \
+    --old-ids "$old_ids" \
+    --new-ids "$new_ids" \
+    --old-state "$old_state_list" \
+    --new-state "$new_state_list"
 }
 
 write_phase_ids() {
-  local phase="$1" state_json="$2" destination="$3"
-  local internal_service_account internal_service_keys stackdriver app_key_admin start_binding suspend_binding
-  local data_disk_id docker_disk_id boot_disk_id vm_id internal_service_account_id
-  local internal_service_keys_id stackdriver_id app_key_admin_id start_binding_id suspend_binding_id
+  local phase="$1" state_json="$2" destination="$3" runner
 
-  case "$phase" in
-    old)
-      internal_service_account="${moved_from_addresses[0]}"
-      internal_service_keys="${moved_from_addresses[1]}"
-      stackdriver="${moved_from_addresses[2]}"
-      app_key_admin="${moved_from_addresses[3]}"
-      start_binding="$legacy_start_address"
-      suspend_binding="$legacy_suspend_address"
-      ;;
-    new)
-      internal_service_account="${moved_to_addresses[0]}"
-      internal_service_keys="${moved_to_addresses[1]}"
-      stackdriver="${moved_to_addresses[2]}"
-      app_key_admin="${moved_to_addresses[3]}"
-      start_binding="$scoped_start_address"
-      suspend_binding="$scoped_suspend_address"
-      ;;
-    *) fail "unknown state-capture phase: $phase" ;;
-  esac
-
-  data_disk_id="$(capture_state_resource_attribute "$state_json" "$data_disk_address")" || return 1
-  docker_disk_id="$(capture_state_resource_attribute "$state_json" "$docker_disk_address")" || return 1
-  boot_disk_id="$(capture_state_resource_attribute "$state_json" "$boot_disk_address" disk_id)" || return 1
-  vm_id="$(capture_state_resource_attribute "$state_json" "$vm_address" instance_id)" || return 1
-  internal_service_account_id="$(capture_state_resource_attribute "$state_json" "$internal_service_account")" || return 1
-  internal_service_keys_id="$(capture_state_resource_attribute "$state_json" "$internal_service_keys")" || return 1
-  stackdriver_id="$(capture_state_resource_attribute "$state_json" "$stackdriver")" || return 1
-  app_key_admin_id="$(capture_state_resource_attribute "$state_json" "$app_key_admin")" || return 1
-  start_binding_id="$(capture_state_resource_attribute "$state_json" "$start_binding")" || return 1
-  suspend_binding_id="$(capture_state_resource_attribute "$state_json" "$suspend_binding")" || return 1
-
-  jq -n \
-    --arg data_disk "$data_disk_id" \
-    --arg docker_disk "$docker_disk_id" \
-    --arg boot_disk "$boot_disk_id" \
-    --arg vm "$vm_id" \
-    --arg internal_service_account "$internal_service_account_id" \
-    --arg internal_service_keys "$internal_service_keys_id" \
-    --arg stackdriver "$stackdriver_id" \
-    --arg app_key_admin "$app_key_admin_id" \
-    --arg start_binding "$start_binding_id" \
-    --arg suspend_binding "$suspend_binding_id" \
-    --arg phase "$phase" '
-      ({
-        data_disk: $data_disk,
-        docker_disk: $docker_disk,
-        boot_disk: $boot_disk,
-        vm: $vm,
-        internal_service_account: $internal_service_account,
-        internal_service_keys: $internal_service_keys,
-        stackdriver: $stackdriver,
-        app_key_admin: $app_key_admin
-      }) + if $phase == "old" then {
-        legacy_start: $start_binding,
-        legacy_suspend: $suspend_binding
-      } else {
-        scoped_start: $start_binding,
-        scoped_suspend: $suspend_binding
-      } end
-    ' >"$destination"
+  runner="${CLOUD_COMPOSE_CI_BIN:-$repo_root/.bin/cloud-compose-ci}"
+  if [[ ! -x "$runner" ]]; then
+    fail "compiled CI runner is missing at ${runner}; run 'make cloud-compose-ci' first"
+    return 1
+  fi
+  "$runner" gcp upgrade capture-ids --phase "$phase" --state "$state_json" >"$destination"
   chmod 0600 "$destination"
 }
 
@@ -1045,12 +787,10 @@ upgrade_main() {
       ;;
     check-plan)
       [[ "$#" -eq 2 ]] || { usage >&2; return 2; }
-      require_cmd jq
       assert_upgrade_plan "$2"
       ;;
     check-transition)
       [[ "$#" -eq 5 ]] || { usage >&2; return 2; }
-      require_cmd jq
       assert_state_transition "$2" "$3" "$4" "$5"
       ;;
     *)

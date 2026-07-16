@@ -1,0 +1,6 @@
+module.app.module.gcp[0].google_service_account.internal-services[0]
+module.app.module.gcp[0].google_service_account_iam_member.internal-services-keys[0]
+module.app.module.gcp[0].google_project_iam_member.stackdriver[0]
+module.app.module.gcp[0].google_compute_instance_iam_member.gce-start[0]
+module.app.module.gcp[0].google_compute_instance_iam_member.gce-suspend[0]
+module.app.module.gcp[0].google_service_account_iam_member.app-keys[0]
