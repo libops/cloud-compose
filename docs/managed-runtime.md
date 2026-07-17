@@ -26,10 +26,11 @@ core and plugins independently. The provider-neutral
 backward-compatible fallback only for an installed package with neither a
 template selector nor an explicit per-package selector.
 
-The ISLE preset is an intentional temporary exception to the v1 defaults. It
-stays on sitectl v0.40.0, sitectl-drupal v0.12.0, and sitectl-isle v0.19.0 until
-the remaining ISLE components can ship together as v1. Do not combine the
-pre-v1 ISLE plugin with the v1 core or Drupal plugin.
+All presets select coordinated sitectl v1 release packages. The ISLE preset
+uses the `libops/isle` v1.1.0 template with sitectl, sitectl-drupal, and
+sitectl-isle v1.0.0. Every other application preset remains on its v1.0.0
+template contract. Override the template or package selectors only as one
+reviewed, compatible release set.
 
 Omitting `runtime.sitectl.packages` selects the template's package set. An
 explicit list replaces that set; `packages = []` or `packages = ["sitectl"]`
@@ -50,9 +51,9 @@ runtime = {
       "sitectl-isle",
     ]
     package_versions = {
-      sitectl          = "v0.40.0"
-      sitectl-drupal   = "v0.12.0"
-      sitectl-isle     = "v0.19.0"
+      sitectl          = "v1.0.0"
+      sitectl-drupal   = "v1.0.0"
+      sitectl-isle     = "v1.0.0"
     }
     plugin = "isle"
   }

@@ -262,9 +262,9 @@ assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
 assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-    "sitectl": "v0.40.0",
-    "sitectl-drupal": "v0.12.0",
-    "sitectl-isle": "v0.19.0",
+    "sitectl": "v1.0.0",
+    "sitectl-drupal": "v1.0.0",
+    "sitectl-isle": "v1.0.0",
 }
 assert project["docker_compose_repo"] == "https://github.com/libops/isle"
 assert project["project_dir"] == "/mnt/disks/data/libops/isle/main"

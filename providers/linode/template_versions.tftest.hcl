@@ -1,4 +1,3 @@
-mock_provider "cloudinit" {}
 mock_provider "linode" {}
 
 run "custom_package_set_merges_only_applicable_template_versions" {
@@ -32,6 +31,16 @@ run "custom_package_set_merges_only_applicable_template_versions" {
     }
     error_message = "The Linode entrypoint must filter template selectors and preserve explicit overrides."
   }
+
+  assert {
+    condition     = local.runtime.compose.branch == "v1.1.0"
+    error_message = "The Linode entrypoint must inherit the ISLE v1.1.0 template branch when no override is supplied."
+  }
+
+  assert {
+    condition     = local.runtime.extra_env.ISLANDORA_TAG == "6.3.19"
+    error_message = "The Linode ISLE preset must supply its required application environment."
+  }
 }
 
 run "explicit_core_only_package_set_disables_template_plugins" {
@@ -56,7 +65,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v0.40.0"
+      sitectl = "v1.0.0"
     }
     error_message = "The Linode entrypoint must preserve an explicit core-only package set."
   }

@@ -122,7 +122,9 @@ The generated app env file exports `COMPOSE_BIND_PORT` for that purpose.
 
 `docker_compose_branch` (the `runtime.compose.branch` input at the public
 module boundary) accepts either a branch/tag name or a full 40-character Git
-commit. The source-preparation and `init` phases follow a configured moving ref.
+commit. When the public input is omitted or empty, the selected template
+preset supplies its reviewed branch; the no-preset registry default remains
+`main`. The source-preparation and `init` phases follow a configured moving ref.
 An ordinary `up` or service restart instead validates and preserves the commit
 selected by the last successful init or rollout. This keeps a detached feature
 or pull-request deployment operable until an explicit rollout selects another

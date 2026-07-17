@@ -2,10 +2,6 @@ terraform {
   required_version = ">= 1.3.0"
 
   required_providers {
-    cloudinit = {
-      source  = "hashicorp/cloudinit"
-      version = "~> 2.3"
-    }
     digitalocean = {
       source  = "digitalocean/digitalocean"
       version = "~> 2.0"
@@ -35,6 +31,7 @@ locals {
   }
 
   runtime = merge(var.runtime, {
+    extra_env = merge(try(local.template.extra_env, {}), var.runtime.extra_env)
     compose = merge(local.input_compose, {
       repo = (
         trimspace(local.input_compose.repo) != ""
