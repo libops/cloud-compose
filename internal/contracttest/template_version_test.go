@@ -14,6 +14,7 @@ type templateRegistry struct {
 
 type templateDefinition struct {
 	Branch          string            `json:"branch"`
+	ExtraEnv        map[string]string `json:"extra_env"`
 	Packages        []string          `json:"packages"`
 	PackageVersions map[string]string `json:"package_versions"`
 }
@@ -86,6 +87,13 @@ func TestTemplateVersionContract(t *testing.T) {
 		if definition.Branch != expectedBranch {
 			t.Errorf("template %q branch = %q, want stable contract %s", name, definition.Branch, expectedBranch)
 		}
+		expectedExtraEnv := map[string]string{}
+		if name == "isle" {
+			expectedExtraEnv["ISLANDORA_TAG"] = "6.3.19"
+		}
+		if !maps.Equal(definition.ExtraEnv, expectedExtraEnv) {
+			t.Errorf("template %q application environment diverged:\nexpected %s\nactual   %s", name, prettyJSON(t, expectedExtraEnv), prettyJSON(t, definition.ExtraEnv))
+		}
 	}
 
 	checkPackageVersionKeys := func(name string, definition templateDefinition) {
@@ -124,6 +132,7 @@ func TestTemplateVersionContract(t *testing.T) {
 		requireContains(t, content, "if contains(keys(local.template.package_versions), package)", relativePath+" template package-version filter")
 		requireContains(t, content, "package_versions = merge(local.template_sitectl_package_versions, local.input_sitectl.package_versions)", relativePath+" explicit package-version override")
 		requireContains(t, content, "local.input_sitectl.packages == null ? local.template.packages : local.input_sitectl.packages", relativePath+" omitted-package handling")
+		requireContains(t, content, "extra_env = merge(try(local.template.extra_env, {}), var.runtime.extra_env)", relativePath+" template application environment merge")
 	}
 
 	for _, relativePath := range []string{"examples/binpack/main.tf", "docs/examples.md"} {

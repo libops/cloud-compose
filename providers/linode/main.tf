@@ -31,6 +31,7 @@ locals {
   }
 
   runtime = merge(var.runtime, {
+    extra_env = merge(try(local.template.extra_env, {}), var.runtime.extra_env)
     compose = merge(local.input_compose, {
       repo = (
         trimspace(local.input_compose.repo) != ""

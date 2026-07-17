@@ -31,6 +31,11 @@ run "custom_package_set_merges_only_applicable_template_versions" {
     condition     = local.runtime.compose.branch == "v1.1.0"
     error_message = "The DigitalOcean entrypoint must inherit the ISLE v1.1.0 template branch when no override is supplied."
   }
+
+  assert {
+    condition     = local.runtime.extra_env.ISLANDORA_TAG == "6.3.19"
+    error_message = "The DigitalOcean ISLE preset must supply its required application environment."
+  }
 }
 
 run "explicit_core_only_package_set_disables_template_plugins" {

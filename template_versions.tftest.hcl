@@ -101,6 +101,45 @@ run "isle_template_uses_v1_release_set" {
     condition     = local.compose.branch == "v1.1.0"
     error_message = "The ISLE preset must select the stable v1.1.0 template contract."
   }
+
+  assert {
+    condition = (
+      length(keys(local.runtime.extra_env)) == 1 &&
+      local.runtime.extra_env.ISLANDORA_TAG == "6.3.19"
+    )
+    error_message = "The ISLE preset must supply the minimum supported Islandora image tag."
+  }
+}
+
+run "explicit_application_environment_overrides_template_defaults" {
+  command = plan
+
+  variables {
+    name           = "template-versions"
+    cloud_provider = "gcp"
+    template       = "isle"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
+    runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      extra_env = {
+        ISLANDORA_TAG = "6.3.20"
+        SITE_LABEL    = "repository"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(keys(local.runtime.extra_env)) == 2 &&
+      local.runtime.extra_env.ISLANDORA_TAG == "6.3.20" &&
+      local.runtime.extra_env.SITE_LABEL == "repository"
+    )
+    error_message = "Explicit application environment must override preset defaults without dropping additional values."
+  }
 }
 
 run "explicit_package_versions_override_template_defaults" {
