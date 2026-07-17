@@ -31,13 +31,13 @@
     },
     "isle": {
       "repo": "https://github.com/libops/isle",
-      "branch": "v1.0.0",
+      "branch": "v1.1.0",
       "plugin": "isle",
       "packages": ["sitectl", "sitectl-drupal", "sitectl-isle"],
       "package_versions": {
-        "sitectl": "v0.40.0",
-        "sitectl-drupal": "v0.12.0",
-        "sitectl-isle": "v0.19.0"
+        "sitectl": "v1.0.0",
+        "sitectl-drupal": "v1.0.0",
+        "sitectl-isle": "v1.0.0"
       }
     },
     "drupal": {

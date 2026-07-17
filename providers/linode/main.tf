@@ -2,10 +2,6 @@ terraform {
   required_version = ">= 1.3.0"
 
   required_providers {
-    cloudinit = {
-      source  = "hashicorp/cloudinit"
-      version = "~> 2.3"
-    }
     linode = {
       source  = "linode/linode"
       version = "~> 4.0"

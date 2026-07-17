@@ -34,10 +34,10 @@ validate_public_provider_graph() {
       expected_sources=$'hashicorp/cloudinit\nhashicorp/google\nhashicorp/time'
       ;;
     providers/do)
-      expected_sources=$'digitalocean/digitalocean\nhashicorp/cloudinit'
+      expected_sources='digitalocean/digitalocean'
       ;;
     providers/linode)
-      expected_sources=$'hashicorp/cloudinit\nlinode/linode'
+      expected_sources='linode/linode'
       ;;
     *)
       return 0

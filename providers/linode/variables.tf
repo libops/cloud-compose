@@ -88,7 +88,7 @@ variable "runtime" {
         upload_timeout  = optional(string, "")
       }), {})
       repo   = optional(string, "")
-      branch = optional(string, "main")
+      branch = optional(string, "")
       projects = optional(map(object({
         docker_compose_repo   = string
         docker_compose_branch = optional(string)
