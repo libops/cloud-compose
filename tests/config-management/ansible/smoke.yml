@@ -47,9 +47,9 @@
       sitectl:
         environment: production
         package_versions:
-          sitectl: v0.40.0
-          sitectl-drupal: v0.12.0
-          sitectl-isle: v0.19.0
+          sitectl: v1.0.0
+          sitectl-drupal: v1.0.0
+          sitectl-isle: v1.0.0
       managed_runtime:
         enabled: false
         internal_services_enabled: false
@@ -119,7 +119,7 @@
           - '(cloud_compose_application_env_file.content | b64decode | from_json).PORT == "9999"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].docker_compose_repo == "https://github.com/libops/isle"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].project_dir == "/mnt/disks/data/libops/isle/main"'
-          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].compose_project_name == "libops-isle-v1-0-0"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].compose_project_name == "libops-isle-v1-1-0"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].ingress.domain == "isle.example.edu"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].sitectl_plugin == "isle"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].init_commands == []'
