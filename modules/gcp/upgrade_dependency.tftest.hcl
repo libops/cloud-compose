@@ -32,6 +32,11 @@ variables {
   vault_auth_method          = "gcp-iam"
   vault_addr                 = "https://vault.example"
   vault_role                 = "wordpress"
+  disk_attachments = {
+    mariadb-backups = {
+      source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+    }
+  }
 }
 
 run "apply_power_managed_vault_baseline" {
@@ -54,8 +59,16 @@ run "plan_vm_replacement_while_retiring_vault_signer" {
       length(google_compute_instance_iam_member.gce-start) == 1 &&
       length(google_compute_instance_iam_member.gce-suspend) == 1 &&
       google_compute_instance_iam_member.gce-start[0].instance_name == google_compute_instance.cloud-compose.name &&
-      google_compute_instance_iam_member.gce-suspend[0].instance_name == google_compute_instance.cloud-compose.name
+      google_compute_instance_iam_member.gce-suspend[0].instance_name == google_compute_instance.cloud-compose.name &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "mariadb-backups"
+      ]).source == "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups" &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "mariadb-backups"
+      ]).mode == "READ_WRITE"
     )
-    error_message = "A VM replacement must retain both instance-scoped power bindings without introducing an upgrade dependency cycle."
+    error_message = "A VM replacement must retain instance-scoped power bindings and caller-owned disks without introducing an upgrade dependency cycle."
   }
 }

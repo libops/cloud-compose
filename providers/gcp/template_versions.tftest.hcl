@@ -73,6 +73,35 @@ run "explicit_core_only_package_set_disables_template_plugins" {
   }
 }
 
+run "gcp_entrypoint_forwards_caller_owned_disks" {
+  command = plan
+
+  variables {
+    name     = "template-versions"
+    template = "wp"
+    gcp = {
+      project_id = "test-project"
+      disks = {
+        attachments = {
+          mariadb-backups = {
+            source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = output.instance.attached_disks == {
+      mariadb-backups = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+        mode   = "READ_WRITE"
+      }
+    }
+    error_message = "The GCP entrypoint must forward caller-owned disks into the VM's inline attachment set."
+  }
+}
+
 run "accepts_direct_cloud_run_proxy_depth" {
   command = plan
 

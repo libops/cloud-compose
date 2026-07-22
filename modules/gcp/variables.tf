@@ -179,6 +179,48 @@ variable "disk_size_gb" {
   description = "Data disk size in GB"
 }
 
+variable "disk_attachments" {
+  type = map(object({
+    source = string
+    mode   = optional(string, "READ_WRITE")
+  }))
+  default     = {}
+  description = "Caller-owned persistent disks to attach inline to the VM, keyed by GCE device name. The caller retains disk lifecycle ownership."
+
+  validation {
+    condition = alltrue([
+      for device_name in keys(var.disk_attachments) :
+      can(regex("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", device_name)) &&
+      !contains(["boot", "data", "docker-volumes", "prod-volumes"], device_name)
+    ])
+    error_message = "disk_attachments keys must be valid GCE device names and must not use boot, data, docker-volumes, or prod-volumes."
+  }
+
+  validation {
+    condition = alltrue([
+      for attachment in values(var.disk_attachments) :
+      trimspace(attachment.source) != ""
+    ])
+    error_message = "disk_attachments sources must not be empty."
+  }
+
+  validation {
+    condition = alltrue([
+      for attachment in values(var.disk_attachments) :
+      contains(["READ_ONLY", "READ_WRITE"], attachment.mode)
+    ])
+    error_message = "disk_attachments modes must be READ_ONLY or READ_WRITE."
+  }
+
+  validation {
+    condition = length(distinct([
+      for attachment in values(var.disk_attachments) :
+      trimspace(attachment.source)
+    ])) == length(var.disk_attachments)
+    error_message = "disk_attachments must not attach the same source more than once."
+  }
+}
+
 variable "os" {
   type        = string
   default     = "cos-125-19216-220-185"

@@ -88,6 +88,137 @@ run "disables_privileged_services_by_default" {
   }
 }
 
+run "attaches_caller_owned_disks_inline" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      mariadb-backups = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+      }
+      reference-data = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/reference-data"
+        mode   = "READ_ONLY"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(google_compute_instance.cloud-compose.attached_disk) == 4 &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "mariadb-backups"
+      ]).source == "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups" &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "mariadb-backups"
+      ]).mode == "READ_WRITE" &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "reference-data"
+      ]).source == "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/reference-data" &&
+      one([
+        for disk in google_compute_instance.cloud-compose.attached_disk : disk
+        if disk.device_name == "reference-data"
+      ]).mode == "READ_ONLY"
+    )
+    error_message = "Caller-owned disks must be part of the VM's authoritative inline attachment set with explicit modes."
+  }
+}
+
+run "rejects_reserved_disk_attachment_name" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      data = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/extra-data"
+      }
+    }
+  }
+
+  expect_failures = [var.disk_attachments]
+}
+
+run "rejects_invalid_disk_attachment_name" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      "Invalid_Name" = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/invalid-name"
+      }
+    }
+  }
+
+  expect_failures = [var.disk_attachments]
+}
+
+run "rejects_blank_disk_attachment_source" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      backups = {
+        source = "   "
+      }
+    }
+  }
+
+  expect_failures = [var.disk_attachments]
+}
+
+run "rejects_invalid_disk_attachment_mode" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      backups = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/backups"
+        mode   = "READ_MOSTLY"
+      }
+    }
+  }
+
+  expect_failures = [var.disk_attachments]
+}
+
+run "rejects_duplicate_disk_attachment_source" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    disk_attachments = {
+      backups-a = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/backups"
+      }
+      backups-b = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/backups"
+      }
+    }
+  }
+
+  expect_failures = [var.disk_attachments]
+}
+
 run "creates_app_key_management_only_when_explicitly_enabled" {
   command = plan
 

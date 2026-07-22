@@ -29,13 +29,19 @@ output "instance" {
       name      = google_compute_disk.docker-volumes.name
       self_link = google_compute_disk.docker-volumes.self_link
     }
+    attached_disks = {
+      for disk in google_compute_instance.cloud-compose.attached_disk : disk.device_name => {
+        source = disk.source
+        mode   = disk.mode
+      } if contains(keys(var.disk_attachments), disk.device_name)
+    }
     gsa : {
       email : local.vm_service_account_email,
       id : local.vm_service_account_id,
       name : local.vm_service_account_name,
     }
   }
-  description = "The GCP instance identity, network placement, replaceable boot disk, persistent disks, and VM service account. The legacy disk field remains the Docker-volume disk name."
+  description = "The GCP instance identity, network placement, replaceable boot disk, persistent disks, caller-owned attachments, and VM service account. The legacy disk field remains the Docker-volume disk name."
 }
 
 output "network" {

@@ -74,6 +74,36 @@ run "public_entrypoint_exposes_sitectl_package_versions" {
   }
 }
 
+run "public_entrypoint_forwards_caller_owned_disks" {
+  command = plan
+
+  variables {
+    name           = "root-contract"
+    cloud_provider = "gcp"
+    template       = "wp"
+    gcp = {
+      project_id = "test-project"
+      disks = {
+        attachments = {
+          mariadb-backups = {
+            source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = output.instance.attached_disks == {
+      mariadb-backups = {
+        source = "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-east5-b/disks/mariadb-backups"
+        mode   = "READ_WRITE"
+      }
+    }
+    error_message = "The root entrypoint must forward caller-owned disks into the VM's inline attachment set."
+  }
+}
+
 run "public_entrypoint_rejects_reserved_extra_environment" {
   command = plan
 

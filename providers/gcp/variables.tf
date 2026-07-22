@@ -42,6 +42,10 @@ variable "gcp" {
     disks = optional(object({
       type                   = optional(string, "hyperdisk-balanced")
       docker_volumes_size_gb = optional(number, 50)
+      attachments = optional(map(object({
+        source = string
+        mode   = optional(string, "READ_WRITE")
+      })), {})
     }), {})
 
     network = optional(object({
@@ -108,6 +112,39 @@ variable "gcp" {
       "pd-standard",
     ], var.gcp.disks.type)
     error_message = "gcp.disks.type must be hyperdisk-balanced, pd-ssd, or pd-standard."
+  }
+
+  validation {
+    condition = alltrue([
+      for device_name in keys(var.gcp.disks.attachments) :
+      can(regex("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", device_name)) &&
+      !contains(["boot", "data", "docker-volumes", "prod-volumes"], device_name)
+    ])
+    error_message = "gcp.disks.attachments keys must be valid GCE device names and must not use boot, data, docker-volumes, or prod-volumes."
+  }
+
+  validation {
+    condition = alltrue([
+      for attachment in values(var.gcp.disks.attachments) :
+      trimspace(attachment.source) != ""
+    ])
+    error_message = "gcp.disks.attachments sources must not be empty."
+  }
+
+  validation {
+    condition = alltrue([
+      for attachment in values(var.gcp.disks.attachments) :
+      contains(["READ_ONLY", "READ_WRITE"], attachment.mode)
+    ])
+    error_message = "gcp.disks.attachments modes must be READ_ONLY or READ_WRITE."
+  }
+
+  validation {
+    condition = length(distinct([
+      for attachment in values(var.gcp.disks.attachments) :
+      trimspace(attachment.source)
+    ])) == length(var.gcp.disks.attachments)
+    error_message = "gcp.disks.attachments must not attach the same source more than once."
   }
 
   validation {

@@ -226,6 +226,23 @@ Dependency installation dispatches by OS family:
 Provider modules should mount persistent data and Docker-volume disks before the
 runtime starts. Destroying/recreating the VM must not destroy these volumes.
 
+GCP callers can add persistent disks through `gcp.disks.attachments`. The map
+key is the GCE device name, `source` is the caller-owned disk self-link, and
+`mode` defaults to `READ_WRITE` but can be set to `READ_ONLY`. Cloud-compose
+owns the complete inline attachment set on the instance so every configured
+disk is present when the VM starts; the caller continues to own each disk's
+lifecycle. Device names must be valid GCE names and cannot collide with the
+module-owned `boot`, `data`, `docker-volumes`, or `prod-volumes` names.
+
+Do not manage the same VM/disk pair with a standalone
+`google_compute_attached_disk`; that creates two Terraform owners for one
+attachment. When migrating an existing standalone attachment, abandon the old
+resource from state without destroying it (for example, a `removed` block with
+`destroy = false` on supported Terraform versions), add the inline attachment,
+and inspect the transition plan to confirm it contains no detach. A normal
+destroy of the old standalone resource can detach the disk before the inline
+owner takes over.
+
 Every Compose `project_dir` must be a normalized descendant of the fixed
 `/mnt/disks/data` ownership boundary. Terraform rejects paths such as `/`,
 `/etc`, repeated separators, and dot-segment traversal during planning. The

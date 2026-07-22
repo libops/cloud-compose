@@ -98,8 +98,9 @@ module "gcp" {
   os           = local.gcp_instance.os
   production   = local.gcp_instance.production
 
-  disk_type    = local.gcp_disks.type
-  disk_size_gb = local.gcp_disks.docker_volumes_size_gb
+  disk_type        = local.gcp_disks.type
+  disk_size_gb     = local.gcp_disks.docker_volumes_size_gb
+  disk_attachments = local.gcp_disks.attachments
 
   ingress_port            = local.compose.ingress_port
   primary_compose_project = local.compose.primary

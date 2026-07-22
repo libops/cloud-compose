@@ -799,6 +799,16 @@ resource "google_compute_instance" "cloud-compose" {
     }
   }
 
+  dynamic "attached_disk" {
+    for_each = var.disk_attachments
+    iterator = caller_disk
+    content {
+      device_name = caller_disk.key
+      source      = trimspace(caller_disk.value.source)
+      mode        = caller_disk.value.mode
+    }
+  }
+
   metadata = {
     google-logging-enabled       = "true"
     google-logging-use-fluentbit = "true"
