@@ -29,11 +29,26 @@ func TestValidatePlan(t *testing.T) {
 			wantErr: "did not preserve moved resource",
 		},
 		{
-			name: "durable disk is replaced",
+			name: "application data disk is replaced",
+			mutate: func(t *testing.T, plan map[string]any) {
+				setActions(t, planChange(t, plan, dataDiskAddress), "delete", "create")
+			},
+			wantErr: "application-data disk growth was not update-only",
+		},
+		{
+			name: "application data disk has wrong growth target",
+			mutate: func(t *testing.T, plan map[string]any) {
+				change := planChange(t, plan, dataDiskAddress)["change"].(map[string]any)
+				change["after"].(map[string]any)["size"] = float64(29)
+			},
+			wantErr: "size transition was 20 -> 29 GB",
+		},
+		{
+			name: "Docker-volume disk is replaced",
 			mutate: func(t *testing.T, plan map[string]any) {
 				setActions(t, planChange(t, plan, dockerDiskAddress), "delete", "create")
 			},
-			wantErr: "persistent disk was not a no-op",
+			wantErr: "Docker-volume disk was not a no-op",
 		},
 		{
 			name: "unexpected managed resource is deleted",
@@ -226,7 +241,14 @@ func TestValidateTransition(t *testing.T) {
 	}{
 		{name: "expected transition"},
 		{
-			name: "durable disk identity changes",
+			name: "application data disk identity changes",
+			mutateNewIDs: func(values map[string]any) {
+				values["data_disk"] = "data-replaced"
+			},
+			wantErr: "resource identity changed",
+		},
+		{
+			name: "Docker-volume disk identity changes",
 			mutateNewIDs: func(values map[string]any) {
 				values["docker_disk"] = "docker-replaced"
 			},

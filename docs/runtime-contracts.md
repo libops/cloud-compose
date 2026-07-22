@@ -225,6 +225,15 @@ Dependency installation dispatches by OS family:
 
 Provider modules should mount persistent data and Docker-volume disks before the
 runtime starts. Destroying/recreating the VM must not destroy these volumes.
+On GCP, `gcp.disks.data_size_gb` independently sizes the application-data disk;
+`gcp.disks.docker_volumes_size_gb` sizes the Docker-volume disk. Callers that
+store logical backups or other bounded data under `/mnt/disks/data` must size
+the application-data disk for both runtime overhead and the complete retention
+and staging budget. Increasing the Terraform input grows the GCP block device
+in place; it does not by itself resize an already mounted filesystem. Schedule
+a controlled reboot after the apply so cloud-init reruns filesystem preparation
+and `resize2fs`, then verify the mounted ext4 capacity. Never reduce the input
+after the disk exists.
 
 Every Compose `project_dir` must be a normalized descendant of the fixed
 `/mnt/disks/data` ownership boundary. Terraform rejects paths such as `/`,
@@ -659,8 +668,10 @@ The VM uses an ephemeral public address, so replacement can change it even when
 both persistent disks survive. Inventory DNS records, TLS issuance/routing, and
 external allowlists before applying; update and verify them against the new
 address before ending the maintenance window. The hosted upgrade smoke proves
-the module's state moves and disk/sentinel preservation on its fixture, not the
-DNS, TLS, backups, or application-specific migrations of a downstream stack.
+the module's state moves, update-only application-data growth from 20 to 30 GB,
+mounted ext4 growth after the controlled cloud-init boot, and disk/sentinel
+preservation on its fixture, not the DNS, TLS, backups, or application-specific
+migrations of a downstream stack.
 
 The `GCP WordPress` pull-request check runs this upgrade path only for
 pull-request titles beginning with `[major]`; other pull requests retain the
@@ -701,15 +712,18 @@ runner's public IPv4 `/32`.
 
 Before applying the current source, the gate requires Terraform plan JSON to
 report all five `previous_address` transitions, requires the four preserved
-resources plus the data and Docker-volume disks to be no-ops, requires removal
+resources and Docker-volume disk to be no-ops, requires the application-data
+disk to be an update-only 20-to-30-GB growth, requires removal
 of the two legacy project-level power memberships, the legacy default Compute
 service-account impersonation member, the unused VM self-TokenCreator member,
 and the obsolete app self-signing member, and requires creation of the two
 instance-level power memberships. It permits no other managed-resource
 deletion beyond the expected VM and boot-disk replacements. It healthchecks
 WordPress before and after the upgrade,
-compares provider resource IDs, rejects legacy addresses in upgraded state, and
-checks sentinels on both persistent disks. An exit trap performs Terraform
+compares provider resource IDs, rejects disk replacement and legacy addresses
+in upgraded state, checks sentinels on both persistent disks, and verifies that
+the mounted application-data ext4 capacity exceeds its pre-upgrade capacity
+after the controlled reboot reruns cloud-init. An exit trap performs Terraform
 destroy followed by the name- and run-scoped provider sweep; the same GCP job
 also has an `always()` cleanup step, and the trusted default-branch cleanup
 workflow remains the final fallback. In GitHub Actions the cleanup scope must

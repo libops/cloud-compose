@@ -52,7 +52,11 @@
     },
     {
       "address": "module.app.module.gcp[0].google_compute_disk.data",
-      "change": {"actions": ["no-op"]}
+      "change": {
+        "actions": ["update"],
+        "before": {"size": 20},
+        "after": {"size": 30}
+      }
     },
     {
       "address": "module.app.module.gcp[0].google_compute_disk.docker-volumes",

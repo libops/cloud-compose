@@ -74,6 +74,31 @@ run "public_entrypoint_exposes_sitectl_package_versions" {
   }
 }
 
+run "public_entrypoint_forwards_application_data_size" {
+  command = plan
+
+  variables {
+    name           = "root-contract"
+    cloud_provider = "gcp"
+    template       = "wp"
+    gcp = {
+      project_id = "test-project"
+      disks = {
+        data_size_gb           = 170
+        docker_volumes_size_gb = 50
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      output.volumes.data.size_gb == 170 &&
+      output.volumes.docker_volumes.size_gb == 50
+    )
+    error_message = "The root entrypoint must forward independent application-data and Docker-volume sizes."
+  }
+}
+
 run "public_entrypoint_rejects_reserved_extra_environment" {
   command = plan
 

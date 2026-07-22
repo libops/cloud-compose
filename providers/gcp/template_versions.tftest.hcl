@@ -73,6 +73,30 @@ run "explicit_core_only_package_set_disables_template_plugins" {
   }
 }
 
+run "gcp_entrypoint_forwards_application_data_size" {
+  command = plan
+
+  variables {
+    name     = "template-versions"
+    template = "wp"
+    gcp = {
+      project_id = "test-project"
+      disks = {
+        data_size_gb           = 170
+        docker_volumes_size_gb = 50
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      output.volumes.data.size_gb == 170 &&
+      output.volumes.docker_volumes.size_gb == 50
+    )
+    error_message = "The GCP entrypoint must forward independent application-data and Docker-volume sizes."
+  }
+}
+
 run "accepts_direct_cloud_run_proxy_depth" {
   command = plan
 

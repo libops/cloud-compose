@@ -23,11 +23,13 @@ output "instance" {
       id        = google_compute_disk.data.id
       name      = google_compute_disk.data.name
       self_link = google_compute_disk.data.self_link
+      size_gb   = google_compute_disk.data.size
     }
     docker_volumes_disk = {
       id        = google_compute_disk.docker-volumes.id
       name      = google_compute_disk.docker-volumes.name
       self_link = google_compute_disk.docker-volumes.self_link
+      size_gb   = google_compute_disk.docker-volumes.size
     }
     gsa : {
       email : local.vm_service_account_email,
@@ -57,11 +59,13 @@ output "volumes" {
       id        = google_compute_disk.data.id
       name      = google_compute_disk.data.name
       self_link = google_compute_disk.data.self_link
+      size_gb   = google_compute_disk.data.size
     }
     docker_volumes = {
       id        = google_compute_disk.docker-volumes.id
       name      = google_compute_disk.docker-volumes.name
       self_link = google_compute_disk.docker-volumes.self_link
+      size_gb   = google_compute_disk.docker-volumes.size
     }
   }
   description = "Persistent GCP application-data and Docker-volume disks. The replaceable boot disk is exposed under instance.boot_disk."
