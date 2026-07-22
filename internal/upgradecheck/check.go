@@ -9,10 +9,15 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 )
 
-const resourcePrefix = "module.app.module.gcp[0]"
+const (
+	resourcePrefix         = "module.app.module.gcp[0]"
+	baselineDataDiskSizeGB = 20
+	upgradedDataDiskSizeGB = 30
+)
 
 var (
 	dataDiskAddress   = resourcePrefix + ".google_compute_disk.data"
@@ -72,7 +77,9 @@ type resourceChange struct {
 	PreviousAddress string `json:"previous_address"`
 	Mode            string `json:"mode"`
 	Change          struct {
-		Actions []string `json:"actions"`
+		Actions []string                   `json:"actions"`
+		Before  map[string]json.RawMessage `json:"before"`
+		After   map[string]json.RawMessage `json:"after"`
 	} `json:"change"`
 }
 
@@ -140,12 +147,34 @@ func ValidatePlan(reader io.Reader) error {
 		}
 	}
 
-	for _, address := range []string{dataDiskAddress, dockerDiskAddress} {
-		if !anyChange(changes, func(change resourceChange) bool {
-			return change.Address == address && slices.Equal(change.Change.Actions, []string{"no-op"})
-		}) {
-			return fmt.Errorf("persistent disk was not a no-op in the upgrade plan: %s", address)
-		}
+	dataDiskChange, ok := changeAtAddress(changes, dataDiskAddress)
+	if !ok {
+		return fmt.Errorf("upgrade plan did not contain the application-data disk: %s", dataDiskAddress)
+	}
+	if !slices.Equal(dataDiskChange.Change.Actions, []string{"update"}) {
+		return fmt.Errorf("application-data disk growth was not update-only in the upgrade plan: %s", dataDiskAddress)
+	}
+	beforeSize, err := wholeNumberAttribute(dataDiskChange.Change.Before, "size")
+	if err != nil {
+		return fmt.Errorf("application-data disk baseline size: %w", err)
+	}
+	afterSize, err := wholeNumberAttribute(dataDiskChange.Change.After, "size")
+	if err != nil {
+		return fmt.Errorf("application-data disk upgraded size: %w", err)
+	}
+	if beforeSize != baselineDataDiskSizeGB || afterSize != upgradedDataDiskSizeGB {
+		return fmt.Errorf(
+			"application-data disk size transition was %d -> %d GB, want %d -> %d GB",
+			beforeSize,
+			afterSize,
+			baselineDataDiskSizeGB,
+			upgradedDataDiskSizeGB,
+		)
+	}
+
+	dockerDiskChange, ok := changeAtAddress(changes, dockerDiskAddress)
+	if !ok || !slices.Equal(dockerDiskChange.Change.Actions, []string{"no-op"}) {
+		return fmt.Errorf("Docker-volume disk was not a no-op in the upgrade plan: %s", dockerDiskAddress)
 	}
 
 	for _, removal := range removedLegacyBindings {
@@ -218,6 +247,31 @@ func ValidatePlan(reader io.Reader) error {
 		)
 	}
 	return nil
+}
+
+func changeAtAddress(changes []resourceChange, address string) (resourceChange, bool) {
+	for _, change := range changes {
+		if change.Address == address {
+			return change, true
+		}
+	}
+	return resourceChange{}, false
+}
+
+func wholeNumberAttribute(values map[string]json.RawMessage, attribute string) (int64, error) {
+	raw, ok := values[attribute]
+	if !ok {
+		return 0, fmt.Errorf("plan did not expose %s", attribute)
+	}
+	var value json.Number
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, fmt.Errorf("plan exposed invalid %s", attribute)
+	}
+	parsed, err := strconv.ParseInt(value.String(), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("plan exposed non-whole %s", attribute)
+	}
+	return parsed, nil
 }
 
 // CaptureIDs extracts the immutable resource identities needed to compare the

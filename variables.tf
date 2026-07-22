@@ -47,6 +47,7 @@ variable "gcp" {
 
     disks = optional(object({
       type                   = optional(string, "hyperdisk-balanced")
+      data_size_gb           = optional(number, 20)
       docker_volumes_size_gb = optional(number, 50)
     }), {})
 
@@ -114,6 +115,11 @@ variable "gcp" {
       "pd-standard",
     ], var.gcp.disks.type)
     error_message = "gcp.disks.type must be hyperdisk-balanced, pd-ssd, or pd-standard."
+  }
+
+  validation {
+    condition     = var.gcp.disks.data_size_gb >= 10 && floor(var.gcp.disks.data_size_gb) == var.gcp.disks.data_size_gb
+    error_message = "gcp.disks.data_size_gb must be a whole number of at least 10 GB."
   }
 
   validation {

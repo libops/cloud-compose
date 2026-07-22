@@ -176,7 +176,18 @@ variable "sitectl_ingress" {
 variable "disk_size_gb" {
   type        = number
   default     = 50
-  description = "Data disk size in GB"
+  description = "Docker-volume disk size in GB"
+}
+
+variable "data_disk_size_gb" {
+  type        = number
+  default     = 20
+  description = "Application-data disk size in GB. Size this independently for checkouts, configuration, credentials, tools, and caller-managed data such as logical backups. Terraform can grow the block device in place; the mounted ext4 filesystem grows when cloud-init reruns filesystem preparation on the next controlled boot. Existing disks cannot shrink."
+
+  validation {
+    condition     = var.data_disk_size_gb >= 10 && floor(var.data_disk_size_gb) == var.data_disk_size_gb
+    error_message = "data_disk_size_gb must be a whole number of at least 10 GB."
+  }
 }
 
 variable "os" {

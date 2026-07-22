@@ -76,11 +76,23 @@ grep -Fq '/mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner must write the data-disk sentinel exactly once"
 [[ "$(grep -Fc 'sudo tee /mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script")" -eq 1 ]] ||
   fail "upgrade runner must write the Docker-volume sentinel exactly once"
+grep -Fq 'read_data_filesystem_size_bytes()' "$script" ||
+  fail "upgrade runner does not measure mounted application-data filesystem capacity"
+grep -Fq 'filesystem="$(findmnt -n -o FSTYPE --target /mnt/disks/data)"' "$script" ||
+  fail "upgrade runner does not require the application-data mount to remain ext4"
+grep -Fq 'df --block-size=1 --output=size -- /mnt/disks/data' "$script" ||
+  fail "upgrade runner does not measure mounted ext4 capacity in bytes"
+grep -Fq '((10#$upgraded_data_filesystem_bytes > 10#$baseline_data_filesystem_bytes))' "$script" ||
+  fail "upgrade runner does not prove mounted ext4 grew beyond its baseline capacity"
 
 grep -Fq 'backend "local" {}' "$fixture" ||
   fail "upgrade fixture does not declare the shared local backend"
 grep -Fq 'source = "../../.."' "$fixture" ||
   fail "upgrade fixture does not exercise the GCP-only compatibility root"
+grep -Fq 'application_data_size_gb = var.legacy_baseline ? 20 : 30' "$fixture" ||
+  fail "upgrade fixture does not request exact 20-to-30-GB application-data growth"
+grep -Fq 'data_size_gb           = local.application_data_size_gb' "$fixture" ||
+  fail "upgrade fixture does not pass its phase-specific application-data size"
 grep -Fq 'create                   = false' "$fixture" ||
   fail "upgrade fixture still owns an ephemeral network"
 grep -Fq 'project_id               = var.gcp_network_project_id' "$fixture" ||
@@ -208,7 +220,7 @@ grep -Fq 'docker_compose_branch = var.wordpress_compose_ref' "$fixture" ||
   fail "upgrade fixture does not use its pinned WordPress commit"
 grep -Fq "git_project checkout --detach \${var.wordpress_compose_ref}" "$fixture" ||
   fail "legacy bootstrap does not pre-check out the exact WordPress commit"
-grep -Fq 'wordpress_project_dir = "/mnt/disks/data/libops/wp.git/${var.wordpress_compose_ref}"' "$fixture" ||
+grep -Eq 'wordpress_project_dir[[:space:]]*=[[:space:]]*"/mnt/disks/data/libops/wp.git/\$\{var\.wordpress_compose_ref\}"' "$fixture" ||
   fail "upgrade fixture does not derive the exact legacy single-project checkout path"
 grep -Fq 'project=${local.wordpress_project_dir};' "$fixture" ||
   fail "upgrade fixture does not pre-check out the shared baseline/current Compose path"
@@ -307,6 +319,10 @@ grep -Fq 'pull-request titles beginning with `[major]`' "$docs" ||
   fail "upgrade documentation does not explain when the expensive gate runs"
 grep -Fq "$wordpress_ref" "$docs" ||
   fail "upgrade documentation omits the pinned WordPress Compose revision"
+grep -Fq 'controlled reboot after the apply' "$docs" ||
+  fail "GCP disk-growth documentation does not explain when ext4 capacity activates"
+grep -Fq 'update-only application-data growth from 20 to 30 GB' "$docs" ||
+  fail "upgrade documentation omits the exact in-place data-disk growth contract"
 
 cat >"$tmp/good-plan.json" <<'EOF'
 {
@@ -363,7 +379,11 @@ cat >"$tmp/good-plan.json" <<'EOF'
     },
     {
       "address": "module.app.module.gcp[0].google_compute_disk.data",
-      "change": {"actions": ["no-op"]}
+      "change": {
+        "actions": ["update"],
+        "before": {"size": 20},
+        "after": {"size": 30}
+      }
     },
     {
       "address": "module.app.module.gcp[0].google_compute_disk.docker-volumes",
@@ -394,10 +414,22 @@ if bash "$script" check-plan "$tmp/bad-move.json" >/dev/null 2>&1; then
   fail "plan checker accepted a missing moved-resource provenance"
 fi
 
+jq '(.resource_changes[] | select(.address | endswith("google_compute_disk.data")) | .change.actions) = ["delete", "create"]' \
+  "$tmp/good-plan.json" >"$tmp/bad-data-disk.json"
+if bash "$script" check-plan "$tmp/bad-data-disk.json" >/dev/null 2>&1; then
+  fail "plan checker accepted application-data disk replacement"
+fi
+
+jq '(.resource_changes[] | select(.address | endswith("google_compute_disk.data")) | .change.after.size) = 29' \
+  "$tmp/good-plan.json" >"$tmp/bad-data-growth.json"
+if bash "$script" check-plan "$tmp/bad-data-growth.json" >/dev/null 2>&1; then
+  fail "plan checker accepted the wrong application-data growth target"
+fi
+
 jq '(.resource_changes[] | select(.address | endswith("docker-volumes")) | .change.actions) = ["delete", "create"]' \
-  "$tmp/good-plan.json" >"$tmp/bad-disk.json"
-if bash "$script" check-plan "$tmp/bad-disk.json" >/dev/null 2>&1; then
-  fail "plan checker accepted persistent-disk replacement"
+  "$tmp/good-plan.json" >"$tmp/bad-docker-disk.json"
+if bash "$script" check-plan "$tmp/bad-docker-disk.json" >/dev/null 2>&1; then
+  fail "plan checker accepted Docker-volume disk replacement"
 fi
 
 jq '.resource_changes += [{"address":"module.app.google_compute_disk.unexpected","change":{"actions":["delete"]}}]' \
@@ -490,7 +522,13 @@ bash "$script" check-transition \
 jq '.docker_disk = "docker-replaced"' "$tmp/new-ids.json" >"$tmp/bad-new-ids.json"
 if bash "$script" check-transition \
   "$tmp/old-ids.json" "$tmp/bad-new-ids.json" "$tmp/old-state.txt" "$tmp/new-state.txt" >/dev/null 2>&1; then
-  fail "state checker accepted a changed persistent disk id"
+  fail "state checker accepted a changed Docker-volume disk id"
+fi
+
+jq '.data_disk = "data-replaced"' "$tmp/new-ids.json" >"$tmp/bad-data-ids.json"
+if bash "$script" check-transition \
+  "$tmp/old-ids.json" "$tmp/bad-data-ids.json" "$tmp/old-state.txt" "$tmp/new-state.txt" >/dev/null 2>&1; then
+  fail "state checker accepted a changed application-data disk id"
 fi
 
 cp "$tmp/new-state.txt" "$tmp/bad-new-state.txt"

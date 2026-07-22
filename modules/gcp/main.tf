@@ -629,7 +629,7 @@ resource "google_compute_disk" "data" {
   project                   = var.project_id
   type                      = var.disk_type
   zone                      = var.zone
-  size                      = 20
+  size                      = var.data_disk_size_gb
   physical_block_size_bytes = 4096
 }
 

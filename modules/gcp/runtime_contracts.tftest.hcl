@@ -88,6 +88,41 @@ run "disables_privileged_services_by_default" {
   }
 }
 
+run "sizes_application_data_independently" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    data_disk_size_gb   = 170
+    disk_size_gb        = 50
+  }
+
+  assert {
+    condition = (
+      google_compute_disk.data.size == 170 &&
+      google_compute_disk.docker-volumes.size == 50 &&
+      output.volumes.data.size_gb == 170 &&
+      output.volumes.docker_volumes.size_gb == 50
+    )
+    error_message = "Application data and Docker volumes must retain independent configured capacities."
+  }
+}
+
+run "rejects_fractional_application_data_size" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    data_disk_size_gb   = 20.5
+  }
+
+  expect_failures = [var.data_disk_size_gb]
+}
+
 run "creates_app_key_management_only_when_explicitly_enabled" {
   command = plan
 

@@ -29,8 +29,9 @@ data "google_project" "current" {
 }
 
 locals {
-  project_id            = trimspace(var.gcp_project_id)
-  wordpress_project_dir = "/mnt/disks/data/libops/wp.git/${var.wordpress_compose_ref}"
+  project_id               = trimspace(var.gcp_project_id)
+  wordpress_project_dir    = "/mnt/disks/data/libops/wp.git/${var.wordpress_compose_ref}"
+  application_data_size_gb = var.legacy_baseline ? 20 : 30
 }
 
 module "app" {
@@ -57,6 +58,7 @@ module "app" {
     }
     disks = {
       type                   = "pd-standard"
+      data_size_gb           = local.application_data_size_gb
       docker_volumes_size_gb = 30
     }
     snapshots = {

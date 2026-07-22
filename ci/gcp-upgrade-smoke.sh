@@ -445,6 +445,35 @@ verify_disk_sentinels() {
   [[ "$actual_volumes" == "$nonce" ]] || fail "the Docker-volume disk sentinel did not survive the upgrade"
 }
 
+read_data_filesystem_size_bytes() {
+  local home_dir="$1" key_path="$2" output_json="$3"
+  local host port user remote_script encoded_script quoted_script size_bytes
+
+  host="$(jq -er '.host' "$output_json")"
+  port="$(jq -er '.ssh_port' "$output_json")"
+  user="$(jq -er '.ssh_user' "$output_json")"
+
+  read -r -d '' remote_script <<'EOF' || true
+set -euo pipefail
+
+filesystem="$(findmnt -n -o FSTYPE --target /mnt/disks/data)"
+if [[ "$filesystem" != "ext4" ]]; then
+  echo "Application-data mount uses ${filesystem:-an unknown filesystem}, expected ext4" >&2
+  exit 1
+fi
+df --block-size=1 --output=size -- /mnt/disks/data | awk 'NR == 2 { print $1 }'
+EOF
+
+  encoded_script="$(printf '%s' "$remote_script" | base64 | tr -d '\n')"
+  quoted_script="$(shell_quote "$encoded_script")"
+  size_bytes="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "printf %s ${quoted_script} | base64 -d | sudo bash")"
+  size_bytes="${size_bytes//$'\r'/}"
+  [[ "$size_bytes" =~ ^[1-9][0-9]*$ ]] ||
+    fail "mounted application-data ext4 reported an invalid byte capacity: ${size_bytes:-empty}"
+  printf '%s\n' "$size_bytes"
+}
+
 write_tfvars() {
   local root="$1" name="$2" project="$3" region="$4" zone="$5" public_key="$6" runner_cidr="$7"
   local network_project="$8" network_name="$9" subnetwork_name="${10}"
@@ -577,6 +606,7 @@ run_upgrade() (
   local requested_base current_ref current_sha base_sha run_id run_namespace name
   local work_root old_source new_source state_path old_data new_data key_path public_key
   local runner_ipv4 runner_cidr region zone plan_file plan_json nonce
+  local baseline_data_filesystem_bytes upgraded_data_filesystem_bytes
   local old_root new_root old_output new_output old_home new_home
   local old_state_json new_state_json old_ids new_ids old_state_list new_state_list
   local cleanup_started=false
@@ -703,6 +733,8 @@ run_upgrade() (
   old_state_list="$work_root/old-state-list.txt"
   phase_output "$old_root" "$old_data" "$old_output"
   run_phase_healthcheck "0.10.2 baseline" "$old_home" "$key_path" "$old_output"
+  baseline_data_filesystem_bytes="$(read_data_filesystem_size_bytes \
+    "$old_home" "$key_path" "$old_output")"
   tf_in "$old_root" "$old_data" show -json >"$old_state_json"
   tf_in "$old_root" "$old_data" state list >"$old_state_list"
   chmod 0600 "$old_state_json" "$old_state_list"
@@ -735,6 +767,10 @@ run_upgrade() (
 
   run_phase_healthcheck "upgraded current" "$new_home" "$key_path" "$new_output"
   run_direct_vpc_cold_start "$new_home" "$key_path" "$new_output" "$name" "$zone"
+  upgraded_data_filesystem_bytes="$(read_data_filesystem_size_bytes \
+    "$new_home" "$key_path" "$new_output")"
+  ((10#$upgraded_data_filesystem_bytes > 10#$baseline_data_filesystem_bytes)) ||
+    fail "mounted application-data ext4 did not grow beyond its baseline capacity (${baseline_data_filesystem_bytes} -> ${upgraded_data_filesystem_bytes} bytes)"
   verify_metadata_isolation "$new_home" "$key_path" "$new_output"
   verify_disk_sentinels "$new_home" "$key_path" "$new_output" "$nonce"
   echo "GCP cloud-compose 0.10.2 -> ${current_sha} upgrade smoke test passed"
