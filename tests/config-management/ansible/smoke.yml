@@ -26,7 +26,6 @@
           line one
           line two
       compose:
-        project_dir: /mnt/disks/data/libops/isle/main
         init: []
         up:
           - global-up-command
@@ -40,7 +39,6 @@
         projects:
           isle-prod:
             docker_compose_repo: https://github.com/libops/isle
-            project_dir: /mnt/disks/data/libops/isle/main
             docker_compose_up: []
             docker_compose_down:
               - app-down-command
@@ -97,7 +95,7 @@
           - >-
             'CLOUD_COMPOSE_PROVIDER="onprem"' in (cloud_compose_env_file.content | b64decode)
           - >-
-            'DOCKER_COMPOSE_DIR="/mnt/disks/data/libops/isle/main"' in (cloud_compose_env_file.content | b64decode)
+            'DOCKER_COMPOSE_DIR="/mnt/disks/data/libops/isle/isle-prod"' in (cloud_compose_env_file.content | b64decode)
           - >-
             'DOCKER_COMPOSE_REPO="https://github.com/libops/isle"' in (cloud_compose_env_file.content | b64decode)
           - >-
@@ -118,7 +116,7 @@
           - '(cloud_compose_application_env_file.content | b64decode | from_json).LD_PRELOAD == "/tmp/cloud-compose-ansible-untrusted-preload.so"'
           - '(cloud_compose_application_env_file.content | b64decode | from_json).PORT == "9999"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].docker_compose_repo == "https://github.com/libops/isle"'
-          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].project_dir == "/mnt/disks/data/libops/isle/main"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].project_dir == "/mnt/disks/data/libops/isle/isle-prod"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].compose_project_name == "libops-isle-v1-1-0"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].ingress.domain == "isle.example.edu"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].sitectl_plugin == "isle"'

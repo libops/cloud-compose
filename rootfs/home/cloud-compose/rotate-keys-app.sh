@@ -85,6 +85,15 @@ install_app_credentials() {
   fi
 
   if [[ -f "$target" && ! -L "$target" ]] && cmp -s -- "$APP_CREDENTIALS_FILE" "$target"; then
+    if [[ -n "$ROTATION_APP_CREDENTIAL_OWNER" ]] && ! chown -- "$ROTATION_APP_CREDENTIAL_OWNER" "$target"; then
+      return 2
+    fi
+    if [[ -n "$ROTATION_CREDENTIAL_GROUP" ]] && ! chgrp -- "$ROTATION_CREDENTIAL_GROUP" "$target"; then
+      return 2
+    fi
+    if ! chmod 0440 "$target"; then
+      return 2
+    fi
     return 1
   fi
 

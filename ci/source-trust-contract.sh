@@ -104,6 +104,26 @@ run_compose_app_lifecycle branch init
 [[ "$(<"$COMPOSE_APPS_STATE_DIR/branch.deployed-head")" == "$commit_four" ]] || \
   fail "moving branch deployed HEAD was not recorded"
 
+# A reconstructed host reuses the persistent application-data disk. Changing
+# the configured ref must reconcile that existing checkout in place instead of
+# selecting a ref-derived directory and abandoning the prior workspace.
+branch_checkout_inode="$(stat -c %i "$branch_checkout")"
+printf 'persistent host data\n' >"$branch_checkout/host-data.keep"
+jq '.branch.docker_compose_branch = "release-one"' \
+  "$projects_file" >"$projects_file.tmp"
+mv "$projects_file.tmp" "$projects_file"
+clone_or_update_compose_app branch
+assert_head "$branch_checkout" "$commit_one"
+[[ "$(stat -c %i "$branch_checkout")" == "$branch_checkout_inode" ]] || \
+  fail "configured-ref migration replaced the persistent checkout directory"
+[[ -f "$branch_checkout/host-data.keep" ]] || \
+  fail "configured-ref migration discarded persistent checkout data"
+jq '.branch.docker_compose_branch = "main"' \
+  "$projects_file" >"$projects_file.tmp"
+mv "$projects_file.tmp" "$projects_file"
+clone_or_update_compose_app branch
+assert_head "$branch_checkout" "$commit_four"
+
 # A rollout may deliberately deploy a feature or provider-specific ref that is
 # not an ancestor of the configured baseline branch. Ordinary service starts
 # must preserve that deployed revision, and a later rollout must remain able to

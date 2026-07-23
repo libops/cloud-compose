@@ -210,7 +210,7 @@ run "normalizes_minimal_compose_project" {
       local.compose_projects.wordpress.docker_compose_repo == "https://github.com/libops/wp.git" &&
       local.compose_projects.wordpress.docker_compose_branch == "v1.0.0" &&
       local.compose_projects.wordpress.repo_path == "libops/wp.git" &&
-      local.compose_projects.wordpress.project_dir == "/mnt/disks/data/libops/wp.git/v1.0.0" &&
+      local.compose_projects.wordpress.project_dir == "/mnt/disks/data/libops/wp.git/wordpress" &&
       local.compose_projects.wordpress.compose_project_name == "libops-wp-v1-0-0" &&
       local.compose_projects.wordpress.ingress_port == 80 &&
       local.compose_projects.wordpress.ingress.letsencrypt == var.sitectl_ingress.letsencrypt &&
@@ -225,6 +225,28 @@ run "normalizes_minimal_compose_project" {
       local.compose_projects.wordpress.rollout_commands == var.docker_compose_rollout
     )
     error_message = "A compose project containing only docker_compose_repo must inherit and derive every optional field."
+  }
+}
+
+run "preserves_explicit_project_directory_during_default_migration" {
+  command = plan
+
+  variables {
+    name           = "gcp-contract"
+    project_id     = "test-project"
+    project_number = "123456789"
+    compose_projects = {
+      wordpress = {
+        docker_compose_repo   = "https://github.com/libops/wp.git"
+        docker_compose_branch = "v1.0.0"
+        project_dir           = "/mnt/disks/data/libops/wp.git/v1.0.0"
+      }
+    }
+  }
+
+  assert {
+    condition     = local.compose_projects.wordpress.project_dir == "/mnt/disks/data/libops/wp.git/v1.0.0"
+    error_message = "An explicit legacy project_dir must remain unchanged while callers migrate to the stable default."
   }
 }
 

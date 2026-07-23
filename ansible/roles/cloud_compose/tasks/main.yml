@@ -186,7 +186,7 @@
 - name: Derive cloud-compose project paths
   ansible.builtin.set_fact:
     _cc_repo_path: "{{ _cc_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '') }}"
-    _cc_project_dir: "{{ _cc_compose.project_dir | default(cloud_compose_data_dir ~ '/' ~ (_cc_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '')) ~ '/' ~ _cc_branch, true) }}"
+    _cc_project_dir: "{{ _cc_compose.project_dir | default(cloud_compose_data_dir ~ '/' ~ (_cc_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '')) ~ '/' ~ cloud_compose_name, true) }}"
     _cc_compose_project_name: "{{ _cc_compose.compose_project_name | default(((_cc_repo | regex_replace('^[^:]+://[^/]+/', '') | regex_replace('/+$', '')) ~ '-' ~ _cc_branch) | lower | regex_replace('\\.git$', '') | regex_replace('[^a-zA-Z0-9]', '-') | regex_replace('-+', '-'), true) }}"
     _cc_explicit_projects: "{{ _cc_compose.projects | default({}, true) }}"
     _cc_managed_artifacts: "{{ _cc_managed.artifacts | default(cloud_compose_managed_artifacts, true) }}"
@@ -269,7 +269,7 @@
       docker_compose_repo: "{{ _cc_app_repo }}"
       docker_compose_branch: "{{ _cc_app_branch }}"
       repo_path: "{{ _cc_app_repo_path }}"
-      project_dir: "{{ item.value.project_dir | default(cloud_compose_data_dir ~ '/' ~ _cc_app_repo_path ~ '/' ~ _cc_app_branch, true) }}"
+      project_dir: "{{ item.value.project_dir | default(cloud_compose_data_dir ~ '/' ~ _cc_app_repo_path ~ '/' ~ item.key, true) }}"
       compose_project_name: "{{ item.value.compose_project_name | default((_cc_app_repo_path ~ '-' ~ _cc_app_branch) | lower | regex_replace('\\.git$', '') | regex_replace('[^a-zA-Z0-9]', '-') | regex_replace('-+', '-'), true) }}"
       ingress_port: "{{ item.value.ingress_port | default(_cc_ingress_port) }}"
       ingress: "{{ _cc_app_ingress }}"

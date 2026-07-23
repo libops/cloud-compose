@@ -54,6 +54,7 @@ cat >"$tmp/bin/chgrp" <<'EOF'
 if [[ "${FAKE_CHGRP_FAIL_BETA:-false}" == "true" && "${!#}" == */apps/beta/secrets ]]; then
   exit 1
 fi
+printf 'CHGRP %s\n' "$*" >>"${ORDER_LOG:?}"
 exit 0
 EOF
 cat >"$tmp/bin/sleep" <<'EOF'
@@ -460,11 +461,19 @@ fi
 
 # Re-running during grace neither creates nor deletes a key.
 : >"$order_log"
-bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+chmod 0600 "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS"
+ROTATION_CREDENTIAL_OWNER=100 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
 [[ "$(<"$post_count")" == 1 ]] || fail "grace retry created another replacement key"
 if grep -Eq '^DELETE ' "$order_log"; then
   fail "grace retry deleted the disabled previous key too early"
 fi
+[[ "$(stat -c %a "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS")" == "440" ]] || \
+  fail "identical application credentials did not converge their mode"
+grep -Fq "CHOWN -- 100 $tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" "$order_log" || \
+  fail "identical application credentials did not converge their owner"
+grep -Fq "CHGRP -- test-group $tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" "$order_log" || \
+  fail "identical application credentials did not converge their group"
 
 # Rollback re-enables and authenticates the previous key, distributes it,
 # reloads only the already-active service, then removes the abandoned key.

@@ -113,6 +113,129 @@ validate_compose_projects_manifest() {
     done < <(jq -r '.[] | .project_dir | @base64' "$COMPOSE_PROJECTS_FILE")
 }
 
+# Converge one already-existing manifest project without traversing or changing
+# ownership below it. The low-level helper accepts numeric IDs so its filesystem
+# behavior can be tested without requiring the production account locally; the
+# public wrapper always selects the fixed cloud-compose identity.
+_converge_compose_app_filesystem_for_ids() (
+    local app="$1"
+    local runtime_uid="$2"
+    local runtime_gid="$3"
+    local project_dir resolved_project_dir env_file env_path
+    local project_fd project_fd_path project_identity
+    local env_fd env_fd_path env_identity env_metadata
+    local guard_uid="$EUID"
+    local guard_gid
+
+    if [[ ! "$runtime_uid" =~ ^[0-9]+$ || ! "$runtime_gid" =~ ^[0-9]+$ ]]; then
+        echo "Invalid cloud-compose runtime account IDs" >&2
+        return 2
+    fi
+    guard_gid="$(id -g)" || return 1
+
+    compose_app_exists "$app" || return 1
+    project_dir="$(compose_app_field "$app" project_dir)" || return 1
+    validate_compose_project_dir "$project_dir" || return 1
+
+    # A missing project is created later by the unprivileged source-preparation
+    # phase. Existing persistent checkouts must be real directories at the
+    # exact manifest path; do not follow even an in-boundary symlink as root.
+    if [[ ! -e "$project_dir" && ! -L "$project_dir" ]]; then
+        return 0
+    fi
+    if [[ -L "$project_dir" || ! -d "$project_dir" ]]; then
+        echo "Compose project path is not a real directory: $project_dir" >&2
+        return 1
+    fi
+    resolved_project_dir="$(realpath -e -- "$project_dir")" || return 1
+    if [[ "$resolved_project_dir" != "$project_dir" ]]; then
+        echo "Compose project path contains a symbolic-link component: $project_dir" >&2
+        return 1
+    fi
+
+    # Operate through a verified descriptor. If an application account races a
+    # path replacement, the descriptor cannot be redirected to another inode
+    # and the final identity check fails closed.
+    project_identity="$(stat -c '%d:%i' -- "$project_dir")" || return 1
+    exec {project_fd}<"$project_dir" || return 1
+    project_fd_path="/proc/${BASHPID}/fd/${project_fd}"
+    if [[ "$(stat -Lc '%F:%d:%i' -- "$project_fd_path")" != "directory:${project_identity}" ||
+        "$(stat -c '%d:%i' -- "$project_dir")" != "$project_identity" ]]; then
+        echo "Compose project path changed while opening: $project_dir" >&2
+        return 1
+    fi
+
+    # Freeze the opened directory before inspecting its child. The first chmod
+    # removes ordinary write access; changing owner and repeating the chmod
+    # closes a race with the former owner changing its mode concurrently. Only
+    # state observed after the final root-owned/read-only transition is trusted.
+    chmod 0555 "$project_fd_path" || return 1
+    chown --dereference "${guard_uid}:${guard_gid}" "$project_fd_path" || return 1
+    chmod 0555 "$project_fd_path" || return 1
+    if [[ "$(stat -c '%d:%i' -- "$project_dir")" != "$project_identity" ||
+        "$(stat -Lc '%u:%g:%a' -- "$project_fd_path")" != "${guard_uid}:${guard_gid}:555" ]]; then
+        echo "Compose project path did not freeze safely: $project_dir" >&2
+        return 1
+    fi
+
+    # Resolve .env through the verified directory descriptor. The directory is
+    # no longer writable by the application identity, so this lstat-style
+    # symlink rejection cannot race the subsequent open.
+    env_path="${project_dir}/.env"
+    env_file="${project_fd_path}/.env"
+    if [[ ! -e "$env_file" && ! -L "$env_file" ]]; then
+        chown --dereference "${runtime_uid}:${runtime_gid}" "$project_fd_path" || return 1
+        chmod 0775 "$project_fd_path" || return 1
+        return 0
+    fi
+    if [[ -L "$env_file" || ! -f "$env_file" ]]; then
+        echo "Compose environment path is not a regular file: $env_path" >&2
+        return 1
+    fi
+    env_metadata="$(stat -c '%F:%h' -- "$env_file")" || return 1
+    if [[ "$env_metadata" != "regular file:1" ]]; then
+        echo "Compose environment file must have exactly one link: $env_path" >&2
+        return 1
+    fi
+
+    env_identity="$(stat -c '%d:%i' -- "$env_file")" || return 1
+    exec {env_fd}<"$env_file" || return 1
+    env_fd_path="/proc/${BASHPID}/fd/${env_fd}"
+    if [[ "$(stat -Lc '%F:%h:%d:%i' -- "$env_fd_path")" != "regular file:1:${env_identity}" ||
+        "$(stat -c '%d:%i' -- "$env_file")" != "$env_identity" ]]; then
+        echo "Compose environment path changed while opening: $env_path" >&2
+        return 1
+    fi
+    chown --dereference "${runtime_uid}:${runtime_gid}" "$env_fd_path" || return 1
+    chmod 0640 "$env_fd_path" || return 1
+    if [[ "$(stat -c '%d:%i' -- "$env_file")" != "$env_identity" ||
+        "$(stat -Lc '%u:%g:%a:%h' -- "$env_fd_path")" != "${runtime_uid}:${runtime_gid}:640:1" ]]; then
+        echo "Compose environment ownership did not converge safely: $env_path" >&2
+        return 1
+    fi
+
+    chown --dereference "${runtime_uid}:${runtime_gid}" "$project_fd_path" || return 1
+    chmod 0775 "$project_fd_path" || return 1
+    if [[ "$(stat -c '%d:%i' -- "$project_dir")" != "$project_identity" ||
+        "$(stat -Lc '%u:%g:%a' -- "$project_fd_path")" != "${runtime_uid}:${runtime_gid}:775" ]]; then
+        echo "Compose project ownership did not converge safely: $project_dir" >&2
+        return 1
+    fi
+)
+
+converge_compose_app_filesystem() {
+    local app="$1"
+    local runtime_uid runtime_gid
+
+    if ((EUID != 0)); then
+        echo "Compose application filesystem convergence must run as root" >&2
+        return 1
+    fi
+    runtime_uid="$(id -u cloud-compose)" || return 1
+    runtime_gid="$(id -g cloud-compose)" || return 1
+    _converge_compose_app_filesystem_for_ids "$app" "$runtime_uid" "$runtime_gid"
+}
+
 compose_app_exists() {
     local app="$1"
 
