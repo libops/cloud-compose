@@ -94,4 +94,4 @@ runcmd:
   chmod 0775 /mnt/disks/data /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
   rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
-  bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1
+  bash /home/cloud-compose/start-cloud-compose-bootstrap.sh

@@ -297,6 +297,7 @@ for path in [
     "/home/cloud-compose/down",
     "/home/cloud-compose/rollout",
     "/home/cloud-compose/run.sh",
+    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
 ]:
     assert Path(path).exists(), path
     assert os.access(path, os.X_OK), path
@@ -486,6 +487,7 @@ for path in [
     "/home/cloud-compose/down",
     "/home/cloud-compose/rollout",
     "/home/cloud-compose/run.sh",
+    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
 ]:
     assert Path(path).exists(), path
     assert os.access(path, os.X_OK), path

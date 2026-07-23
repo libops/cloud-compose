@@ -27,7 +27,13 @@ enabled() {
 }
 
 mkdirs() {
-    mkdir -p "$BIN_DIR" "$TMP_DIR" "$PACKAGE_STATE_DIR" "$ARTIFACT_STATE_DIR" "$PUBLISHED_BIN_DIR"
+    # The managed binary is published through /home/cloud-compose/bin and must
+    # remain traversable after a root-owned bootstrap drops to cloud-compose.
+    # Converge existing directories as well as new ones so a previously
+    # restrictive service umask cannot leave the published symlink unusable.
+    install -d -m 0755 "$STATE_DIR" "$BIN_DIR"
+    install -d -m 0700 "$TMP_DIR" "$PACKAGE_STATE_DIR" "$ARTIFACT_STATE_DIR"
+    mkdir -p "$PUBLISHED_BIN_DIR"
 }
 
 with_lock() {

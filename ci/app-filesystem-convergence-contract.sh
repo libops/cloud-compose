@@ -15,8 +15,8 @@ export COMPOSE_PROJECTS_FILE="$tmp/compose-projects.json"
 export COMPOSE_APPS_ENV_DIR="$tmp/apps"
 export COMPOSE_APPS_STATE_DIR="$tmp/state"
 export CLOUD_COMPOSE_DATA_ROOT="$tmp/data"
-project_dir="$CLOUD_COMPOSE_DATA_ROOT/repository/app"
-mkdir -p "$project_dir"
+fixture_project_dir="$CLOUD_COMPOSE_DATA_ROOT/repository/app"
+mkdir -p "$fixture_project_dir"
 
 write_manifest() {
   local path="$1"
@@ -32,30 +32,30 @@ write_manifest() {
 # shellcheck disable=SC1091
 source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
 
-write_manifest "$project_dir"
-printf 'PRESERVED=value\n' >"$project_dir/.env"
-chmod 0400 "$project_dir/.env"
-original_inode="$(stat -c '%d:%i' "$project_dir/.env")"
+write_manifest "$fixture_project_dir"
+printf 'PRESERVED=value\n' >"$fixture_project_dir/.env"
+chmod 0400 "$fixture_project_dir/.env"
+original_inode="$(stat -c '%d:%i' "$fixture_project_dir/.env")"
 runtime_uid="$(id -u)"
 runtime_gid="$(id -g)"
 _converge_compose_app_filesystem_for_ids app "$runtime_uid" "$runtime_gid"
 
-[[ "$(<"$project_dir/.env")" == "PRESERVED=value" ]] ||
+[[ "$(<"$fixture_project_dir/.env")" == "PRESERVED=value" ]] ||
   fail "environment contents changed during metadata repair"
-[[ "$(stat -c '%d:%i' "$project_dir/.env")" == "$original_inode" ]] ||
+[[ "$(stat -c '%d:%i' "$fixture_project_dir/.env")" == "$original_inode" ]] ||
   fail "environment metadata repair replaced the file"
-[[ "$(stat -c '%u:%g:%a:%h' "$project_dir/.env")" == "${runtime_uid}:${runtime_gid}:640:1" ]] ||
+[[ "$(stat -c '%u:%g:%a:%h' "$fixture_project_dir/.env")" == "${runtime_uid}:${runtime_gid}:640:1" ]] ||
   fail "environment metadata did not converge"
-[[ "$(stat -c '%u:%g:%a' "$project_dir")" == "${runtime_uid}:${runtime_gid}:775" ]] ||
+[[ "$(stat -c '%u:%g:%a' "$fixture_project_dir")" == "${runtime_uid}:${runtime_gid}:775" ]] ||
   fail "exact manifest project directory metadata did not converge"
 
 # Convergence is idempotent and does not traverse application content.
-mkdir -p "$project_dir/preserved"
-printf 'unchanged\n' >"$project_dir/preserved/file"
-chmod 0600 "$project_dir/preserved/file"
-preserved_metadata="$(stat -c '%u:%g:%a:%i' "$project_dir/preserved/file")"
+mkdir -p "$fixture_project_dir/preserved"
+printf 'unchanged\n' >"$fixture_project_dir/preserved/file"
+chmod 0600 "$fixture_project_dir/preserved/file"
+preserved_metadata="$(stat -c '%u:%g:%a:%i' "$fixture_project_dir/preserved/file")"
 _converge_compose_app_filesystem_for_ids app "$runtime_uid" "$runtime_gid"
-[[ "$(stat -c '%u:%g:%a:%i' "$project_dir/preserved/file")" == "$preserved_metadata" ]] ||
+[[ "$(stat -c '%u:%g:%a:%i' "$fixture_project_dir/preserved/file")" == "$preserved_metadata" ]] ||
   fail "convergence changed a descendant outside the .env contract"
 
 # Hold convergence after its final read-only ownership transition while an
@@ -98,8 +98,8 @@ for _ in $(seq 1 500); do
   sleep 0.01
 done
 [[ -f "$CONVERGENCE_FROZEN" ]] || fail "convergence did not reach its frozen-directory state"
-if mv "$project_dir/.env" "$project_dir/.env.raced" 2>/dev/null; then
-  ln -s "$outside_target" "$project_dir/.env"
+if mv "$fixture_project_dir/.env" "$fixture_project_dir/.env.raced" 2>/dev/null; then
+  ln -s "$outside_target" "$fixture_project_dir/.env"
   : >"$tmp/adversary-swapped"
 fi
 : >"$CONVERGENCE_RELEASE"
@@ -114,27 +114,27 @@ wait "$convergence_pid"
 PATH="${PATH#"$tmp/bin:"}"
 export PATH
 
-mv "$project_dir/.env" "$project_dir/.env.regular"
-ln -s "$project_dir/.env.regular" "$project_dir/.env"
+mv "$fixture_project_dir/.env" "$fixture_project_dir/.env.regular"
+ln -s "$fixture_project_dir/.env.regular" "$fixture_project_dir/.env"
 if _converge_compose_app_filesystem_for_ids app "$runtime_uid" "$runtime_gid" >/dev/null 2>&1; then
   fail "symbolic-link environment file was accepted"
 fi
-chmod 0775 "$project_dir"
-rm "$project_dir/.env"
+chmod 0775 "$fixture_project_dir"
+rm "$fixture_project_dir/.env"
 
-mkdir "$project_dir/.env"
+mkdir "$fixture_project_dir/.env"
 if _converge_compose_app_filesystem_for_ids app "$runtime_uid" "$runtime_gid" >/dev/null 2>&1; then
   fail "non-regular environment path was accepted"
 fi
-chmod 0775 "$project_dir"
-rmdir "$project_dir/.env"
+chmod 0775 "$fixture_project_dir"
+rmdir "$fixture_project_dir/.env"
 
-ln "$project_dir/.env.regular" "$project_dir/.env"
+ln "$fixture_project_dir/.env.regular" "$fixture_project_dir/.env"
 if _converge_compose_app_filesystem_for_ids app "$runtime_uid" "$runtime_gid" >/dev/null 2>&1; then
   fail "hard-linked environment file was accepted"
 fi
-chmod 0775 "$project_dir"
-rm "$project_dir/.env"
+chmod 0775 "$fixture_project_dir"
+rm "$fixture_project_dir/.env"
 
 outside_project="$tmp/outside-project"
 mkdir "$outside_project"

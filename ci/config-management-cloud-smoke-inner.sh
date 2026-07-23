@@ -196,6 +196,7 @@ test -x /home/cloud-compose/up
 test -x /home/cloud-compose/down
 test -x /home/cloud-compose/rollout
 test -x /home/cloud-compose/run.sh
+test -x /home/cloud-compose/start-cloud-compose-bootstrap.sh
 python3 -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
 python3 -m json.tool /home/cloud-compose/application-env.json >/dev/null
 

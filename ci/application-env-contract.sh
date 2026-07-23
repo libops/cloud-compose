@@ -162,7 +162,10 @@ env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$host_env" \
     cd "$2"
     sync_compose_application_env
   ' application-env "$profile" "$tmp/alpha"
-! grep -Fq '# cloud-compose application: APPLICATION_LITERAL' "$tmp/alpha/.env"
+if grep -Fq '# cloud-compose application: APPLICATION_LITERAL' "$tmp/alpha/.env"; then
+  echo "Removed application environment entry remains in the Compose .env file" >&2
+  exit 1
+fi
 grep -Fq '# cloud-compose managed: COMPOSE_BIND_PORT' "$tmp/alpha/.env"
 
 fake_rollout="$tmp/fake-rollout"

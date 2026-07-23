@@ -5,6 +5,9 @@ set -eou pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
+# shellcheck disable=SC1091
+source /home/cloud-compose/bootstrap-helpers.sh
+
 run_as_cloud_compose() (
   # Configuration-management entrypoints commonly launch run.sh from /root.
   # Enter an accessible directory before dropping privileges so child scripts
@@ -28,6 +31,10 @@ runtime_enabled() {
     *) return 1 ;;
   esac
 }
+
+durable_bootstrap_marker="/home/cloud-compose/.cloud-compose-bootstrap-complete"
+current_boot_app_init_marker="/run/cloud-compose-app-init-complete"
+app_wait_seconds="${CLOUD_COMPOSE_APP_WAIT_SECONDS:-4500}"
 
 # The shared lifecycle lock must exist before the root-owned managed-runtime
 # installer and the unprivileged application service can contend for it. This
@@ -69,9 +76,16 @@ fi
 # An explicitly enabled Vault Agent is a startup dependency. Its systemd unit
 # also publishes a readiness marker before the application service may start.
 bash /home/cloud-compose/vault-agent-init.sh
-run_as_cloud_compose bash /home/cloud-compose/app-init.sh
+if cloud_compose_should_run_app_init \
+    "$durable_bootstrap_marker" "$current_boot_app_init_marker"; then
+  rm -f -- "$current_boot_app_init_marker"
+  run_as_cloud_compose bash /home/cloud-compose/app-init.sh
+  cloud_compose_publish_marker "$current_boot_app_init_marker"
+else
+  echo "Application initialization already completed during this boot; resuming service convergence"
+fi
 
-systemctl enable --now cloud-compose.service
+cloud_compose_start_and_wait_for_oneshot cloud-compose.service "$app_wait_seconds"
 if runtime_enabled "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}"; then
   systemctl enable --now cloud-compose-internal-services.timer
 else
@@ -88,5 +102,4 @@ else
   systemctl disable --now cloud-compose-docker-prune.timer cloud-compose-docker-prune.service >/dev/null 2>&1 || true
 fi
 systemctl enable --now cloud-compose-mariadb-backup.timer
-touch /home/cloud-compose/.cloud-compose-bootstrap-complete
-chown cloud-compose:cloud-compose /home/cloud-compose/.cloud-compose-bootstrap-complete
+cloud_compose_publish_marker "$durable_bootstrap_marker"

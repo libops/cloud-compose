@@ -126,7 +126,14 @@ provider-specific entry wins when the same username appears in both maps.
 Use the Ansible role or Salt formula when Terraform should not create the VM,
 disk, firewall, or DNS. These adapters install the packaged cloud-compose rootfs,
 write `.env`, write `compose-projects.json`, reload systemd, and optionally run
-the bootstrap.
+the bootstrap. Like the Terraform providers, both adapters start
+`cloud-compose-bootstrap.service` and wait for its durable readiness marker;
+transient bootstrap and application-service failures retry after 30 seconds.
+The Ansible role's four-hour async budget is intentionally longer than the
+starter's bounded three-hour wait. Inspect failures in
+`journalctl -u cloud-compose-bootstrap` and with
+`systemctl status cloud-compose-bootstrap cloud-compose`; the systemd journal
+is the canonical bootstrap log.
 
 These adapters are for a dedicated, empty application host. They install and
 restart Docker with `/mnt/disks/data/docker` as its data root, install

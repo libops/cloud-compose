@@ -159,6 +159,7 @@ with tempfile.TemporaryDirectory(prefix="cloud-compose-input-contract.") as temp
         reject(label, payload, expected)
 
 ansible_tasks = (repo_root / "ansible/roles/cloud_compose/tasks/main.yml").read_text()
+ansible_defaults = (repo_root / "ansible/roles/cloud_compose/defaults/main.yml").read_text()
 ansible_gate = ansible_tasks.find("Validate project directory and managed artifact host boundaries")
 ansible_first_mutation = ansible_tasks.find("Install Debian runtime dependencies")
 if ansible_gate < 0 or ansible_first_mutation < 0 or ansible_gate > ansible_first_mutation:
@@ -167,6 +168,12 @@ if "files/validate-runtime-inputs.py" not in ansible_tasks:
     fail("Ansible does not execute the shared host-input validator")
 if "--data-root" in ansible_tasks:
     fail("Ansible makes the production project ownership boundary configurable")
+if 'cmd: bash "{{ cloud_compose_home }}/start-cloud-compose-bootstrap.sh"' not in ansible_tasks:
+    fail("Ansible bypasses the retryable bootstrap service")
+if 'cmd: bash "{{ cloud_compose_home }}/run.sh"' in ansible_tasks:
+    fail("Ansible still invokes the one-shot bootstrap script directly")
+if "cloud_compose_bootstrap_timeout: 14400" not in ansible_defaults:
+    fail("Ansible bootstrap timeout does not cover the bounded retryable bootstrap wait")
 
 salt_state = (repo_root / "salt/cloud-compose/init.sls").read_text()
 cloud_smoke_driver = (repo_root / "ci/config-management-cloud-smoke.sh").read_text()
@@ -175,6 +182,10 @@ salt_gate = salt_state.find("cloud-compose-host-inputs-valid:")
 salt_first_mutation = salt_state.find("cloud-compose-packages:")
 if salt_gate < 0 or salt_first_mutation < 0 or salt_gate > salt_first_mutation:
     fail("Salt host-input validation does not precede its first host mutation")
+if "home ~ '/start-cloud-compose-bootstrap.sh'" not in salt_state:
+    fail("Salt bypasses the retryable bootstrap service")
+if "home ~ '/run.sh'" in salt_state:
+    fail("Salt still invokes the one-shot bootstrap script directly")
 gate_block = salt_state[salt_gate:salt_first_mutation]
 for marker in (
     "cmd.run:",

@@ -5,16 +5,20 @@ Requires=docker.service cloud-compose-metadata-firewall.service
 RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
 Wants=network-online.target
 After=network-online.target docker.service cloud-compose-metadata-firewall.service cloud-compose-vault-agent.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 User=cloud-compose
 Group=cloud-compose
+ExecStartPre=/bin/bash /home/cloud-compose/assert-app-initialized.sh
 ExecStartPre=/bin/bash /home/cloud-compose/assert-vault-ready.sh
 ExecStart=/bin/bash /home/cloud-compose/up
 ExecStop=/bin/bash /home/cloud-compose/down
-TimeoutStartSec=45min
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=1h
 TimeoutStopSec=15min
 
 [Install]
