@@ -24,7 +24,6 @@ cloud_compose:
         line one
         line two
     compose:
-      project_dir: /mnt/disks/data/libops/wp/main
       init: []
       up:
         - global-up-command
@@ -38,7 +37,6 @@ cloud_compose:
       projects:
         wp-prod:
           docker_compose_repo: https://github.com/libops/wp.git
-          project_dir: /mnt/disks/data/libops/wp/main
           docker_compose_up: []
           docker_compose_down:
             - app-down-command

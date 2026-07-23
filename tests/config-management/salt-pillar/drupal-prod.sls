@@ -8,7 +8,6 @@ cloud_compose:
   template: drupal
   runtime:
     compose:
-      project_dir: /mnt/disks/data/libops/drupal/main
       ingress:
         domain: drupal.example.edu
         acme_email: admin@example.edu

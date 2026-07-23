@@ -47,6 +47,10 @@ systemctl restart cloud-compose-overlay.service
 
 bash /home/cloud-compose/host-conf.sh
 bash /home/cloud-compose/host-init.sh
+# Persistent ignored files can retain metadata from an older VM generation.
+# Repair only the exact manifest project directory and its existing .env before
+# any unprivileged source or application lifecycle needs to write there.
+bash /home/cloud-compose/converge-app-filesystems.sh
 # Source preparation performs no application lifecycle work. It gives key
 # rotation a validated destination without allowing app/plugin initialization
 # to run before an explicitly enabled Vault Agent has authenticated.

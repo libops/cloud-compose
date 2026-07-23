@@ -15,7 +15,10 @@ of `/mnt/disks/data`. Before installing packages, creating accounts, or changing
 files, the formula resolves existing symlinks on the minion and rejects `/`,
 `/etc`, traversal, repeated/empty segments, control characters, and any symlink
 escape outside that boundary. The production boundary is intentionally not
-configurable.
+configurable. By default, the formula derives
+`/mnt/disks/data/<repository path>/<application key>`; changing a branch, tag,
+or commit therefore reuses the same checkout. Keep an explicit `project_dir`
+only when an established deployment path must remain unchanged.
 
 The same preflight validates `runtime.managed_runtime.artifacts` before writing
 the host manifest. Artifact names are safe basenames of at most 128 characters;

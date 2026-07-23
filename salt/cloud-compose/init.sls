@@ -261,7 +261,7 @@
 {% endfor %}
 {% set repo_path_source = repo | replace('https://github.com/', '') | replace('http://github.com/', '') | replace('git@github.com:', '') %}
 {% set repo_path = compose.get('repo_path') or (repo_path_source.strip('/') if repo_path_source else name) %}
-{% set project_dir = compose.get('project_dir') or data_dir ~ '/' ~ repo_path ~ '/' ~ branch %}
+{% set project_dir = compose.get('project_dir') or data_dir ~ '/' ~ repo_path ~ '/' ~ name %}
 {% set compose_project_name = compose.get('compose_project_name') or normalize_compose_project_name(repo_path, branch) %}
 {% set raw_explicit_projects = compose.get('projects', {}) %}
 {% if raw_explicit_projects is mapping %}
@@ -342,7 +342,7 @@
   'docker_compose_repo': app_repo,
   'docker_compose_branch': app_branch,
   'repo_path': app_repo_path,
-  'project_dir': app.get('project_dir') or data_dir ~ '/' ~ app_repo_path ~ '/' ~ app_branch,
+  'project_dir': app.get('project_dir') or data_dir ~ '/' ~ app_repo_path ~ '/' ~ app_name,
   'compose_project_name': app.get('compose_project_name') or normalize_compose_project_name(app_repo_path, app_branch),
   'ingress_port': app_ingress_port,
   'ingress': app_ingress,

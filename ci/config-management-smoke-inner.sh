@@ -257,7 +257,7 @@ projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_tex
 project = projects["isle-prod"]
 
 assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/main"
+assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/isle-prod"
 assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
 assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
@@ -267,14 +267,14 @@ assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
     "sitectl-isle": "v1.0.0",
 }
 assert project["docker_compose_repo"] == "https://github.com/libops/isle"
-assert project["project_dir"] == "/mnt/disks/data/libops/isle/main"
+assert project["project_dir"] == "/mnt/disks/data/libops/isle/isle-prod"
 assert project["ingress"]["domain"] == "isle.example.edu"
 assert project["sitectl_plugin"] == "isle"
 assert project["init_commands"] == []
 assert project["up_commands"] == []
 assert project["down_commands"] == ["app-down-command"]
 assert project["rollout_commands"] == ["global-rollout-command"]
-assert Path("/mnt/disks/data/libops/isle/main").is_dir()
+assert Path("/mnt/disks/data/libops/isle/isle-prod").is_dir()
 assert "BASH_ENV" not in env
 assert "LD_PRELOAD" not in env
 assert "PORT" not in env
@@ -515,7 +515,7 @@ run_salt_case \
   wp \
   sitectl-wp \
   wp.example.edu \
-  /mnt/disks/data/libops/wp/main \
+  /mnt/disks/data/libops/wp.git/wp-prod \
   libops-wp-v1-0-0
 
 run_salt_case \
@@ -525,7 +525,7 @@ run_salt_case \
   drupal \
   sitectl-drupal \
   drupal.example.edu \
-  /mnt/disks/data/libops/drupal/main \
+  /mnt/disks/data/libops/drupal.git/drupal-prod \
   libops-drupal-v1-0-0
 
 run_invalid_salt_case() {

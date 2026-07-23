@@ -241,7 +241,34 @@ Every Compose `project_dir` must be a normalized descendant of the fixed
 Ansible and Salt adapters apply the same validation before any filesystem
 mutation, and the host runtime resolves existing symlinks again before cloning
 or changing ownership. This boundary is intentionally not configurable on a
-production host.
+production host. When `project_dir` is omitted, every adapter derives the
+stable path `/mnt/disks/data/<repository path>/<application key>`. The Git
+branch, tag, or commit is deliberately not part of that path, so a ref update
+or reconstructed VM reconciles the persistent checkout in place. Set
+`project_dir` explicitly only when preserving an established deployment path
+or separating checkouts beyond the repository/application identity is
+required.
+
+Before dropping privileges during bootstrap, Cloud Compose also converges only
+the exact manifest project directory and its existing `.env`: the directory is
+`cloud-compose:cloud-compose` mode `0775`, and `.env` is mode `0640` with the
+same owner. This repairs metadata retained from an older VM without recursively
+changing checkout contents. A symbolic-link project path or a symbolic-link,
+non-regular, or multiply linked `.env` fails closed. The file contents and
+inode are preserved. The root bootstrap temporarily makes the verified project
+directory read-only and root-owned while it performs the no-follow `.env`
+validation, so an unprivileged process cannot substitute a link between the
+check and metadata update. In particular, this heals a checkout initialized by
+releases through 0.8.1, whose root-run application init could leave a mode
+`0600` `.env` owned by root before later releases moved app lifecycle work to
+the unprivileged account.
+
+Releases through 1.6 derived an omitted `project_dir` from the Git ref. Before
+upgrading an existing deployment that relied on that default, set
+`project_dir` explicitly to its current ref-scoped checkout if it must remain
+at the same path. Cloud Compose does not guess whether an old checkout can be
+moved safely. New deployments and callers that intentionally accept one fresh
+checkout should omit the override and use the stable default.
 
 GCP snapshot overlays accept Docker volume basenames only. The overlay helper
 verifies that an existing mount uses the configured lower, upper, and work

@@ -55,7 +55,7 @@ locals {
       project_dir = (
         try(trimspace(app.project_dir), "") != ""
         ? try(trimspace(app.project_dir), "")
-        : "/mnt/disks/data/${trim(replace(trimspace(app.docker_compose_repo), "/^[^:]+://[^/]+/", ""), "/")}/${trimspace(coalesce(try(app.docker_compose_branch, null), var.docker_compose_branch))}"
+        : "/mnt/disks/data/${trim(replace(trimspace(app.docker_compose_repo), "/^[^:]+://[^/]+/", ""), "/")}/${app_name}"
       )
       compose_project_name = (
         try(trimspace(app.compose_project_name), "") != ""
