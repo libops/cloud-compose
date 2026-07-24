@@ -138,7 +138,7 @@ vault_line="$(grep -nF 'bash /home/cloud-compose/vault-agent-init.sh' "$repo_roo
 source_line="$(grep -nF 'run_as_cloud_compose bash /home/cloud-compose/prepare-app-sources.sh' "$repo_root/rootfs/home/cloud-compose/run.sh" | cut -d: -f1)"
 rotation_line="$(grep -nF 'bash /home/cloud-compose/rotate-keys-daily.sh' "$repo_root/rootfs/home/cloud-compose/run.sh" | cut -d: -f1)"
 init_line="$(grep -nF 'run_as_cloud_compose bash /home/cloud-compose/app-init.sh' "$repo_root/rootfs/home/cloud-compose/run.sh" | cut -d: -f1)"
-app_line="$(grep -nF 'systemctl enable --now cloud-compose.service' "$repo_root/rootfs/home/cloud-compose/run.sh" | cut -d: -f1)"
+app_line="$(grep -nF 'cloud_compose_start_and_wait_for_oneshot cloud-compose.service' "$repo_root/rootfs/home/cloud-compose/run.sh" | cut -d: -f1)"
 [[ -n "$source_line" && -n "$rotation_line" && -n "$vault_line" && -n "$init_line" && -n "$app_line" ]] || \
     fail "bootstrap is missing a source, rotation, Vault, init, or app-service phase"
 (( source_line < rotation_line && rotation_line < vault_line && vault_line < init_line && init_line < app_line )) || \

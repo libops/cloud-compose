@@ -714,7 +714,7 @@ cloud-compose-clear-bootstrap-marker:
 {% if run_bootstrap is sameas true %}
 cloud-compose-bootstrap:
   cmd.run:
-    - name: bash {{ (home ~ '/run.sh') | json }}
+    - name: bash {{ (home ~ '/start-cloud-compose-bootstrap.sh') | json }}
     - creates: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
     - require:
 {% if install_packages %}

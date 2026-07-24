@@ -1,0 +1,30 @@
+[Unit]
+Description=Converge Cloud Compose application bootstrap
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
+ConditionPathExists=!/home/cloud-compose/.cloud-compose-bootstrap-complete
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /home/cloud-compose/run-bootstrap.sh
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=2h
+# Match the cloud-init execution contract: runtime binaries and application
+# scaffolding need traversable parent directories. Secret writers set their
+# own restrictive modes.
+UMask=0022
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloud-compose-bootstrap
+# Keep raw command output out of the warning-only Fluent Bit journal input.
+SyslogLevel=info
+SyslogLevelPrefix=no
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+
+[Install]
+WantedBy=multi-user.target

@@ -10,6 +10,9 @@ cd /home/cloud-compose
 # shellcheck disable=SC1091
 source /home/cloud-compose/compose-apps.sh
 
+acquire_cloud_compose_lifecycle_lock "init"
+trap release_cloud_compose_lifecycle_lock EXIT
+
 apps=()
 compose_app_names_array apps
 for app in "${apps[@]}"; do

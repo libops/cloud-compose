@@ -385,7 +385,20 @@ if [ -f /home/cloud-compose/.cloud-compose-bootstrap-complete ]; then
   echo complete
   exit 0
 fi
-if systemctl is-active --quiet cloud-compose; then
+bootstrap_load_state=\"\$(systemctl show --property=LoadState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
+if [ \"\$bootstrap_load_state\" = loaded ]; then
+  bootstrap_active_state=\"\$(systemctl show --property=ActiveState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
+  bootstrap_sub_state=\"\$(systemctl show --property=SubState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
+  case \"\$bootstrap_active_state:\$bootstrap_sub_state\" in
+    active:* | activating:* | *:auto-restart)
+      echo active
+      exit 0
+      ;;
+  esac
+elif [ \"\$bootstrap_load_state\" = not-found ] &&
+  systemctl is-active --quiet cloud-compose; then
+  # Releases before retryable bootstrap have no durable unit or marker; their
+  # active application service remains the compatibility completion signal.
   echo complete
   exit 0
 fi
@@ -443,8 +456,14 @@ wait_for_cloud_init() {
       ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set +e
 echo \"--- active bootstrap processes ---\"
 ps -eo pid,ppid,stat,etime,args | grep -E \"cloud-init|runcmd|run.sh|host-conf|host-init|app-init|install-dependencies|apt-get|docker|sitectl|git clone\" | grep -v grep
-echo \"--- /home/cloud-compose/run.log ---\"
-sudo tail -n 160 /home/cloud-compose/run.log
+echo \"--- cloud-compose bootstrap unit ---\"
+sudo journalctl -u cloud-compose-bootstrap --no-pager -n 160
+echo \"--- legacy cloud-compose bootstrap log (when present) ---\"
+if sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log; then
+  sudo tail -n 160 /home/cloud-compose/run.log
+else
+  echo \"Legacy bootstrap log is not present\"
+fi
 echo \"--- /var/log/cloud-init-output.log ---\"
 sudo tail -n 120 /var/log/cloud-init-output.log
 '" || true
@@ -472,8 +491,14 @@ echo \"--- /var/log/cloud-init.log ---\"
 sudo tail -n 400 /var/log/cloud-init.log
 echo \"--- cloud-init runcmd ---\"
 sudo sed -n '1,240p' /var/lib/cloud/instance/scripts/runcmd
-echo \"--- /home/cloud-compose/run.log ---\"
-sudo tail -n 400 /home/cloud-compose/run.log
+echo \"--- cloud-compose bootstrap unit ---\"
+sudo journalctl -u cloud-compose-bootstrap --no-pager -n 400
+echo \"--- legacy cloud-compose bootstrap log (when present) ---\"
+if sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log; then
+  sudo tail -n 400 /home/cloud-compose/run.log
+else
+  echo \"Legacy bootstrap log is not present\"
+fi
 echo \"--- cloud-compose unit ---\"
 sudo journalctl -u cloud-compose --no-pager -n 300
 echo \"--- lifecycle lock permissions ---\"

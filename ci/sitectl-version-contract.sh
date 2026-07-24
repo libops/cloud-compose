@@ -9,6 +9,41 @@ trap 'rm -rf "$tmp"' EXIT
 
 touch "$tmp/profile.sh"
 
+# A restrictive first-boot umask once left the root-owned managed binary path
+# untraversable after application initialization dropped privileges. Exercise
+# the production mkdirs implementation against that preexisting state and
+# require every invocation to converge both public and private modes.
+CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh" \
+    bash --noprofile --norc -c '
+        set -euo pipefail
+        source "$1"
+        STATE_DIR="$2/mode-state"
+        BIN_DIR="$STATE_DIR/bin"
+        TMP_DIR="$STATE_DIR/tmp"
+        PACKAGE_STATE_DIR="$STATE_DIR/packages"
+        ARTIFACT_STATE_DIR="$STATE_DIR/artifacts"
+        PUBLISHED_BIN_DIR="$2/published"
+
+        umask 0077
+        mkdir -p \
+            "$BIN_DIR" \
+            "$TMP_DIR" \
+            "$PACKAGE_STATE_DIR" \
+            "$ARTIFACT_STATE_DIR" \
+            "$PUBLISHED_BIN_DIR"
+        chmod 0700 "$STATE_DIR" "$BIN_DIR"
+        chmod 0755 "$TMP_DIR" "$PACKAGE_STATE_DIR" "$ARTIFACT_STATE_DIR"
+
+        mkdirs
+        mkdirs
+
+        test "$(stat -c "%a" "$STATE_DIR")" = 755
+        test "$(stat -c "%a" "$BIN_DIR")" = 755
+        test "$(stat -c "%a" "$TMP_DIR")" = 700
+        test "$(stat -c "%a" "$PACKAGE_STATE_DIR")" = 700
+        test "$(stat -c "%a" "$ARTIFACT_STATE_DIR")" = 700
+    ' cloud-compose-sitectl-modes "$runtime_script" "$tmp"
+
 run_contract() {
     CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh" \
         SITECTL_PACKAGES="$1" \

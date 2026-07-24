@@ -142,6 +142,21 @@ Use a full commit for reproducible production rollouts. A commit pin fixes the
 repository contents but does not prove who authored them; protect the selected
 repository and review/sign commits according to your downstream governance.
 
+First boot runs through `cloud-compose-bootstrap.service`. Both that bootstrap
+and `cloud-compose.service` retry failures after 30 seconds, so a transient
+registry, Vault, or Compose failure converges without an operator restarting
+cloud-init. Application initialization is serialized by the normal lifecycle
+lock and recorded for the current boot before the app starts; a bootstrap retry
+reuses that successful initialization instead of repeating it. Durable
+readiness is published only after the Compose `up` unit reaches its successful
+oneshot state. The cloud-init caller waits for that result, so configured
+post-initialization commands retain their ordering. Inspect the bounded system
+journal with `sudo journalctl -u cloud-compose-bootstrap` and the unit states
+with `systemctl status cloud-compose-bootstrap cloud-compose`. Bootstrap output
+uses a fixed `info` priority and has no unit-specific Fluent Bit input, so raw
+bootstrap output is not forwarded to Cloud Logging; systemd's own service
+failures remain available to the existing warning-level collector.
+
 ## Sitectl
 
 During init, the VM creates a `sitectl` context for every app. The default `up`

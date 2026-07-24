@@ -21,12 +21,13 @@ if grep -Fq 'google_compute_instance_iam_member.gce-start' <<<"$ppb_module"; the
 fi
 
 script="$repo_root/ci/gcp-upgrade-smoke.sh"
+shared_smoke="$repo_root/ci/cloud-smoke.sh"
 fixture="$repo_root/tests/smoke/gcp-upgrade/main.tf"
 variables="$repo_root/tests/smoke/gcp-upgrade/variables.tf"
 workflow="$repo_root/.github/workflows/cloud-smoke.yml"
 docs="$repo_root/docs/runtime-contracts.md"
 
-for required in "$script" "$fixture" "$variables" "$workflow" "$docs"; do
+for required in "$script" "$shared_smoke" "$fixture" "$variables" "$workflow" "$docs"; do
   [[ -f "$required" ]] || fail "required file is missing: $required"
 done
 
@@ -46,6 +47,16 @@ grep -Fq "provider_tag_cleanup gcp-wp \"\$run_id\"" "$script" ||
   fail "upgrade runner does not finish cleanup with the verified provider sweep"
 grep -Fq 'target_env gcp-wp' "$script" ||
   fail "upgrade cleanup does not load the concrete GCP WordPress target environment"
+[[ "$(grep -Fc 'sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log' "$shared_smoke")" -eq 2 ]] ||
+  fail "shared smoke diagnostics do not retain guarded legacy bootstrap logs for the pinned baseline"
+grep -Fq 'bootstrap_load_state=\"\$(systemctl show --property=LoadState --value -- cloud-compose-bootstrap.service' "$shared_smoke" ||
+  fail "shared smoke readiness does not distinguish retryable bootstrap from the legacy baseline"
+grep -Fq 'active:* | activating:* | *:auto-restart)' "$shared_smoke" ||
+  fail "shared smoke readiness can abandon the bootstrap unit during its restart delay"
+grep -Fq 'elif [ \"\$bootstrap_load_state\" = not-found ] &&' "$shared_smoke" ||
+  fail "shared smoke readiness does not restrict legacy fallback to an absent bootstrap unit"
+grep -Fq 'systemctl is-active --quiet cloud-compose; then' "$shared_smoke" ||
+  fail "shared smoke readiness lost its pre-bootstrap-unit compatibility signal"
 grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must match GITHUB_RUN_ID in GitHub Actions' "$script" ||
   fail "hosted cleanup ownership is not bound to the actual GitHub run id"
 grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must be set explicitly outside GitHub Actions' "$script" ||
@@ -141,12 +152,22 @@ if grep -Fq 'runcmd = [' "$fixture"; then
 fi
 git -C "$repo_root" show f33117cdbbf4a9c7d59006a4db986baef118e6bb:templates/cloud-init.yml \
   >"$tmp/baseline-cloud-init.yml" || fail "could not inspect the pinned baseline cloud-init"
-for cloud_init_template in "$repo_root/templates/cloud-init.yml" "$tmp/baseline-cloud-init.yml"; do
-  run_script_line="$(grep -nF 'bash /home/cloud-compose/run.sh' "$cloud_init_template" | cut -d: -f1)"
-  template_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$cloud_init_template" | cut -d: -f1)"
-  [[ -n "$template_initcmd_line" && -n "$run_script_line" && "$template_initcmd_line" -lt "$run_script_line" ]] ||
-    fail "baseline or current cloud-init does not execute fixture initcmd before run.sh"
-done
+baseline_run_line="$(grep -nF 'bash /home/cloud-compose/run.sh' "$tmp/baseline-cloud-init.yml" | cut -d: -f1 || true)"
+baseline_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$tmp/baseline-cloud-init.yml" | cut -d: -f1 || true)"
+[[ -n "$baseline_initcmd_line" && -n "$baseline_run_line" && "$baseline_initcmd_line" -lt "$baseline_run_line" ]] ||
+  fail "baseline cloud-init does not execute fixture initcmd before run.sh"
+
+current_bootstrap_line="$(
+  grep -nF 'bash /home/cloud-compose/start-cloud-compose-bootstrap.sh' \
+    "$repo_root/templates/cloud-init.yml" |
+    cut -d: -f1 || true
+)"
+current_initcmd_line="$(
+  grep -nF 'for CMD in ADDITIONAL_INITCMD' "$repo_root/templates/cloud-init.yml" |
+    cut -d: -f1 || true
+)"
+[[ -n "$current_initcmd_line" && -n "$current_bootstrap_line" && "$current_initcmd_line" -lt "$current_bootstrap_line" ]] ||
+  fail "current cloud-init does not execute fixture initcmd before retryable bootstrap"
 grep -Fq 'for unit in internal-services.timer internal-services.service cloud-compose-internal-services.timer cloud-compose-internal-services.service' "$script" ||
   fail "upgrade runner does not assert that both timer generations remain inactive after boot"
 grep -Fq 'run_direct_vpc_cold_start "$new_home" "$key_path" "$new_output" "$name" "$zone"' "$script" ||

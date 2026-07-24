@@ -580,7 +580,7 @@
 
 - name: Bootstrap cloud-compose runtime
   ansible.builtin.command:
-    cmd: bash "{{ cloud_compose_home }}/run.sh"
+    cmd: bash "{{ cloud_compose_home }}/start-cloud-compose-bootstrap.sh"
     creates: "{{ cloud_compose_home }}/.cloud-compose-bootstrap-complete"
   async: "{{ cloud_compose_bootstrap_timeout }}"
   poll: "{{ cloud_compose_bootstrap_poll_interval }}"

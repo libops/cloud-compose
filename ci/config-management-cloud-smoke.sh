@@ -247,8 +247,8 @@ echo \"--- cloud-init status ---\"
 cloud-init status --long
 echo \"--- /var/log/cloud-init-output.log ---\"
 tail -n 300 /var/log/cloud-init-output.log
-echo \"--- /home/cloud-compose/run.log ---\"
-tail -n 300 /home/cloud-compose/run.log
+echo \"--- cloud-compose bootstrap unit ---\"
+sudo journalctl -u cloud-compose-bootstrap --no-pager -n 300
 echo \"--- cloud-compose unit ---\"
 journalctl -u cloud-compose --no-pager -n 300
 echo \"--- docker ps ---\"
