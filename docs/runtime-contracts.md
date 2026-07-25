@@ -555,6 +555,59 @@ previous app credential with:
 sudo /home/cloud-compose/rotate-keys-app.sh rollback
 ```
 
+If the central credential for a module-created app identity is missing but
+distributed app copies remain, bootstrap first restores it only when every
+existing copy is a valid credential for the exact project and service account
+and all copies are byte-identical. The restored file retains the source
+modification time so recovery cannot reset the rotation interval. An invalid
+or conflicting copy fails before any IAM mutation. Distributed copies for a
+caller-supplied identity are not sufficient revocation authority and require
+operator-reviewed recovery.
+
+Formatting a new GCP data disk publishes a root-owned, single-use
+fresh-filesystem marker whose exact payload is
+`v1:gcp-disk-id:<google_compute_disk.data.disk_id>`. Terraform renders the same
+server-assigned disk incarnation into cloud-init and the root runtime
+environment. A marker restored from a snapshot onto a new disk therefore
+cannot authorize deletion of that new host's current IAM keys. GCP never
+accepts the generic marker used by non-GCP hosts.
+
+A supported GCP data-disk snapshot restore must run through Terraform and VM
+replacement so the replacement boot configuration receives the new disk's
+`disk_id`. Out-of-band attachment or hot-swapping a restored data disk while
+retaining an older boot configuration is unsupported and does not satisfy the
+fresh-authority invariant; converge the VM through Terraform before bootstrap.
+
+A reserved pending ext4 label carries fresh-format intent across a crash
+between formatting, mounting, and marker publication. The label can recreate a
+missing marker only while the mounted ext4 root is exactly root-owned, mode
+`0755`, and empty except for an empty, root-owned `lost+found`; a populated disk
+fails closed. An existing marker must have the exact expected disk payload,
+root ownership, private modes, and single link before the label can be cleared.
+Global durability barriers order marker publication and label clearing.
+
+While the marker exists, a module-created app identity or the
+always-module-created internal identity may reconcile leaked keys from an
+interrupted first bootstrap, but only while its exact consumer unit is loaded
+and inactive. Reconciliation durably flushes the complete validated
+user-managed-key baseline before deletion, retries deletion idempotently, and
+creates one replacement only after the empty-baseline state is also durable. A
+key that appears after the snapshot is never adopted into the deletion set and
+blocks progress for review. Host convergence keeps the data mount root owned by
+`root:cloud-compose` with mode `1775`, leaving the marker directory
+root-private while application paths remain group-creatable. Bootstrap
+consumes and flushes the marker immediately after the one-shot daily rotation
+converges every enabled identity. Consumption precedes the persistent rotation
+timer, Vault, application initialization, and application startup, closing the
+window in which a scheduled snapshot could retain destructive authority.
+
+Caller-supplied app identities never receive that destructive recovery path.
+An already-formatted disk has no fresh-filesystem attestation either: audit and
+revoke its exact orphan keys through an operator-reviewed procedure instead of
+creating the marker retroactively. Outside fresh reconciliation, reaching
+IAM's ten-user-key limit fails before a create request or pending state is
+written.
+
 To disable an existing app file credential, first leave
 `app_credentials_enabled = true`, apply the 1.0 runtime, and retire the remote
 key plus every distributed local copy:
@@ -573,13 +626,15 @@ user-managed key IDs and fails closed without deleting any of them. Audit and
 explicitly revoke those IDs before disabling Key Admin. A missing local file is
 reported as complete only when the service account has no user-managed key.
 
-An ambiguous key-creation response never triggers an automatic second create.
-`rotate-keys.sh audit ...` reports only the baseline delta/key IDs. Recovery
-requires the single audited orphan key ID as explicit confirmation to
-`rotate-keys.sh recover ... KEY_ID`; if no key was created, recovery clears the
-pending state without deleting anything. Recovery also waits
-`ROTATION_RECOVERY_SETTLE_SECONDS` (60 seconds by default) before trusting an
-empty IAM delta, avoiding a false “no key created” result during propagation.
+A definite IAM rejection that proves no key was created clears the pre-create
+state. A timeout, transport failure, or otherwise ambiguous key-creation
+response never triggers an automatic second create. `rotate-keys.sh audit ...`
+reports only the baseline delta/key IDs. Recovery requires the single audited
+orphan key ID as explicit confirmation to `rotate-keys.sh recover ... KEY_ID`;
+if no key was created, recovery clears the pending state without deleting
+anything. Recovery also waits `ROTATION_RECOVERY_SETTLE_SECONDS` (60 seconds by
+default) before trusting an empty IAM delta, avoiding a false “no key created”
+result during propagation.
 
 All Terraform entrypoints, including GCP, DigitalOcean, and Linode, support the
 same verified rootfs archive contract. When `runtime.rootfs_archive_url` is

@@ -26,6 +26,9 @@ APP_CREDENTIALS_FILE="${APP_CREDENTIALS_FILE:-/mnt/disks/data/cloud-compose/app/
 ROTATION_APP_CREDENTIAL_OWNER="${ROTATION_CREDENTIAL_OWNER-100}"
 ROTATION_CENTRAL_CREDENTIAL_OWNER="${ROTATION_CENTRAL_CREDENTIAL_OWNER-root}"
 ROTATION_CREDENTIAL_GROUP="${ROTATION_CREDENTIAL_GROUP-cloud-compose}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-}"
+rotation_reconcile_orphans=false
 rotation_action="${1:-rotate}"
 
 if [[ -n "$ROTATION_CREDENTIAL_GROUP" &&
@@ -55,12 +58,163 @@ case "${GCP_APP_CREDENTIALS_ENABLED:-false}" in
     ;;
 esac
 
+case "${GCP_APP_SERVICE_ACCOUNT_MANAGED:-false}" in
+  true) app_service_account_managed=true ;;
+  false) app_service_account_managed=false ;;
+  *)
+    echo "GCP_APP_SERVICE_ACCOUNT_MANAGED must be true or false" >&2
+    exit 2
+    ;;
+esac
+
 rotate_keys() {
   ROTATION_CREDENTIAL_OWNER="$ROTATION_CENTRAL_CREDENTIAL_OWNER" \
+  ROTATION_RECONCILE_ORPHANS="$rotation_reconcile_orphans" \
+  CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" \
+  CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="$CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY" \
   bash "$rotate_keys_script" "$1" \
     "$GCP_APP_SERVICE_ACCOUNT_EMAIL" \
     "$GCP_PROJECT" \
     "$APP_CREDENTIALS_FILE"
+}
+
+require_inactive_app_service() {
+  local load_state active_state
+
+  load_state="$(systemctl show --property=LoadState --value -- cloud-compose.service)" || {
+    echo "Could not determine whether cloud-compose.service is loaded" >&2
+    return 1
+  }
+  active_state="$(systemctl show --property=ActiveState --value -- cloud-compose.service)" || {
+    echo "Could not determine whether cloud-compose.service is inactive" >&2
+    return 1
+  }
+  if [[ "$load_state" != "loaded" || "$active_state" != "inactive" ]]; then
+    echo "Fresh-filesystem key reconciliation requires loaded, inactive cloud-compose.service; observed ${load_state}/${active_state}" >&2
+    return 1
+  fi
+}
+
+app_credential_key_id() {
+  local file="$1" key_id
+
+  key_id="$(jq -jr '
+    (.private_key_id |
+      select(type == "string" and length > 0 and (explode | index(0) == null))),
+    "\u001f"
+  ' "$file")" || return 1
+  key_id="${key_id%$'\x1f'}"
+  [[ "$key_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  printf '%s\n' "$key_id"
+}
+
+validate_app_credentials() {
+  local file="$1" key_id
+
+  [[ ! -L "$file" && -f "$file" ]] || return 1
+  key_id="$(app_credential_key_id "$file")" || return 1
+  jq -e \
+    --arg key_id "$key_id" \
+    --arg service_account "$GCP_APP_SERVICE_ACCOUNT_EMAIL" \
+    --arg project_id "$GCP_PROJECT" '
+      .type == "service_account" and
+      .private_key_id == $key_id and
+      .client_email == $service_account and
+      .project_id == $project_id and
+      .token_uri == "https://oauth2.googleapis.com/token" and
+      (.private_key | type == "string" and
+        startswith("-----BEGIN PRIVATE KEY-----") and
+        contains("-----END PRIVATE KEY-----"))
+    ' "$file" >/dev/null
+}
+
+restore_central_app_credentials() {
+  local source="$1" target_dir target_tmp
+
+  target_dir="$(dirname -- "$APP_CREDENTIALS_FILE")"
+  if [[ -L "$target_dir" || ( -e "$target_dir" && ! -d "$target_dir" ) ]]; then
+    echo "Application credential directory is unsafe: $target_dir" >&2
+    return 1
+  fi
+  install -d -m 0750 -- "$target_dir"
+  if [[ -L "$target_dir" || ! -d "$target_dir" ]]; then
+    echo "Application credential directory changed during recovery: $target_dir" >&2
+    return 1
+  fi
+
+  target_tmp="$(mktemp "${APP_CREDENTIALS_FILE}.tmp.XXXXXX")" || return 1
+  if ! install -m 0440 "$source" "$target_tmp"; then
+    rm -f -- "$target_tmp"
+    return 1
+  fi
+  if ! touch -r "$source" "$target_tmp"; then
+    rm -f -- "$target_tmp"
+    return 1
+  fi
+  if ! chown -- "$ROTATION_CENTRAL_CREDENTIAL_OWNER" "$target_tmp"; then
+    rm -f -- "$target_tmp"
+    return 1
+  fi
+  if [[ -n "$ROTATION_CREDENTIAL_GROUP" ]] &&
+    ! chgrp -- "$ROTATION_CREDENTIAL_GROUP" "$target_tmp"; then
+    rm -f -- "$target_tmp"
+    return 1
+  fi
+  if ! mv -f -- "$target_tmp" "$APP_CREDENTIALS_FILE"; then
+    rm -f -- "$target_tmp"
+    return 1
+  fi
+  validate_app_credentials "$APP_CREDENTIALS_FILE" || {
+    echo "Recovered central application credentials failed validation" >&2
+    return 1
+  }
+  echo "Recovered central application credentials from unanimous distributed copies"
+}
+
+recover_distributed_app_credentials() {
+  local first_target="" target
+  local -a pending_artifacts=(
+    "${APP_CREDENTIALS_FILE}.rotation-pending.json"
+    "${APP_CREDENTIALS_FILE}.rotation-staged.json"
+    "${APP_CREDENTIALS_FILE}.rotation-previous.json"
+    "${APP_CREDENTIALS_FILE}.rotation-replacement.json"
+  )
+
+  if [[ -f "$APP_CREDENTIALS_FILE" ]]; then
+    return 0
+  fi
+  for target in "${pending_artifacts[@]}"; do
+    if [[ -e "$target" || -L "$target" ]]; then
+      if [[ "$target" == "${APP_CREDENTIALS_FILE}.rotation-pending.json" ]]; then
+        return 0
+      fi
+      echo "Cannot recover central credentials while an orphaned rotation artifact remains: $target" >&2
+      return 1
+    fi
+  done
+
+  for target in "${app_credential_targets[@]}"; do
+    if [[ ! -e "$target" && ! -L "$target" ]]; then
+      continue
+    fi
+    if ! validate_app_credentials "$target"; then
+      echo "Distributed application credentials are invalid: $target" >&2
+      return 1
+    fi
+    if [[ -z "$first_target" ]]; then
+      first_target="$target"
+    elif ! cmp -s -- "$first_target" "$target"; then
+      echo "Distributed application credentials disagree; refusing remote key reconciliation" >&2
+      return 1
+    fi
+  done
+  if [[ -n "$first_target" ]]; then
+    if [[ "$app_service_account_managed" != "true" ]]; then
+      echo "Caller-supplied app identities require operator-reviewed central credential recovery" >&2
+      return 1
+    fi
+    restore_central_app_credentials "$first_target"
+  fi
 }
 
 install_app_credentials() {
@@ -144,6 +298,13 @@ for target in "${credential_artifacts[@]}"; do
     exit 2
   fi
 done
+for target in "${app_credential_targets[@]}"; do
+  target_dir="$(dirname -- "$target")"
+  if [[ -L "$target_dir" || ( -e "$target_dir" && ! -d "$target_dir" ) ]]; then
+    echo "Application credential directory is unsafe: $target_dir" >&2
+    exit 2
+  fi
+done
 
 if [[ "$rotation_action" == "retire" ]]; then
   rotate_keys retire
@@ -161,6 +322,14 @@ if [[ "$app_credentials_enabled" != "true" ]]; then
   done
   echo "Application file credentials are disabled"
   exit 0
+fi
+
+recover_distributed_app_credentials
+if [[ ! -e "$APP_CREDENTIALS_FILE" && ! -L "$APP_CREDENTIALS_FILE" &&
+  "$app_service_account_managed" == "true" &&
+  ( -e "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" || -L "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" ) ]]; then
+  require_inactive_app_service
+  rotation_reconcile_orphans=true
 fi
 
 install -d -m 0750 "$(dirname -- "$APP_CREDENTIALS_FILE")"

@@ -184,13 +184,28 @@ assert_contains "$app_init" 'trap release_cloud_compose_lifecycle_lock EXIT'
 assert_contains "$run_script" 'if cloud_compose_should_run_app_init'
 assert_contains "$run_script" 'cloud_compose_publish_marker "$current_boot_app_init_marker"'
 assert_contains "$run_script" 'cloud_compose_start_and_wait_for_oneshot cloud-compose.service "$app_wait_seconds"'
+assert_contains "$run_script" '"$fresh_filesystem_marker" "$fresh_filesystem_identity"'
 assert_contains "$run_script" 'cloud_compose_publish_marker "$durable_bootstrap_marker"'
+[[ "$(grep -Fc 'cloud_compose_consume_fresh_filesystem_marker \' "$run_script")" == "1" ]] ||
+    fail "bootstrap must have one fresh-filesystem authority consumption boundary"
+rotation_line="$(grep -nF 'bash /home/cloud-compose/rotate-keys-daily.sh' "$run_script" | cut -d: -f1)"
+fresh_marker_line="$(grep -nF 'cloud_compose_consume_fresh_filesystem_marker \' "$run_script" | cut -d: -f1)"
+fresh_marker_sync_line="$(grep -nFx 'sync' "$run_script" | cut -d: -f1)"
+key_timer_line="$(grep -nF 'systemctl enable --now cloud-compose-key-rotation.timer' "$run_script" | cut -d: -f1)"
+vault_line="$(grep -nF 'bash /home/cloud-compose/vault-agent-init.sh' "$run_script" | cut -d: -f1)"
 init_line="$(grep -nF 'run_as_cloud_compose bash /home/cloud-compose/app-init.sh' "$run_script" | cut -d: -f1)"
 boot_marker_line="$(grep -nF 'cloud_compose_publish_marker "$current_boot_app_init_marker"' "$run_script" | cut -d: -f1)"
 app_line="$(grep -nF 'cloud_compose_start_and_wait_for_oneshot cloud-compose.service' "$run_script" | cut -d: -f1)"
 durable_marker_line="$(grep -nF 'cloud_compose_publish_marker "$durable_bootstrap_marker"' "$run_script" | cut -d: -f1)"
-((init_line < boot_marker_line && boot_marker_line < app_line && app_line < durable_marker_line)) ||
-    fail "bootstrap does not publish init, await the app, then publish durable readiness"
+((rotation_line < fresh_marker_line &&
+    fresh_marker_line < fresh_marker_sync_line &&
+    fresh_marker_sync_line < key_timer_line &&
+    key_timer_line < vault_line &&
+    vault_line < init_line &&
+    init_line < boot_marker_line &&
+    boot_marker_line < app_line &&
+    app_line < durable_marker_line)) ||
+    fail "bootstrap does not consume fresh authority durably before persistent rotation, Vault, and application initialization"
 
 assert_contains "$run_bootstrap" 'if ((EUID != 0)); then'
 assert_contains "$run_bootstrap" 'exec bash /home/cloud-compose/run.sh'
@@ -283,7 +298,8 @@ rm -f -- "$durable_marker"
 # Execute the production run script from a relocated fixture so the contract can
 # inject deterministic host commands without writing to /home or /run. The
 # first application-service convergence fails after app-init succeeds. The
-# second full run must reuse the current-boot init marker and publish durable
+# fresh reconciliation authority must already be consumed before that failure;
+# the second run reuses the current-boot init marker and publishes durable
 # readiness after the service recovers.
 integration_root="$tmp/integration"
 integration_home="$integration_root/home/cloud-compose"
@@ -291,11 +307,14 @@ integration_run="$integration_root/run"
 integration_bin="$integration_root/bin"
 integration_log="$integration_root/systemctl.log"
 app_init_count="$integration_root/app-init-count"
+fresh_data_root="$integration_root/data"
+fresh_marker="$fresh_data_root/.cloud-compose/fresh-filesystem"
 first_output="$integration_root/first-attempt.log"
 retry_output="$integration_root/retry-attempt.log"
-mkdir -p "$integration_home" "$integration_run" "$integration_bin"
+mkdir -p "$integration_home" "$integration_run" "$integration_bin" "$(dirname -- "$fresh_marker")"
 : >"$integration_log"
 printf '0\n' >"$app_init_count"
+printf 'fresh\n' >"$fresh_marker"
 
 sed \
     -e "s#/home/cloud-compose#$integration_home#g" \
@@ -344,6 +363,12 @@ cat >"$integration_bin/sleep" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$integration_bin/sync" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s sync\n' "${RUN_ATTEMPT:?}" >>"${INTEGRATION_SYSTEMCTL_LOG:?}"
+[[ "$RUN_ATTEMPT" != "sync-fail" ]]
+EOF
 cat >"$integration_bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -379,6 +404,32 @@ case "$1" in
         ;;
 esac
 EOF
+cat >"$integration_bin/stat" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target="${!#}"
+format=""
+previous=""
+for argument in "$@"; do
+    if [[ "$previous" == "-c" ]]; then
+        format="$argument"
+    fi
+    previous="$argument"
+done
+marker="${INTEGRATION_FRESH_MARKER:?}"
+case "$target:$format" in
+    "$(dirname -- "$marker"):%u:%g:%a")
+        printf '%s\n' "${FRESH_MARKER_DIR_IDENTITY:-0:0:700}"
+        ;;
+    "$marker:%u:%g:%a:%h")
+        printf '%s\n' "${FRESH_MARKER_IDENTITY:-0:0:600:1}"
+        ;;
+    *)
+        exec /usr/bin/stat "$@"
+        ;;
+esac
+EOF
 chmod +x "$integration_bin"/*
 
 integration_env=(
@@ -387,8 +438,10 @@ integration_env=(
     "CLOUD_COMPOSE_SYSTEMD_POLL_SECONDS=1"
     "CLOUD_COMPOSE_PROVIDER=contract"
     "CLOUD_COMPOSE_DOCKER_PRUNE_ENABLED=false"
+    "CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER=$fresh_marker"
     "LIBOPS_INTERNAL_SERVICES_ENABLED=false"
     "LIBOPS_MANAGED_RUNTIME_ENABLED=false"
+    "INTEGRATION_FRESH_MARKER=$fresh_marker"
     "INTEGRATION_SYSTEMCTL_LOG=$integration_log"
     "PATH=$integration_bin:/usr/bin:/bin"
 )
@@ -402,6 +455,8 @@ fi
     fail "failed first attempt did not retain current-boot app-init readiness"
 [[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
     fail "failed first attempt published durable bootstrap readiness"
+[[ ! -e "$fresh_marker" ]] ||
+    fail "failed first attempt retained fresh-filesystem authority past key convergence"
 
 env "${integration_env[@]}" RUN_ATTEMPT=recover \
     bash "$integration_home/run.sh" >"$retry_output" 2>&1
@@ -409,11 +464,81 @@ env "${integration_env[@]}" RUN_ATTEMPT=recover \
     fail "bootstrap retry repeated successful app-init"
 [[ -f "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
     fail "bootstrap retry did not publish durable readiness"
+[[ ! -e "$fresh_marker" ]] ||
+    fail "successful bootstrap retry retained fresh-filesystem reconciliation authority"
 grep -Fq 'Application initialization already completed during this boot' "$retry_output" ||
     fail "bootstrap retry did not report reuse of successful app-init"
 grep -Fq 'fail reset-failed -- cloud-compose.service' "$integration_log" ||
     fail "first bootstrap attempt did not exercise failed service recovery"
 grep -Fq 'recover enable -- cloud-compose.service' "$integration_log" ||
     fail "bootstrap retry did not converge the application service"
+
+# Marker removal must be flushed before durable readiness can be republished.
+rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+printf 'fresh\n' >"$fresh_marker"
+if env "${integration_env[@]}" RUN_ATTEMPT=sync-fail \
+    bash "$integration_home/run.sh" >/dev/null 2>&1; then
+    fail "bootstrap accepted a failed post-consume durability barrier"
+fi
+[[ ! -e "$fresh_marker" ]] ||
+    fail "post-consume durability coverage did not remove the fresh marker"
+[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "failed post-consume durability barrier published readiness"
+env "${integration_env[@]}" RUN_ATTEMPT=recover \
+    bash "$integration_home/run.sh" >/dev/null 2>&1
+[[ -f "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "bootstrap retry did not flush an already-absent marker before readiness"
+
+# GCP never falls back to the generic non-GCP marker identity. This check runs
+# before key rotation, so missing disk identity cannot reach IAM.
+rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+printf 'fresh\n' >"$fresh_marker"
+if env "${integration_env[@]}" CLOUD_COMPOSE_PROVIDER=gcp RUN_ATTEMPT=recover \
+    bash "$integration_home/run.sh" >/dev/null 2>&1; then
+    fail "GCP bootstrap accepted the generic fresh-filesystem identity"
+fi
+[[ -f "$fresh_marker" ]] ||
+    fail "GCP bootstrap consumed generic fresh-filesystem authority"
+[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "GCP bootstrap with generic authority published durable readiness"
+
+# A marker payload for another incarnation must fail before application
+# initialization or durable readiness.
+rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+printf 'v1:gcp-disk-id:111111111111111111\n' >"$fresh_marker"
+if env "${integration_env[@]}" RUN_ATTEMPT=recover \
+    bash "$integration_home/run.sh" >/dev/null 2>&1; then
+    fail "bootstrap accepted a mismatched fresh-filesystem marker payload"
+fi
+[[ -f "$fresh_marker" ]] ||
+    fail "mismatched fresh-filesystem marker payload was consumed"
+[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "mismatched fresh-filesystem marker payload published durable readiness"
+
+# Unsafe authority must fail closed before durable readiness. The current-boot
+# app-init marker remains valid, so these attempts exercise only the early
+# marker boundary rather than repeating application initialization.
+rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+printf 'fresh\n' >"$fresh_marker"
+if env "${integration_env[@]}" RUN_ATTEMPT=recover \
+    FRESH_MARKER_IDENTITY=1000:1000:600:1 \
+    bash "$integration_home/run.sh" >/dev/null 2>&1; then
+    fail "bootstrap accepted a fresh-filesystem marker with unsafe ownership"
+fi
+[[ -f "$fresh_marker" ]] ||
+    fail "unsafe fresh-filesystem marker was consumed"
+[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "unsafe fresh-filesystem marker published durable readiness"
+
+rm -f -- "$fresh_marker"
+ln -s /dev/null "$fresh_marker"
+if env "${integration_env[@]}" RUN_ATTEMPT=recover \
+    bash "$integration_home/run.sh" >/dev/null 2>&1; then
+    fail "bootstrap accepted a symlink fresh-filesystem marker"
+fi
+[[ -L "$fresh_marker" ]] ||
+    fail "symlink fresh-filesystem marker was consumed"
+[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+    fail "symlink fresh-filesystem marker published durable readiness"
 
 echo "Bootstrap recovery contract passed"

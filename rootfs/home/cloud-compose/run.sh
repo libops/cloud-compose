@@ -34,6 +34,8 @@ runtime_enabled() {
 
 durable_bootstrap_marker="/home/cloud-compose/.cloud-compose-bootstrap-complete"
 current_boot_app_init_marker="/run/cloud-compose-app-init-complete"
+fresh_filesystem_marker="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
+fresh_filesystem_identity="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-fresh}"
 app_wait_seconds="${CLOUD_COMPOSE_APP_WAIT_SECONDS:-4500}"
 
 # The shared lifecycle lock must exist before the root-owned managed-runtime
@@ -63,7 +65,16 @@ bash /home/cloud-compose/converge-app-filesystems.sh
 # to run before an explicitly enabled Vault Agent has authenticated.
 run_as_cloud_compose bash /home/cloud-compose/prepare-app-sources.sh
 if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
+  if [[ ! "$fresh_filesystem_identity" =~ ^v1:gcp-disk-id:[0-9]{1,32}$ ]]; then
+    echo "GCP fresh-filesystem identity is missing or unsafe" >&2
+    exit 1
+  fi
   bash /home/cloud-compose/rotate-keys-daily.sh
+fi
+cloud_compose_consume_fresh_filesystem_marker \
+  "$fresh_filesystem_marker" "$fresh_filesystem_identity"
+sync
+if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
   if runtime_enabled "${GCP_APP_CREDENTIALS_ENABLED:-false}" ||
     runtime_enabled "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}"; then
     systemctl enable --now cloud-compose-key-rotation.timer

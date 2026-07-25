@@ -81,7 +81,8 @@ fi
 # Ansible and Salt adapters can install the runtime onto pre-mounted storage.
 # Normalize only the mount roots here so every entry path can create lifecycle
 # locks without granting recursive ownership of application or control data.
-for mutable_root in /mnt/disks/data /mnt/disks/volumes; do
-  install -d -m 0775 -o cloud-compose -g cloud-compose "$mutable_root"
-done
+# The sticky, root-owned data root protects root-only bootstrap attestations
+# while still allowing the cloud-compose group to create application paths.
+install -d -m 1775 -o root -g cloud-compose /mnt/disks/data
+install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/volumes
 install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops

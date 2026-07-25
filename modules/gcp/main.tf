@@ -358,6 +358,9 @@ rollout_env = var.rollout_enabled ? {
   } : {
   ROLLOUT_ENABLED = "false"
 }
+fresh_filesystem_env = {
+  CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}"
+}
 host_env = merge({
   HOME                                 = "/home/cloud-compose"
   GCP_PROJECT                          = var.project_id
@@ -387,6 +390,7 @@ host_env = merge({
   PRODUCTION                           = tostring(var.production)
   SITECTL_VERIFY_ARGS                  = join(" ", local.primary_compose_project.sitectl_verify_args)
   GCP_APP_SERVICE_ACCOUNT_EMAIL        = local.app_service_account_email
+  GCP_APP_SERVICE_ACCOUNT_MANAGED      = tostring(local.app_service_account_managed)
   GCP_APP_CREDENTIALS_ENABLED          = tostring(local.app_credentials_enabled)
   POWER_MANAGEMENT_ENABLED             = tostring(var.power_management_enabled)
   COMPOSE_PROFILES                     = local.internal_services_compose_profiles
@@ -399,7 +403,7 @@ host_env = merge({
   LIBOPS_MANAGED_RUNTIME_ENABLED       = tostring(var.libops_managed_runtime_enabled)
   LIBOPS_INTERNAL_SERVICES_ENABLED     = tostring(local.internal_services_enabled)
   LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE = tostring(local.internal_services_enabled && var.libops_internal_services_auto_update)
-}, local.rollout_env)
+}, local.fresh_filesystem_env, local.rollout_env)
 env_file_content             = <<-EOT
     - path: "/home/cloud-compose/.env"
       permissions: "0640"
@@ -460,6 +464,7 @@ rollout_runcmd = var.rollout_enabled ? [
 cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
   FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
   FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
+  FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",
   WRITE_FILES_CONTENT            = local.write_files_content,
   DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts,
   COMPOSE_PROJECTS_FILE          = local.compose_projects_file,
@@ -480,9 +485,10 @@ vm_service_account_email = var.service_account_email != "" ? data.google_service
 vm_service_account_id    = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].id
 vm_service_account_name  = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].name
 
-app_service_account_email = var.app_service_account_email != "" ? data.google_service_account.app[0].email : google_service_account.app[0].email
-app_service_account_id    = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].id
-app_service_account_name  = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].name
+app_service_account_email   = var.app_service_account_email != "" ? data.google_service_account.app[0].email : google_service_account.app[0].email
+app_service_account_id      = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].id
+app_service_account_name    = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].name
+app_service_account_managed = var.app_service_account_email == ""
 
 app_credentials_enabled            = var.app_credentials_enabled
 internal_services_enabled          = var.libops_internal_services_enabled || var.power_management_enabled

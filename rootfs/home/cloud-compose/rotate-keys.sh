@@ -93,6 +93,10 @@ ROTATION_AUTH_MAX_RETRIES="${ROTATION_AUTH_MAX_RETRIES:-6}"
 ROTATION_AUTH_SLEEP_SECONDS="${ROTATION_AUTH_SLEEP_SECONDS:-5}"
 ROTATION_RECOVERY_SETTLE_SECONDS="${ROTATION_RECOVERY_SETTLE_SECONDS:-60}"
 ROTATION_CREDENTIAL_OWNER="${ROTATION_CREDENTIAL_OWNER-100}"
+ROTATION_RECONCILE_ORPHANS="${ROTATION_RECONCILE_ORPHANS:-false}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-}"
+ROTATION_RUNTIME_DIR="${ROTATION_RUNTIME_DIR:-/run/cloud-compose-key-rotation}"
 
 validate_integer_setting() {
     local name="$1" value="$2" minimum="$3" maximum="$4"
@@ -114,6 +118,13 @@ if [[ -n "$ROTATION_CREDENTIAL_OWNER" &&
     log_error "ROTATION_CREDENTIAL_OWNER must be empty, a numeric UID, or a safe local account name"
     exit 2
 fi
+case "$ROTATION_RECONCILE_ORPHANS" in
+    true | false) ;;
+    *)
+        log_error "ROTATION_RECONCILE_ORPHANS must be true or false"
+        exit 2
+        ;;
+esac
 
 if [[ -L "$credentials_dir" || ( -e "$credentials_dir" && ! -d "$credentials_dir" ) ]]; then
     log_error "Credentials directory is unsafe: $credentials_dir"
@@ -141,6 +152,19 @@ STATE_READY_AT=0
 STATE_DISABLED_AT=0
 ACCESS_TOKEN=""
 KEY_OPERATION_RESULT=""
+EPHEMERAL_CREATE_RESPONSE=""
+
+cleanup_ephemeral_create_response() {
+    if [[ -n "$EPHEMERAL_CREATE_RESPONSE" ]]; then
+        rm -f -- "$EPHEMERAL_CREATE_RESPONSE"
+        EPHEMERAL_CREATE_RESPONSE=""
+    fi
+}
+
+trap cleanup_ephemeral_create_response EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 now_epoch() {
     date +%s
@@ -173,6 +197,54 @@ valid_iam_key_name() {
     [[ "$key_name" == "$prefix"* ]] || return 1
     key_id="${key_name#"$prefix"}"
     valid_iam_key_id "$key_id" && [[ "$key_name" == "$prefix$key_id" ]]
+}
+
+require_fresh_reconciliation_authority() {
+    local marker_dir marker_root marker_identity marker_dir_identity marker_payload
+    local marker_root_identity marker_size
+
+    if [[ "$ROTATION_RECONCILE_ORPHANS" != "true" ]]; then
+        log_error "Managed orphan-key reconciliation was not authorized"
+        return 1
+    fi
+    if [[ ! "$CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY" =~ ^v1:gcp-disk-id:[0-9]{1,32}$ ]]; then
+        log_error "GCP fresh-filesystem identity is missing or unsafe"
+        return 1
+    fi
+    if [[ "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" != /* ||
+        "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" == "/" ||
+        "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" == *$'\n'* ||
+        "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" == *$'\r'* ||
+        "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" =~ (^|/)\.\.?(/|$) ]]; then
+        log_error "Fresh-filesystem marker path is unsafe: $CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER"
+        return 1
+    fi
+    marker_dir="$(dirname -- "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER")"
+    marker_root="$(dirname -- "$marker_dir")"
+    if [[ -L "$marker_root" || ! -d "$marker_root" ||
+        -L "$marker_dir" || ! -d "$marker_dir" ||
+        -L "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" ||
+        ! -f "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" ]]; then
+        log_error "Fresh-filesystem marker is missing or unsafe: $CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER"
+        return 1
+    fi
+    marker_root_identity="$(stat -c '%u:%a' -- "$marker_root")" || return 1
+    marker_dir_identity="$(stat -c '%u:%g:%a' -- "$marker_dir")" || return 1
+    marker_identity="$(stat -c '%u:%g:%a:%h' -- "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER")" || return 1
+    if [[ "$marker_root_identity" != "0:1775" ||
+        "$marker_dir_identity" != "0:0:700" ||
+        "$marker_identity" != "0:0:600:1" ]]; then
+        log_error "Fresh-filesystem marker ownership or mode is unsafe: $CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER"
+        return 1
+    fi
+    marker_size="$(stat -c '%s' -- "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER")" || return 1
+    marker_payload=""
+    if [[ "$marker_size" != "$((${#CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY} + 1))" ]] ||
+        ! IFS= read -r marker_payload <"$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" ||
+        [[ "$marker_payload" != "$CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY" ]]; then
+        log_error "Fresh-filesystem marker does not match this GCP data disk incarnation"
+        return 1
+    fi
 }
 
 write_state() {
@@ -210,6 +282,10 @@ write_state() {
     fi
     chmod 0600 "$state_tmp"
     mv -f -- "$state_tmp" "$PENDING_STATE"
+    # IAM mutation must never outrun the exact state that makes its retry
+    # idempotent. A global sync is available on COS and flushes both the
+    # renamed file and its parent-directory entry.
+    sync
 }
 
 load_state() {
@@ -225,7 +301,8 @@ load_state() {
         --arg credentials_file "$CREDENTIALS_FILE" '
         select(
             .version == 2 and
-            (.phase == "creating" or .phase == "staged" or .phase == "authenticated" or
+            (.phase == "reconciling" or .phase == "creating-fresh" or
+             .phase == "creating" or .phase == "staged" or .phase == "authenticated" or
              .phase == "ready" or .phase == "grace" or .phase == "rolling-back" or
              .phase == "rollback" or .phase == "revoke-new") and
             .service_account == $service_account and
@@ -235,6 +312,7 @@ load_state() {
             (.new_key_id | type == "string" and (explode | index(0) == null)) and
             (.new_key_name | type == "string" and (explode | index(0) == null)) and
             (.baseline_key_names | type == "array") and
+            (.baseline_key_names | length <= 10 and . == (sort | unique)) and
             all(.baseline_key_names[];
                 type == "string" and (explode | index(0) == null)) and
             (.created_at | type == "number" and . >= 0 and floor == .) and
@@ -288,6 +366,10 @@ load_state() {
 }
 
 cleanup_state() {
+    # A stale cleanup is safe: every preceding cloud mutation targets the
+    # exact persisted key name and its retry accepts the already-absent state.
+    # Durability barriers are required before mutations, not after removing
+    # retry metadata for an operation that has already converged.
     rm -f -- "$STAGED_CREDENTIALS" "$PREVIOUS_CREDENTIALS" \
         "$REPLACEMENT_CREDENTIALS" "$PENDING_STATE"
 }
@@ -317,10 +399,11 @@ write_access_header_file() {
 }
 
 list_user_keys() {
-    local keys_response curl_status=0
+    local keys_response normalized_keys encoded_key_name key_name curl_status=0
 
     write_access_header_file || return 1
     keys_response="$(curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 120 \
+        --max-filesize 1048576 \
         --connect-timeout 5 --max-time 30 \
         -H "@$ACCESS_HEADER_FILE" \
         "https://iam.googleapis.com/v1/$SA_RESOURCE/keys")" || curl_status=$?
@@ -329,17 +412,40 @@ list_user_keys() {
         log_error "Failed to list service-account keys"
         return 1
     fi
-    jq -cer --arg prefix "$SA_RESOURCE/keys/" '
+    normalized_keys="$(jq -cer --arg prefix "$SA_RESOURCE/keys/" '
         (.keys // []) as $keys |
         if ($keys | type) != "array" then error("invalid key list") else
-            [$keys[] |
-                select(.keyType == "USER_MANAGED") |
-                select((.name | type) == "string" and (.name | startswith($prefix))) |
-                {name: .name, disabled: (.disabled // false)}
-            ] |
-            if all(.[]; (.disabled | type) == "boolean") then . else error("invalid disabled state") end
+            [$keys[] | select(.keyType == "USER_MANAGED")] as $user_keys |
+            if ($user_keys | length) > 10 then error("too many user-managed keys")
+            elif any($user_keys[];
+                (.name | type) != "string" or
+                (.name | startswith($prefix) | not) or
+                ((.disabled // false) | type) != "boolean")
+            then error("invalid user-managed key")
+            elif ([$user_keys[].name] | unique | length) != ($user_keys | length)
+            then error("duplicate user-managed key")
+            else
+                [$user_keys[] | {name: .name, disabled: (.disabled // false)}] | sort_by(.name)
+            end
         end
-    ' <<<"$keys_response"
+    ' <<<"$keys_response")" || {
+        log_error "IAM returned an invalid user-managed key inventory"
+        return 1
+    }
+    while IFS= read -r encoded_key_name; do
+        key_name="$(
+            if ! printf '%s' "$encoded_key_name" | base64 --decode; then
+                exit 1
+            fi
+            printf '\037'
+        )" || return 1
+        key_name="${key_name%$'\x1f'}"
+        if ! valid_iam_key_name "$key_name"; then
+            log_error "IAM returned an invalid user-managed key name"
+            return 1
+        fi
+    done < <(jq -r '.[].name | @base64' <<<"$normalized_keys")
+    printf '%s\n' "$normalized_keys"
 }
 
 list_user_key_names() {
@@ -577,12 +683,220 @@ authenticate_credentials_with_backoff() {
     return 1
 }
 
+reset_after_definite_create_rejection() {
+    if [[ "$STATE_PHASE" == "creating-fresh" ]]; then
+        STATE_PHASE=reconciling
+        STATE_BASELINE_KEY_NAMES='[]'
+        STATE_CREATED_AT="$(now_epoch)"
+        write_state
+    else
+        cleanup_state
+    fi
+}
+
+definite_create_rejection_status() {
+    case "$1" in
+        400 | 401 | 403 | 404 | 409 | 429) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+prepare_rotation_runtime_dir() {
+    local runtime_identity
+
+    if [[ "$ROTATION_RUNTIME_DIR" != /* || "$ROTATION_RUNTIME_DIR" == "/" ||
+        "$ROTATION_RUNTIME_DIR" == *$'\n'* || "$ROTATION_RUNTIME_DIR" == *$'\r'* ||
+        "$ROTATION_RUNTIME_DIR" =~ (^|/)\.\.?(/|$) ||
+        -L "$ROTATION_RUNTIME_DIR" ||
+        ( -e "$ROTATION_RUNTIME_DIR" && ! -d "$ROTATION_RUNTIME_DIR" ) ]]; then
+        log_error "Rotation runtime directory is unsafe: $ROTATION_RUNTIME_DIR"
+        return 1
+    fi
+    install -d -m 0700 -- "$ROTATION_RUNTIME_DIR" || return 1
+    if [[ -L "$ROTATION_RUNTIME_DIR" || ! -d "$ROTATION_RUNTIME_DIR" ]]; then
+        log_error "Rotation runtime directory changed during preparation: $ROTATION_RUNTIME_DIR"
+        return 1
+    fi
+    runtime_identity="$(stat -c '%u:%a' -- "$ROTATION_RUNTIME_DIR")" || return 1
+    if [[ "$runtime_identity" != "${EUID}:700" ]]; then
+        log_error "Rotation runtime directory has unsafe ownership or mode: $ROTATION_RUNTIME_DIR"
+        return 1
+    fi
+}
+
+create_replacement_key() {
+    local response_tmp http_status="" curl_status=0
+    local new_key_name="" new_key_id private_key_data="" staged_tmp
+
+    prepare_rotation_runtime_dir || {
+        reset_after_definite_create_rejection
+        return 1
+    }
+    response_tmp="$(mktemp "${ROTATION_RUNTIME_DIR}/iam-create-response.XXXXXX")" || {
+        reset_after_definite_create_rejection
+        return 1
+    }
+    EPHEMERAL_CREATE_RESPONSE="$response_tmp"
+    chmod 0600 "$response_tmp"
+    if ! write_access_header_file; then
+        cleanup_ephemeral_create_response
+        reset_after_definite_create_rejection
+        return 1
+    fi
+
+    log_info "Creating replacement key for $SERVICE_ACCOUNT"
+    http_status="$(curl -sS --connect-timeout 5 --max-time 30 -X POST \
+        -H "@$ACCESS_HEADER_FILE" \
+        -H "Content-Type: application/json" \
+        -o "$response_tmp" -w '%{http_code}' \
+        "https://iam.googleapis.com/v1/$SA_RESOURCE/keys")" || curl_status=$?
+    rm -f -- "$ACCESS_HEADER_FILE"
+
+    new_key_name="$(jq -er '.name | select(type == "string" and length > 0)' \
+        "$response_tmp" 2>/dev/null)" || new_key_name=""
+    if [[ -z "$new_key_name" ]]; then
+        cleanup_ephemeral_create_response
+        if definite_create_rejection_status "$http_status"; then
+            reset_after_definite_create_rejection
+            log_error "IAM rejected key creation with HTTP $http_status; no key was created"
+        else
+            log_error "Key creation had an indeterminate result; pending state prevents another key until audited recovery"
+        fi
+        return 1
+    fi
+    new_key_id="${new_key_name##*/}"
+    if [[ ! "$new_key_id" =~ ^[A-Za-z0-9_-]+$ ]] ||
+        [[ "$new_key_name" != "$SA_RESOURCE/keys/$new_key_id" ]]; then
+        cleanup_ephemeral_create_response
+        log_error "Key creation response contained an unexpected resource name; use audited recovery"
+        return 1
+    fi
+
+    STATE_NEW_KEY_ID="$new_key_id"
+    STATE_NEW_KEY_NAME="$new_key_name"
+    private_key_data="$(jq -er '.privateKeyData | select(type == "string" and length > 0)' \
+        "$response_tmp" 2>/dev/null)" || private_key_data=""
+    cleanup_ephemeral_create_response
+    if [[ -z "$private_key_data" ]]; then
+        STATE_PHASE=revoke-new
+        write_state
+        if delete_key "$new_key_name"; then
+            cleanup_state
+        fi
+        log_error "Key creation response omitted replacement credentials"
+        return 1
+    fi
+    if ((curl_status != 0)); then
+        log_info "Recovered a complete replacement credential from an interrupted IAM response"
+    fi
+
+    staged_tmp="$(mktemp "${STAGED_CREDENTIALS}.tmp.XXXXXX")" || return 1
+    if ! printf '%s' "$private_key_data" | base64 -d >"$staged_tmp" ||
+        ! validate_credentials_key "$staged_tmp" "$new_key_id"; then
+        rm -f -- "$staged_tmp"
+        STATE_PHASE=revoke-new
+        write_state
+        if delete_key "$new_key_name"; then
+            cleanup_state
+        fi
+        log_error "IAM returned invalid replacement credentials"
+        return 1
+    fi
+    chmod 0600 "$staged_tmp"
+    mv -f -- "$staged_tmp" "$STAGED_CREDENTIALS"
+
+    STATE_PHASE=staged
+    write_state
+    if ! install_staged_credentials; then
+        STATE_PHASE=revoke-new
+        write_state
+        if delete_key "$new_key_name"; then
+            cleanup_state
+        fi
+        log_error "Could not safely preserve and install replacement credentials"
+        return 1
+    fi
+    log_info "Installed replacement key $new_key_id; previous credentials remain available for rollback"
+}
+
+finish_orphan_reconciliation() {
+    local encoded_key_name key_name current_names remaining_baseline unexpected
+    local remaining_ids unexpected_ids
+
+    while IFS= read -r encoded_key_name; do
+        key_name="$(
+            if ! printf '%s' "$encoded_key_name" | base64 --decode; then
+                exit 1
+            fi
+            printf '\037'
+        )" || return 1
+        key_name="${key_name%$'\x1f'}"
+        valid_iam_key_name "$key_name" || return 1
+        log_info "Deleting fresh-filesystem orphan key ${key_name##*/}"
+        if ! delete_key "$key_name"; then
+            log_error "Failed to delete fresh-filesystem orphan key ${key_name##*/}; reconciliation will retry"
+            return 1
+        fi
+    done < <(jq -r '.[] | @base64' <<<"$STATE_BASELINE_KEY_NAMES")
+
+    current_names="$(list_user_key_names)" || return 1
+    remaining_baseline="$(jq -cn \
+        --argjson before "$STATE_BASELINE_KEY_NAMES" \
+        --argjson after "$current_names" \
+        '$after | map(select(. as $name | $before | index($name))) | sort')" || return 1
+    unexpected="$(jq -cn \
+        --argjson before "$STATE_BASELINE_KEY_NAMES" \
+        --argjson after "$current_names" \
+        '$after - $before | sort')" || return 1
+
+    if [[ "$(jq -r 'length' <<<"$unexpected")" != "0" ]]; then
+        unexpected_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$unexpected")" || return 1
+        log_error "Unexpected concurrent user-managed keys appeared during fresh-filesystem reconciliation: $unexpected_ids"
+        return 1
+    fi
+    if [[ "$(jq -r 'length' <<<"$remaining_baseline")" != "0" ]]; then
+        remaining_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$remaining_baseline")" || return 1
+        log_error "Deleted orphan keys are still visible and will be retried: $remaining_ids"
+        return 1
+    fi
+
+    STATE_PHASE=creating-fresh
+    STATE_BASELINE_KEY_NAMES='[]'
+    STATE_CREATED_AT="$(now_epoch)"
+    write_state
+    create_replacement_key
+}
+
+begin_orphan_reconciliation() {
+    require_fresh_reconciliation_authority || return 1
+    fetch_access_token || return 1
+
+    STATE_PHASE=reconciling
+    STATE_CURRENT_KEY_ID=""
+    STATE_NEW_KEY_ID=""
+    STATE_NEW_KEY_NAME=""
+    STATE_BASELINE_KEY_NAMES="$(list_user_key_names)" || return 1
+    STATE_CREATED_AT="$(now_epoch)"
+    STATE_READY_AT=0
+    STATE_DISABLED_AT=0
+    write_state
+    finish_orphan_reconciliation
+}
+
 resume_pending_prepare() {
     local recovered_key_id
 
     load_state || return 1
     case "$STATE_PHASE" in
-        creating)
+        reconciling)
+            require_fresh_reconciliation_authority || return 1
+            fetch_access_token || return 1
+            finish_orphan_reconciliation
+            ;;
+        creating | creating-fresh)
+            if [[ "$STATE_PHASE" == "creating-fresh" ]]; then
+                require_fresh_reconciliation_authority || return 1
+            fi
             if [[ -L "$STAGED_CREDENTIALS" || ! -f "$STAGED_CREDENTIALS" ]]; then
                 log_error "Key creation has an ambiguous result; run audit, then recover with an explicitly confirmed orphan key ID"
                 return 1
@@ -643,8 +957,7 @@ resume_pending_prepare() {
 
 prepare_rotation() {
     local current_key_id="" file_modified_at file_age_seconds
-    local new_key_response="" new_key_name new_key_id private_key_data staged_tmp
-    local create_succeeded=true curl_status=0
+    local baseline_key_names baseline_count baseline_ids
 
     if [[ -L "$CREDENTIALS_FILE" || ( -e "$CREDENTIALS_FILE" && ! -f "$CREDENTIALS_FILE" ) ]]; then
         log_error "Credentials path is unsafe: $CREDENTIALS_FILE"
@@ -673,83 +986,29 @@ prepare_rotation() {
             log_error "Existing credentials file does not match the rotation target: $CREDENTIALS_FILE"
             return 1
         }
+    elif [[ "$ROTATION_RECONCILE_ORPHANS" == "true" ]]; then
+        begin_orphan_reconciliation
+        return
     fi
 
     fetch_access_token || return 1
+    baseline_key_names="$(list_user_key_names)" || return 1
+    baseline_count="$(jq -r 'length' <<<"$baseline_key_names")" || return 1
+    if ((10#$baseline_count >= 10)); then
+        baseline_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$baseline_key_names")" || return 1
+        log_error "Service account already has the 10 user-managed keys allowed by IAM: $baseline_ids"
+        return 1
+    fi
     STATE_PHASE=creating
     STATE_CURRENT_KEY_ID="$current_key_id"
     STATE_NEW_KEY_ID=""
     STATE_NEW_KEY_NAME=""
-    STATE_BASELINE_KEY_NAMES="$(list_user_key_names)" || return 1
+    STATE_BASELINE_KEY_NAMES="$baseline_key_names"
     STATE_CREATED_AT="$(now_epoch)"
     STATE_READY_AT=0
     STATE_DISABLED_AT=0
     write_state
-
-    log_info "Creating replacement key for $SERVICE_ACCOUNT"
-    write_access_header_file || return 1
-    new_key_response="$(curl -fsS --connect-timeout 5 --max-time 30 -X POST \
-        -H "@$ACCESS_HEADER_FILE" \
-        -H "Content-Type: application/json" \
-        "https://iam.googleapis.com/v1/$SA_RESOURCE/keys")" || curl_status=$?
-    rm -f -- "$ACCESS_HEADER_FILE"
-    if ((curl_status != 0)); then
-        create_succeeded=false
-    fi
-    if [[ "$create_succeeded" != "true" ]]; then
-        log_error "Key creation had an indeterminate result; pending state prevents another key until audited recovery"
-        return 1
-    fi
-
-    new_key_name="$(jq -er '.name | select(type == "string" and length > 0)' <<<"$new_key_response")" || {
-        log_error "Key creation response omitted the key resource name; use audited recovery"
-        return 1
-    }
-    new_key_id="${new_key_name##*/}"
-    if [[ ! "$new_key_id" =~ ^[A-Za-z0-9_-]+$ ]] || [[ "$new_key_name" != "$SA_RESOURCE/keys/$new_key_id" ]]; then
-        log_error "Key creation response contained an unexpected resource name; use audited recovery"
-        return 1
-    fi
-
-    STATE_NEW_KEY_ID="$new_key_id"
-    STATE_NEW_KEY_NAME="$new_key_name"
-    private_key_data="$(jq -er '.privateKeyData | select(type == "string" and length > 0)' <<<"$new_key_response")" || {
-        STATE_PHASE=revoke-new
-        write_state
-        if delete_key "$new_key_name"; then
-            cleanup_state
-        fi
-        log_error "Key creation response omitted replacement credentials"
-        return 1
-    }
-
-    staged_tmp="$(mktemp "${STAGED_CREDENTIALS}.tmp.XXXXXX")" || return 1
-    if ! printf '%s' "$private_key_data" | base64 -d >"$staged_tmp" ||
-        ! validate_credentials_key "$staged_tmp" "$new_key_id"; then
-        rm -f -- "$staged_tmp"
-        STATE_PHASE=revoke-new
-        write_state
-        if delete_key "$new_key_name"; then
-            cleanup_state
-        fi
-        log_error "IAM returned invalid replacement credentials"
-        return 1
-    fi
-    chmod 0600 "$staged_tmp"
-    mv -f -- "$staged_tmp" "$STAGED_CREDENTIALS"
-
-    STATE_PHASE=staged
-    write_state
-    if ! install_staged_credentials; then
-        STATE_PHASE=revoke-new
-        write_state
-        if delete_key "$new_key_name"; then
-            cleanup_state
-        fi
-        log_error "Could not safely preserve and install replacement credentials"
-        return 1
-    fi
-    log_info "Installed replacement key $new_key_id; previous credentials remain available for rollback"
+    create_replacement_key
 }
 
 authenticate_rotation() {
@@ -993,7 +1252,7 @@ rotation_audit() {
         return 0
     fi
     load_state || return 1
-    if [[ "$STATE_PHASE" == "creating" ]]; then
+    if [[ "$STATE_PHASE" == "creating" || "$STATE_PHASE" == "creating-fresh" ]]; then
         candidates="$(creation_candidates)" || return 1
     fi
     if [[ "$STATE_PHASE" == "grace" ]]; then
@@ -1016,7 +1275,7 @@ rotation_audit() {
             phase: $phase,
             current_key_id: $current_key_id,
             new_key_id: $new_key_id,
-            recovery_required: ($phase == "creating"),
+            recovery_required: ($phase == "creating" or $phase == "creating-fresh"),
             candidate_key_ids: [$candidate_names[] | split("/")[-1]],
             created_at: $created_at,
             ready_at: $ready_at,
@@ -1029,7 +1288,7 @@ recover_ambiguous_creation() {
     local candidates candidate_id creation_age
 
     load_state || return 1
-    if [[ "$STATE_PHASE" != "creating" ]]; then
+    if [[ "$STATE_PHASE" != "creating" && "$STATE_PHASE" != "creating-fresh" ]]; then
         log_error "Audited recovery is valid only for an ambiguous creating state"
         return 1
     fi
@@ -1041,8 +1300,15 @@ recover_ambiguous_creation() {
     fi
     candidates="$(creation_candidates)" || return 1
     if [[ "$(jq -r 'length' <<<"$candidates")" == "0" ]]; then
-        cleanup_state
-        log_info "Audit found no key beyond the pre-create baseline; cleared ambiguous state"
+        if [[ "$STATE_PHASE" == "creating-fresh" ]]; then
+            STATE_PHASE=reconciling
+            STATE_BASELINE_KEY_NAMES='[]'
+            write_state
+            log_info "Audit found no key after fresh reconciliation; retained empty-baseline state for a safe retry"
+        else
+            cleanup_state
+            log_info "Audit found no key beyond the pre-create baseline; cleared ambiguous state"
+        fi
         return 0
     fi
     if [[ "$(jq -r 'length' <<<"$candidates")" != "1" ]]; then
@@ -1059,8 +1325,15 @@ recover_ambiguous_creation() {
     fetch_access_token || return 1
     log_info "Deleting explicitly confirmed orphan key $candidate_id from ambiguous creation"
     delete_key "$SA_RESOURCE/keys/$candidate_id" || return 1
-    cleanup_state
-    log_info "Audited recovery completed; a later run may create a new replacement"
+    if [[ "$STATE_PHASE" == "creating-fresh" ]]; then
+        STATE_PHASE=reconciling
+        STATE_BASELINE_KEY_NAMES='[]'
+        write_state
+        log_info "Audited fresh-key recovery completed; retained empty-baseline state for a safe retry"
+    else
+        cleanup_state
+        log_info "Audited recovery completed; a later run may create a new replacement"
+    fi
 }
 
 rotation_status() {

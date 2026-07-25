@@ -17,6 +17,9 @@ mkdir -p "$tmp/bin" "$tmp/dev" "$tmp/mount" "$tmp/systemd"
 device="$tmp/dev/data"
 : >"$device"
 calls="$tmp/calls"
+fresh_marker="$tmp/mount/.cloud-compose/fresh-filesystem"
+label_state="$tmp/label-state"
+: >"$label_state"
 
 cat >"$tmp/bin/readlink" <<'EOF'
 #!/usr/bin/env bash
@@ -41,6 +44,30 @@ EOF
 cat >"$tmp/bin/mkfs.ext4" <<'EOF'
 #!/usr/bin/env bash
 printf 'mkfs\n' >>"${CALLS:?}"
+label=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "-L" ]]; then
+    label="$argument"
+  fi
+  previous="$argument"
+done
+printf '%s' "$label" >"${FAKE_LABEL_STATE:?}"
+EOF
+cat >"$tmp/bin/e2label" <<'EOF'
+#!/usr/bin/env bash
+case "$#" in
+  1)
+    cat "${FAKE_LABEL_STATE:?}"
+    ;;
+  2)
+    printf '%s' "$2" >"${FAKE_LABEL_STATE:?}"
+    printf 'label-set %s\n' "$2" >>"${CALLS:?}"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
 EOF
 cat >"$tmp/bin/resize2fs" <<'EOF'
 #!/usr/bin/env bash
@@ -65,8 +92,56 @@ EOF
 cat >"$tmp/bin/mount" <<'EOF'
 #!/usr/bin/env bash
 printf 'mount\n' >>"${CALLS:?}"
-if [[ "${1:-}" == "--move" ]]; then
+status="${FAKE_MOUNT_STATUS:-0}"
+if [[ "${1:-}" == "--move" && "$status" == "0" ]]; then
   printf '%s\n' "${3:?}" >"${FAKE_MOUNT_STATE:?}"
+fi
+exit "$status"
+EOF
+cat >"$tmp/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target="${!#}"
+format=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "-c" ]]; then
+    format="$argument"
+  fi
+  previous="$argument"
+done
+case "$target:$format" in
+  "${MOUNT_PATH:?}:%u:%g:%a")
+    printf '%s\n' "${FAKE_FRESH_ROOT_IDENTITY:-0:0:755}"
+    ;;
+  "$MOUNT_PATH/.cloud-compose:%u:%g:%a")
+    printf '%s\n' "${FAKE_MARKER_DIR_IDENTITY:-0:0:700}"
+    ;;
+  "$MOUNT_PATH/.cloud-compose/fresh-filesystem:%u:%g:%a:%h")
+    printf 'marker\n' >>"${CALLS:?}"
+    printf '%s\n' "${FAKE_MARKER_IDENTITY:-0:0:600:1}"
+    ;;
+  "$MOUNT_PATH/lost+found:%u:%g:%a")
+    printf '%s\n' "${FAKE_LOST_FOUND_IDENTITY:-0:0:700}"
+    ;;
+  *)
+    exec /usr/bin/stat "$@"
+    ;;
+esac
+EOF
+cat >"$tmp/bin/sync" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [[ -s "${FAKE_SYNC_COUNT:?}" ]]; then
+  count="$(<"$FAKE_SYNC_COUNT")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$FAKE_SYNC_COUNT"
+printf 'sync\n' >>"${CALLS:?}"
+if [[ -n "${FAKE_SYNC_FAIL_AT:-}" && "$count" == "$FAKE_SYNC_FAIL_AT" ]]; then
+  exit 1
 fi
 EOF
 cat >"$tmp/bin/findmnt" <<'EOF'
@@ -136,18 +211,29 @@ run_prep() {
     : >"$calls"
     rm -f -- "$tmp/mount-state"
     rm -f -- "$tmp/findmnt-count"
+    printf '0\n' >"$tmp/sync-count"
     FAKE_DEVICE="$configured_device" FAKE_MOUNT_STATE="$tmp/mount-state" \
-        FAKE_FINDMNT_COUNT="$tmp/findmnt-count" CALLS="$calls" \
+        FAKE_FINDMNT_COUNT="$tmp/findmnt-count" FAKE_LABEL_STATE="$label_state" \
+        FAKE_SYNC_COUNT="$tmp/sync-count" CALLS="$calls" \
         PATH="$tmp/bin:/usr/bin:/bin" PREP_SCRIPT="$prep_script" MOUNT_PATH="$tmp/mount" \
         CLOUD_COMPOSE_SYSTEMD_DIR="$tmp/systemd" \
         DEVICE_PATH="${TEST_DEVICE_PATH:-/dev/disk/by-id/test-data}" \
+        PREP_EXTRA_ARG="${TEST_PREP_EXTRA_ARG:-}" \
+        PREP_MARKER_IDENTITY="${TEST_PREP_MARKER_IDENTITY:-}" \
         bash --noprofile --norc -c '
             source "$PREP_SCRIPT"
             if [[ -n "${TEST_PROVIDER_MOUNT:-}" ]]; then
                 digitalocean_automatic_mount() { printf "%s\n" "$TEST_PROVIDER_MOUNT"; }
             fi
             is_block_device() { return 0; }
-            main "$DEVICE_PATH" "$MOUNT_PATH"
+            prep_args=("$DEVICE_PATH" "$MOUNT_PATH")
+            if [[ -n "$PREP_EXTRA_ARG" ]]; then
+                prep_args+=("$PREP_EXTRA_ARG")
+            fi
+            if [[ -n "$PREP_MARKER_IDENTITY" ]]; then
+                prep_args+=("$PREP_MARKER_IDENTITY")
+            fi
+            main "${prep_args[@]}"
         '
 }
 
@@ -182,6 +268,144 @@ fi
 if grep -Fxq resize "$calls"; then
     fail "a newly formatted whole-disk filesystem was resized redundantly"
 fi
+
+rm -rf -- "$tmp/mount/.cloud-compose" "$tmp/mount/lost+found"
+if TEST_PREP_EXTRA_ARG=--unsupported FAKE_BLKID_STATUS=2 run_prep >/dev/null 2>&1; then
+    fail "an unsupported filesystem preparation option was accepted"
+fi
+[[ ! -e "$fresh_marker" ]] ||
+    fail "an unsupported filesystem preparation option published a fresh-filesystem marker"
+if [[ -s "$calls" ]]; then
+    fail "an unsupported filesystem preparation option mutated the filesystem"
+fi
+
+TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 run_prep
+[[ ! -e "$fresh_marker" ]] ||
+    fail "an existing filesystem was marked as freshly formatted"
+if grep -Fxq marker "$calls"; then
+    fail "an existing filesystem invoked fresh-filesystem marker publication"
+fi
+
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=2 FAKE_MOUNT_STATUS=1 run_prep >/dev/null 2>&1; then
+    fail "a failed first mount was accepted"
+fi
+grep -Fxq mkfs "$calls" || fail "mount failure coverage did not format the unsigned device"
+grep -Fxq mount "$calls" || fail "mount failure coverage did not attempt the first mount"
+[[ ! -e "$fresh_marker" ]] ||
+    fail "a fresh-filesystem marker was published before the first mount succeeded"
+if grep -Fxq marker "$calls"; then
+    fail "a failed first mount invoked fresh-filesystem marker publication"
+fi
+[[ "$(<"$label_state")" == "cc-fresh-pending" ]] ||
+    fail "a failed first mount did not retain durable fresh-filesystem intent"
+
+printf 'not-pristine\n' >"$tmp/mount/application-data"
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    run_prep >/dev/null 2>&1; then
+    fail "a pending ext4 label authorized a populated filesystem"
+fi
+[[ ! -e "$fresh_marker" && "$(<"$label_state")" == "cc-fresh-pending" ]] ||
+    fail "populated-filesystem rejection changed fresh-marker authority"
+rm -f -- "$tmp/mount/application-data"
+
+mkdir -p "$tmp/mount/lost+found"
+chmod 0700 "$tmp/mount/lost+found"
+printf 'recovered-data\n' >"$tmp/mount/lost+found/orphan"
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    run_prep >/dev/null 2>&1; then
+    fail "a pending ext4 label accepted data inside lost+found"
+fi
+rm -f -- "$tmp/mount/lost+found/orphan"
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    FAKE_LOST_FOUND_IDENTITY=1000:1000:700 run_prep >/dev/null 2>&1; then
+    fail "a pending ext4 label accepted an untrusted lost+found directory"
+fi
+
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    FAKE_SYNC_FAIL_AT=1 run_prep >/dev/null 2>&1; then
+    fail "fresh marker publication accepted a failed durability barrier"
+fi
+[[ -f "$fresh_marker" && "$(<"$label_state")" == "cc-fresh-pending" ]] ||
+    fail "the pending label was cleared before marker publication became durable"
+if grep -Eq '^label-set ' "$calls"; then
+    fail "a failed marker durability barrier cleared the pending label"
+fi
+
+fresh_marker_inode="$(stat -c '%d:%i' "$fresh_marker")"
+printf 'v1:gcp-disk-id:111111111111111111\n' >"$fresh_marker"
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    TEST_PREP_MARKER_IDENTITY=v1:gcp-disk-id:222222222222222222 \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    run_prep >/dev/null 2>&1; then
+    fail "a pending label accepted a marker from another disk incarnation"
+fi
+[[ "$(<"$label_state")" == "cc-fresh-pending" ]] ||
+    fail "a mismatched disk-incarnation marker cleared the pending label"
+if grep -Eq '^label-set ' "$calls"; then
+    fail "a mismatched disk-incarnation marker cleared its pending label"
+fi
+printf 'fresh\n' >"$fresh_marker"
+if TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 \
+    FAKE_MARKER_IDENTITY=1000:1000:600:1 run_prep >/dev/null 2>&1; then
+    fail "a pending label accepted an untrusted existing marker"
+fi
+[[ "$(<"$label_state")" == "cc-fresh-pending" ]] ||
+    fail "an untrusted existing marker cleared the pending label"
+
+TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 run_prep
+[[ -f "$fresh_marker" ]] ||
+    fail "a retry did not recover fresh-filesystem marker publication"
+if grep -Fxq mkfs "$calls"; then
+    fail "fresh-filesystem marker recovery reformatted the existing filesystem"
+fi
+[[ ! -s "$label_state" ]] ||
+    fail "successful fresh-filesystem marker publication retained the pending label"
+[[ "$(stat -c '%a' "$tmp/mount/.cloud-compose")" == "700" ]] ||
+    fail "the fresh-filesystem marker directory was not mode 0700"
+[[ "$(stat -c '%a' "$fresh_marker")" == "600" ]] ||
+    fail "the fresh-filesystem marker was not mode 0600"
+[[ "$(<"$fresh_marker")" == "fresh" ]] ||
+    fail "generic fresh-filesystem marker did not preserve its exact payload"
+mount_line="$(grep -nFx mount "$calls" | cut -d: -f1)"
+marker_line="$(grep -nFx marker "$calls" | cut -d: -f1)"
+label_clear_line="$(grep -nE '^label-set $' "$calls" | cut -d: -f1)"
+mapfile -t sync_lines < <(grep -nFx sync "$calls" | cut -d: -f1)
+[[ -n "$mount_line" && -n "$marker_line" && -n "$label_clear_line" &&
+    "${#sync_lines[@]}" == "2" &&
+    "$mount_line" -lt "$marker_line" &&
+    "$marker_line" -lt "${sync_lines[0]}" &&
+    "${sync_lines[0]}" -lt "$label_clear_line" &&
+    "$label_clear_line" -lt "${sync_lines[1]}" ]] ||
+    fail "fresh authority ordering is not mount, marker, sync, label clear, sync"
+[[ "$(stat -c '%d:%i' "$fresh_marker")" == "$fresh_marker_inode" ]] ||
+    fail "fresh marker recovery replaced an already trusted marker"
+
+TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 run_prep
+[[ -f "$fresh_marker" && "$(stat -c '%d:%i' "$fresh_marker")" == "$fresh_marker_inode" ]] ||
+    fail "an existing fresh-filesystem marker was not preserved on a same-boot rerun"
+if grep -Fxq marker "$calls"; then
+    fail "a same-boot rerun republished the fresh-filesystem marker"
+fi
+
+rm -rf -- "$tmp/mount/.cloud-compose" "$tmp/mount/lost+found"
+printf 'cc-fresh-pending' >"$label_state"
+TEST_PREP_EXTRA_ARG=--publish-fresh-marker \
+    TEST_PREP_MARKER_IDENTITY=v1:gcp-disk-id:987654321012345678 \
+    FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=ext4 FAKE_FSCK_STATUS=0 run_prep
+[[ "$(<"$fresh_marker")" == "v1:gcp-disk-id:987654321012345678" ]] ||
+    fail "GCP marker publication did not bind the exact data-disk identity"
+[[ ! -s "$label_state" ]] ||
+    fail "exact GCP disk identity did not complete pending marker publication"
+rm -rf -- "$tmp/mount/.cloud-compose" "$tmp/mount/lost+found"
 
 if FAKE_BLKID_STATUS=0 FAKE_FILESYSTEM_TYPE=xfs FAKE_FSCK_STATUS=0 run_prep >/dev/null 2>&1; then
     fail "a non-ext4 filesystem was accepted"
@@ -371,10 +595,33 @@ if grep -Eq 'fsck[^\n]*\|\|[^\n]*mkfs|fsck[^\n]*mkfs' "$repo_root/templates/clou
 fi
 grep -Fq 'FILESYSTEM_PREP_SCRIPT_B64' "$repo_root/templates/cloud-init.yml" || \
     fail "GCP cloud-init does not bootstrap the tested filesystem helper"
-grep -Fq 'bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data' "$repo_root/templates/cloud-init.yml" || \
-    fail "GCP cloud-init executes a temporary filesystem helper directly on potentially noexec /run"
-grep -Fq 'bash "$filesystem_prep" '\''${DATA_DEVICE}'\'' /mnt/disks/data' "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" || \
-    fail "Linux VM cloud-init executes a temporary filesystem helper directly on potentially noexec /run"
+grep -Fq 'bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data \' \
+    "$repo_root/templates/cloud-init.yml" ||
+    fail "GCP cloud-init does not request a fresh marker for the data filesystem"
+grep -Fq -- '--publish-fresh-marker ${jsonencode(FRESH_FILESYSTEM_IDENTITY)}' \
+    "$repo_root/templates/cloud-init.yml" ||
+    fail "GCP cloud-init does not bind the marker to the rendered data-disk identity"
+grep -Fq 'bash "$filesystem_prep" '\''${DATA_DEVICE}'\'' /mnt/disks/data --publish-fresh-marker' \
+    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" ||
+    fail "Linux VM cloud-init does not request a fresh marker for the data filesystem"
+grep -Fq 'bash /run/cloud-compose-prepare-filesystem /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes' \
+    "$repo_root/templates/cloud-init.yml" ||
+    fail "GCP cloud-init does not prepare the volumes filesystem without a fresh marker"
+grep -Fq 'bash "$filesystem_prep" '\''${VOLUMES_DEVICE}'\'' /mnt/disks/volumes' \
+    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" ||
+    fail "Linux VM cloud-init does not prepare the volumes filesystem without a fresh marker"
+grep -Fq '(umask 077 && mkdir -- "$marker_dir")' "$prep_script" ||
+    fail "the fresh-filesystem marker directory is not created privately"
+grep -Fq "(umask 077 && printf '%s\\n' \"\$expected_identity\" >\"\$marker\")" "$prep_script" ||
+    fail "the fresh-filesystem marker is not created privately"
+grep -Fq 'marker_root_identity="$(stat -c '\''%u:%g:%a'\'' -- "$mount_path")"' "$prep_script" ||
+    fail "marker recovery does not verify a root-owned pristine filesystem root"
+grep -Fq '! -name lost+found -print -quit' "$prep_script" ||
+    fail "marker recovery does not reject data outside lost+found"
+grep -Fq -- '-L "$fresh_filesystem_pending_label" -- "$device"' "$prep_script" ||
+    fail "new data filesystems do not persist pending marker intent in their ext4 label"
+grep -Fq 'e2label "$device" ""' "$prep_script" ||
+    fail "fresh-filesystem pending intent is not cleared after marker publication"
 if grep -Eq '^[[:space:]]*"?\$filesystem_(prep|persist)"?[[:space:]]' \
     "$repo_root/templates/cloud-init.yml" "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; then
     fail "cloud-init directly executes a temporary helper from potentially noexec /run"
@@ -382,6 +629,16 @@ fi
 for cloud_init_template in \
     "$repo_root/templates/cloud-init.yml" \
     "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
+    [[ "$(grep -Fc -- '--publish-fresh-marker' "$cloud_init_template")" == "1" ]] ||
+        fail "cloud-init must publish a fresh marker for the data filesystem only"
+    grep -Fq 'chown root:cloud-compose /mnt/disks/data' "$cloud_init_template" ||
+        fail "cloud-init does not preserve root ownership of the data mount root"
+    grep -Fq 'chmod 1775 /mnt/disks/data' "$cloud_init_template" ||
+        fail "cloud-init does not make the data mount root sticky and group-writable"
+    grep -Fq 'chown cloud-compose:cloud-compose /mnt/disks/volumes' "$cloud_init_template" ||
+        fail "cloud-init does not assign the volumes mount root to cloud-compose"
+    grep -Fq 'chmod 0775 /mnt/disks/volumes' "$cloud_init_template" ||
+        fail "cloud-init does not make the volumes mount root group-writable"
     grep -Fq 'for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do' \
         "$cloud_init_template" || fail "cloud-init does not verify every required mount before initialization"
     grep -Fq 'Required cloud-compose mount is unavailable:' "$cloud_init_template" ||
