@@ -100,9 +100,10 @@ output "appGsa" {
     email : local.app_service_account_email,
     id : local.app_service_account_id,
     name : local.app_service_account_name,
+    managed : local.app_service_account_managed,
     credentials_enabled : local.app_credentials_enabled,
   }
-  description = "The Google Service Account the app can leverage to authenticate to other Google services, including whether managed file credentials are enabled."
+  description = "The Google Service Account the app can leverage to authenticate to other Google services, including whether the module owns it and whether managed file credentials are enabled."
 }
 
 output "urls" {

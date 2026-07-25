@@ -35,7 +35,8 @@ bootcmd:
   printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
   printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
   chmod 0600 "$filesystem_prep" "$filesystem_persist"
-  bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data
+  bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data \
+    --publish-fresh-marker ${jsonencode(FRESH_FILESYSTEM_IDENTITY)}
 
 # mount the specific Volumes disk
 - bash /run/cloud-compose-prepare-filesystem /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes
@@ -88,8 +89,10 @@ ${ROOTFS_ARCHIVE_COMMAND}
 %{ for CMD in ADDITIONAL_INITCMD ~}
   ${indent(2, CMD)}
 %{ endfor ~}
-  chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
-  chmod 0775 /mnt/disks/data /mnt/disks/volumes
+  chown root:cloud-compose /mnt/disks/data
+  chmod 1775 /mnt/disks/data
+  chown cloud-compose:cloud-compose /mnt/disks/volumes
+  chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
   rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
   bash /home/cloud-compose/start-cloud-compose-bootstrap.sh

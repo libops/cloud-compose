@@ -20,6 +20,9 @@ esac
 
 INTERNAL_CREDENTIALS_FILE="${INTERNAL_CREDENTIALS_FILE:-/mnt/disks/data/libops-internal/GOOGLE_APPLICATION_CREDENTIALS}"
 ROTATION_CREDENTIAL_GROUP="${ROTATION_CREDENTIAL_GROUP-cloud-compose}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
+CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-}"
+rotation_reconcile_orphans=false
 internal_service_account="internal-$GCP_INSTANCE_NAME@$GCP_PROJECT.iam.gserviceaccount.com"
 rotation_action="${1:-rotate}"
 
@@ -38,11 +41,37 @@ case "$rotation_action" in
 esac
 
 rotate_keys() {
+  ROTATION_RECONCILE_ORPHANS="$rotation_reconcile_orphans" \
+  CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" \
+  CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="$CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY" \
   bash "$rotate_keys_script" "$1" \
     "$internal_service_account" \
     "$GCP_PROJECT" \
     "$INTERNAL_CREDENTIALS_FILE"
 }
+
+require_inactive_internal_service() {
+  local load_state active_state
+
+  load_state="$(systemctl show --property=LoadState --value -- cloud-compose-internal-services.service)" || {
+    echo "Could not determine whether cloud-compose-internal-services.service is loaded" >&2
+    return 1
+  }
+  active_state="$(systemctl show --property=ActiveState --value -- cloud-compose-internal-services.service)" || {
+    echo "Could not determine whether cloud-compose-internal-services.service is inactive" >&2
+    return 1
+  }
+  if [[ "$load_state" != "loaded" || "$active_state" != "inactive" ]]; then
+    echo "Fresh-filesystem key reconciliation requires loaded, inactive cloud-compose-internal-services.service; observed ${load_state}/${active_state}" >&2
+    return 1
+  fi
+}
+
+if [[ ! -e "$INTERNAL_CREDENTIALS_FILE" && ! -L "$INTERNAL_CREDENTIALS_FILE" &&
+  ( -e "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" || -L "$CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER" ) ]]; then
+  require_inactive_internal_service
+  rotation_reconcile_orphans=true
+fi
 
 if [[ "$rotation_action" == "rollback" ]]; then
   rotate_keys rollback

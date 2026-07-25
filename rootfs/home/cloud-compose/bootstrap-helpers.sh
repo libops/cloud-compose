@@ -34,6 +34,55 @@ cloud_compose_publish_marker() (
     fi
 )
 
+cloud_compose_consume_fresh_filesystem_marker() {
+    local marker="$1"
+    local expected_identity="$2"
+    local marker_dir marker_identity marker_dir_identity marker_payload marker_size
+
+    case "$expected_identity" in
+        fresh) ;;
+        v1:gcp-disk-id:*)
+            if [[ ! "$expected_identity" =~ ^v1:gcp-disk-id:[0-9]{1,32}$ ]]; then
+                echo "Unsafe fresh-filesystem identity" >&2
+                return 2
+            fi
+            ;;
+        *)
+            echo "Unsafe fresh-filesystem identity" >&2
+            return 2
+            ;;
+    esac
+
+    if [[ "$marker" != /* || "$marker" == "/" || "$marker" == *$'\n'* ||
+        "$marker" == *$'\r'* || "$marker" =~ (^|/)\.\.?(/|$) ]]; then
+        echo "Unsafe fresh-filesystem marker path: $marker" >&2
+        return 1
+    fi
+    if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+        return 0
+    fi
+    marker_dir="$(dirname -- "$marker")"
+    if [[ -L "$marker_dir" || ! -d "$marker_dir" || -L "$marker" || ! -f "$marker" ]]; then
+        echo "Unsafe fresh-filesystem marker: $marker" >&2
+        return 1
+    fi
+    marker_dir_identity="$(stat -c '%u:%g:%a' -- "$marker_dir")" || return 1
+    marker_identity="$(stat -c '%u:%g:%a:%h' -- "$marker")" || return 1
+    if [[ "$marker_dir_identity" != "0:0:700" || "$marker_identity" != "0:0:600:1" ]]; then
+        echo "Unsafe fresh-filesystem marker ownership or mode: $marker" >&2
+        return 1
+    fi
+    marker_size="$(stat -c '%s' -- "$marker")" || return 1
+    marker_payload=""
+    if [[ "$marker_size" != "$((${#expected_identity} + 1))" ]] ||
+        ! IFS= read -r marker_payload <"$marker" ||
+        [[ "$marker_payload" != "$expected_identity" ]]; then
+        echo "Fresh-filesystem marker does not match this disk incarnation" >&2
+        return 1
+    fi
+    rm -f -- "$marker"
+}
+
 cloud_compose_validate_systemd_unit() {
     case "$1" in
         cloud-compose.service | cloud-compose-bootstrap.service) return 0 ;;

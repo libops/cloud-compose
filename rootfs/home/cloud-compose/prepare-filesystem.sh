@@ -2,12 +2,115 @@
 
 set -euo pipefail
 
+fresh_filesystem_pending_label="cc-fresh-pending"
+
 log() {
     printf '[filesystem-prep] %s\n' "$*" >&2
 }
 
+publish_fresh_filesystem_marker() {
+    local mount_path="$1"
+    local expected_identity="$2"
+    local marker_dir="$mount_path/.cloud-compose"
+    local marker="$marker_dir/fresh-filesystem"
+    local marker_dir_identity marker_identity marker_payload marker_root_identity
+    local marker_size unexpected
+
+    case "$expected_identity" in
+        fresh) ;;
+        v1:gcp-disk-id:*)
+            if [[ ! "$expected_identity" =~ ^v1:gcp-disk-id:[0-9]{1,32}$ ]]; then
+                log "Fresh-filesystem identity is unsafe"
+                return 2
+            fi
+            ;;
+        *)
+            log "Fresh-filesystem identity is unsafe"
+            return 2
+            ;;
+    esac
+
+    if [[ -e "$marker" || -L "$marker" ]]; then
+        if [[ -L "$marker_dir" || ! -d "$marker_dir" ||
+            -L "$marker" || ! -f "$marker" ]]; then
+            log "Fresh-filesystem marker path is unsafe: $marker"
+            return 1
+        fi
+        marker_dir_identity="$(stat -c '%u:%g:%a' -- "$marker_dir")" || return 1
+        marker_identity="$(stat -c '%u:%g:%a:%h' -- "$marker")" || return 1
+        if [[ "$marker_dir_identity" != "0:0:700" ||
+            "$marker_identity" != "0:0:600:1" ]]; then
+            log "Existing fresh-filesystem marker is not root-owned and private: $marker"
+            return 1
+        fi
+        marker_size="$(stat -c '%s' -- "$marker")" || return 1
+        marker_payload=""
+        if [[ "$marker_size" != "$((${#expected_identity} + 1))" ]] ||
+            ! IFS= read -r marker_payload <"$marker" ||
+            [[ "$marker_payload" != "$expected_identity" ]]; then
+            log "Existing fresh-filesystem marker does not match this disk incarnation"
+            return 1
+        fi
+        return 0
+    fi
+
+    # Recover the only safe residue possible if the host stopped after making
+    # the private marker directory but before creating its marker.
+    if [[ -e "$marker_dir" || -L "$marker_dir" ]]; then
+        if [[ -L "$marker_dir" || ! -d "$marker_dir" ]]; then
+            log "Fresh-filesystem marker directory is unsafe: $marker_dir"
+            return 1
+        fi
+        marker_dir_identity="$(stat -c '%u:%g:%a' -- "$marker_dir")" || return 1
+        unexpected="$(find "$marker_dir" -mindepth 1 -maxdepth 1 -print -quit)" || return 1
+        if [[ "$marker_dir_identity" != "0:0:700" || -n "$unexpected" ]]; then
+            log "Fresh-filesystem marker directory is not an empty root-owned staging residue: $marker_dir"
+            return 1
+        fi
+        rmdir -- "$marker_dir"
+        sync
+    fi
+
+    marker_root_identity="$(stat -c '%u:%g:%a' -- "$mount_path")" || return 1
+    if [[ "$marker_root_identity" != "0:0:755" ]]; then
+        log "Fresh-filesystem root is not pristine: $mount_path ($marker_root_identity)"
+        return 1
+    fi
+    unexpected="$(find "$mount_path" -mindepth 1 -maxdepth 1 \
+        ! -name lost+found -print -quit)" || return 1
+    if [[ -n "$unexpected" ]]; then
+        log "Fresh-filesystem root contains unexpected data: $unexpected"
+        return 1
+    fi
+    if [[ -e "$mount_path/lost+found" || -L "$mount_path/lost+found" ]]; then
+        if [[ -L "$mount_path/lost+found" || ! -d "$mount_path/lost+found" ]]; then
+            log "Fresh-filesystem lost+found path is unsafe"
+            return 1
+        fi
+        marker_dir_identity="$(stat -c '%u:%g:%a' -- "$mount_path/lost+found")" || return 1
+        unexpected="$(find "$mount_path/lost+found" -mindepth 1 -maxdepth 1 -print -quit)" || return 1
+        if [[ "$marker_dir_identity" != "0:0:700" || -n "$unexpected" ]]; then
+            log "Fresh-filesystem lost+found is not an empty root-owned directory"
+            return 1
+        fi
+    fi
+
+    if ! (umask 077 && mkdir -- "$marker_dir") ||
+        ! (umask 077 && printf '%s\n' "$expected_identity" >"$marker"); then
+        log "Fresh-filesystem marker path is unsafe: $marker"
+        return 1
+    fi
+    marker_dir_identity="$(stat -c '%u:%g:%a' -- "$marker_dir")" || return 1
+    marker_identity="$(stat -c '%u:%g:%a:%h' -- "$marker")" || return 1
+    if [[ "$marker_dir_identity" != "0:0:700" ||
+        "$marker_identity" != "0:0:600:1" ]]; then
+        log "Published fresh-filesystem marker is not root-owned and private: $marker"
+        return 1
+    fi
+}
+
 usage() {
-    echo "Usage: $0 DEVICE_PATH MOUNT_PATH" >&2
+    echo "Usage: $0 DEVICE_PATH MOUNT_PATH [--publish-fresh-marker [IDENTITY]]" >&2
 }
 
 is_block_device() {
@@ -124,12 +227,34 @@ main() {
     local device_path mount_path device filesystem_type mounted_source resolved_mounted_source
     local already_mounted blkid_status fsck_status wait_seconds sleep_seconds settle_seconds
     local device_mounts_output provider_mount="" moved_source resolved_moved_source
-    local target_contents
+    local target_contents filesystem_label
+    local publish_fresh_marker=false fresh_marker_identity="" fresh_marker_pending=false
     local -a device_mounts
 
-    if [[ $# -ne 2 ]]; then
+    if [[ $# -lt 2 || $# -gt 4 ]]; then
         usage
         return 2
+    fi
+    if [[ $# -ge 3 ]]; then
+        if [[ "$3" != "--publish-fresh-marker" ]]; then
+            usage
+            return 2
+        fi
+        publish_fresh_marker=true
+        fresh_marker_identity="${4:-fresh}"
+        case "$fresh_marker_identity" in
+            fresh) ;;
+            v1:gcp-disk-id:*)
+                if [[ ! "$fresh_marker_identity" =~ ^v1:gcp-disk-id:[0-9]{1,32}$ ]]; then
+                    usage
+                    return 2
+                fi
+                ;;
+            *)
+                usage
+                return 2
+                ;;
+        esac
     fi
 
     device_path="$1"
@@ -305,6 +430,15 @@ main() {
                 log "Could not grow the ext4 filesystem on $device"
                 return 1
             fi
+            if [[ "$publish_fresh_marker" == "true" ]]; then
+                filesystem_label="$(e2label "$device")" || {
+                    log "Could not inspect the ext4 label on $device"
+                    return 1
+                }
+                if [[ "$filesystem_label" == "$fresh_filesystem_pending_label" ]]; then
+                    fresh_marker_pending=true
+                fi
+            fi
             ;;
         2)
             if [[ "$already_mounted" == "true" ]]; then
@@ -313,7 +447,13 @@ main() {
             fi
             log "No filesystem signature found on $device; creating ext4"
             require_device_unmounted "$device" "filesystem creation"
-            mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard -- "$device"
+            if [[ "$publish_fresh_marker" == "true" ]]; then
+                mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard \
+                    -L "$fresh_filesystem_pending_label" -- "$device"
+                fresh_marker_pending=true
+            else
+                mkfs.ext4 -m 0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard -- "$device"
+            fi
             ;;
         *)
             log "Could not safely inspect filesystem signatures on $device (blkid status $blkid_status)"
@@ -324,6 +464,16 @@ main() {
     if [[ "$already_mounted" != "true" ]]; then
         require_device_unmounted "$device" "cloud-compose mount"
         mount -o defaults -- "$device" "$mount_path"
+    fi
+    if [[ "$fresh_marker_pending" == "true" ]]; then
+        publish_fresh_filesystem_marker "$mount_path" "$fresh_marker_identity"
+        sync
+        if ! e2label "$device" ""; then
+            log "Published the fresh-filesystem marker but could not clear the pending ext4 label on $device"
+            return 1
+        fi
+        sync
+        log "Published fresh-filesystem marker at $mount_path/.cloud-compose/fresh-filesystem"
     fi
 }
 

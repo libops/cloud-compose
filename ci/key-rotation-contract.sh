@@ -15,10 +15,14 @@ mkdir -p "$tmp/bin" "$tmp/apps/alpha" "$tmp/apps/beta"
 order_log="$tmp/order.log"
 post_count="$tmp/post-count"
 auth_count="$tmp/auth-count"
+list_count="$tmp/list-count"
+sync_count="$tmp/sync-count"
 key_state="$tmp/key-state.json"
 : >"$order_log"
 printf '0\n' >"$post_count"
 printf '0\n' >"$auth_count"
+printf '0\n' >"$list_count"
+printf '0\n' >"$sync_count"
 
 cat >"$tmp/profile.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -61,6 +65,17 @@ cat >"$tmp/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
 printf 'SLEEP %s\n' "${1:-}" >>"${ORDER_LOG:?}"
 EOF
+cat >"$tmp/bin/sync" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+count="$(<"${SYNC_COUNT:?}")"
+count=$((count + 1))
+printf '%s\n' "$count" >"$SYNC_COUNT"
+printf 'SYNC %s\n' "$count" >>"${ORDER_LOG:?}"
+if [[ -n "${FAKE_SYNC_FAIL_AT:-}" && "$count" == "$FAKE_SYNC_FAIL_AT" ]]; then
+  exit 1
+fi
+EOF
 cat >"$tmp/bin/openssl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -77,11 +92,46 @@ cat >"$tmp/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case "${1:-}" in
+  show)
+    property=""
+    for argument in "$@"; do
+      case "$argument" in
+        --property=*) property="${argument#--property=}" ;;
+      esac
+    done
+    unit="${!#}"
+    if [[ "${FAKE_SYSTEMCTL_QUERY_FAIL:-false}" == "true" ]]; then
+      exit 1
+    fi
+    case "$property" in
+      LoadState) printf '%s\n' "${FAKE_SYSTEMCTL_LOAD_STATE:-loaded}" ;;
+      ActiveState)
+        case "$unit" in
+          cloud-compose.service) printf '%s\n' "${FAKE_APP_STATE:-inactive}" ;;
+          cloud-compose-internal-services.service) printf '%s\n' "${FAKE_INTERNAL_STATE:-inactive}" ;;
+          *) exit 1 ;;
+        esac
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
   is-active)
     unit="${!#}"
     case "$unit" in
-      cloud-compose.service) [[ "${FAKE_APP_ACTIVE:-true}" == "true" ]] ;;
-      cloud-compose-internal-services.service) [[ "${FAKE_INTERNAL_ACTIVE:-true}" == "true" ]] ;;
+      cloud-compose.service)
+        if [[ -n "${FAKE_APP_ACTIVE+x}" ]]; then
+          [[ "$FAKE_APP_ACTIVE" == "true" ]]
+        else
+          [[ "${FAKE_APP_STATE:-active}" == "active" ]]
+        fi
+        ;;
+      cloud-compose-internal-services.service)
+        if [[ -n "${FAKE_INTERNAL_ACTIVE+x}" ]]; then
+          [[ "$FAKE_INTERNAL_ACTIVE" == "true" ]]
+        else
+          [[ "${FAKE_INTERNAL_STATE:-active}" == "active" ]]
+        fi
+        ;;
       *) exit 1 ;;
     esac
     ;;
@@ -105,6 +155,31 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+EOF
+
+cat >"$tmp/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+target="${!#}"
+format=""
+previous=""
+for argument in "$@"; do
+  if [[ "$previous" == "-c" ]]; then
+    format="$argument"
+  fi
+  previous="$argument"
+done
+if [[ -n "${FAKE_FRESH_MARKER:-}" ]]; then
+  marker_dir="$(dirname -- "$FAKE_FRESH_MARKER")"
+  marker_root="$(dirname -- "$marker_dir")"
+  case "$target:$format" in
+    "$marker_root:%u:%a") printf '0:1775\n'; exit 0 ;;
+    "$marker_dir:%u:%g:%a") printf '0:0:700\n'; exit 0 ;;
+    "$FAKE_FRESH_MARKER:%u:%g:%a:%h") printf '0:0:600:1\n'; exit 0 ;;
+  esac
+fi
+exec /usr/bin/stat "$@"
 EOF
 
 cat >"$tmp/bin/curl" <<'EOF'
@@ -138,7 +213,10 @@ write_response() {
 }
 
 write_status() {
-  local status="$1" body="${2:-{}}"
+  local status="$1" body="${2-}"
+  if [[ -z "$body" ]]; then
+    body='{}'
+  fi
   write_response "$body"
   if [[ -n "$write_format" ]]; then
     printf '%s' "$status"
@@ -163,8 +241,21 @@ if [[ "$url" == "https://oauth2.googleapis.com/token" ]]; then
 fi
 
 if [[ "$method" == GET && "$url" == */keys ]]; then
+  count="$(<"${LIST_COUNT:?}")"
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$LIST_COUNT"
+  if [[ -n "${FAKE_INJECT_KEY_ON_LIST:-}" &&
+    "$count" == "${FAKE_INJECT_KEY_ON_LIST_NUMBER:-2}" ]]; then
+    service_account="${url#*serviceAccounts/}"
+    service_account="${service_account%/keys}"
+    injected_name="projects/test-project/serviceAccounts/${service_account}/keys/${FAKE_INJECT_KEY_ON_LIST}"
+    jq --arg name "$injected_name" \
+      '. + [{name: $name, disabled: false}] | unique_by(.name)' \
+      "$KEY_STATE" >"$KEY_STATE.tmp"
+    mv "$KEY_STATE.tmp" "$KEY_STATE"
+  fi
   jq -c '{keys: [.[] | {
-    keyType: "USER_MANAGED",
+    keyType: (.keyType // "USER_MANAGED"),
     name: .name,
     disabled: .disabled
   }]}' "${KEY_STATE:?}"
@@ -178,13 +269,22 @@ if [[ "$method" == POST && "$url" == */keys ]]; then
   service_account="${url#*serviceAccounts/}"
   service_account="${service_account%/keys}"
   key_name="projects/test-project/serviceAccounts/${service_account}/keys/${NEW_KEY_ID:?}"
-  if [[ "${FAKE_POST_MODE:-success}" != "fail-no-create" ]]; then
+  if [[ "${FAKE_POST_MODE:-success}" != "fail-no-create" &&
+    "${FAKE_POST_MODE:-success}" != "rejected-400" ]]; then
     jq --arg name "$key_name" '. + [{name: $name, disabled: false}] | unique_by(.name)' \
       "$KEY_STATE" >"$KEY_STATE.tmp"
     mv "$KEY_STATE.tmp" "$KEY_STATE"
   fi
   case "${FAKE_POST_MODE:-success}" in
     fail-no-create | ambiguous-create) exit 22 ;;
+    rejected-400)
+      write_status 400 '{"error":{"code":400,"message":"quota"}}'
+      exit 0
+      ;;
+    ambiguous-408)
+      write_status 408 '{"error":{"code":408,"message":"timeout"}}'
+      exit 0
+      ;;
   esac
   key_data="$(jq -nc --arg id "$NEW_KEY_ID" --arg email "$service_account" '{
     type: "service_account",
@@ -194,7 +294,11 @@ if [[ "$method" == POST && "$url" == */keys ]]; then
     client_email: $email,
     token_uri: "https://oauth2.googleapis.com/token"
   }' | base64 | tr -d '\n')"
-  printf '{"name":"%s","privateKeyData":"%s"}\n' "$key_name" "$key_data"
+  body="$(printf '{"name":"%s","privateKeyData":"%s"}' "$key_name" "$key_data")"
+  write_status 200 "$body"
+  if [[ "${FAKE_POST_MODE:-success}" == "late-success" ]]; then
+    exit 18
+  fi
   exit 0
 fi
 
@@ -246,6 +350,11 @@ if [[ "$method" == DELETE ]]; then
   jq --arg name "$key_name" 'map(select(.name != $name))' "$KEY_STATE" >"$KEY_STATE.tmp"
   mv "$KEY_STATE.tmp" "$KEY_STATE"
   printf 'DELETE %s\n' "$key_name" >>"${ORDER_LOG:?}"
+  if [[ -n "${FAKE_DELETE_FAIL_AFTER_MUTATION_ID:-}" &&
+    "$key_name" == */keys/"$FAKE_DELETE_FAIL_AFTER_MUTATION_ID" ]]; then
+    write_status 500
+    exit 0
+  fi
   write_status 200
   exit 0
 fi
@@ -261,6 +370,8 @@ export TEST_BIN="$tmp/bin"
 export ORDER_LOG="$order_log"
 export POST_COUNT="$post_count"
 export AUTH_COUNT="$auth_count"
+export LIST_COUNT="$list_count"
+export SYNC_COUNT="$sync_count"
 export KEY_STATE="$key_state"
 export CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh"
 export CLOUD_COMPOSE_COMPOSE_APPS_PATH="$tmp/compose-apps.sh"
@@ -277,6 +388,8 @@ export ROTATION_AUTH_SLEEP_SECONDS=0
 export ROTATION_RECOVERY_SETTLE_SECONDS=0
 export ROTATION_CREDENTIAL_OWNER=
 export ROTATION_CREDENTIAL_GROUP=test-group
+export ROTATION_RUNTIME_DIR="$tmp/run/key-rotation"
+export GCP_APP_SERVICE_ACCOUNT_MANAGED=false
 export NEW_KEY_ID="replacement-key"
 export EXPECTED_CONSUMER_KEY_ID="$NEW_KEY_ID"
 
@@ -284,13 +397,32 @@ key_name() {
   printf 'projects/test-project/serviceAccounts/%s/keys/%s\n' "$1" "$2"
 }
 
+reset_operation_counts() {
+  : >"$order_log"
+  printf '0\n' >"$post_count"
+  printf '0\n' >"$auth_count"
+  printf '0\n' >"$list_count"
+  printf '0\n' >"$sync_count"
+}
+
 reset_key_state() {
   local email="$1" old_id="$2"
   jq -n --arg name "$(key_name "$email" "$old_id")" \
     '[{name: $name, disabled: false}]' >"$key_state"
-  : >"$order_log"
-  printf '0\n' >"$post_count"
-  printf '0\n' >"$auth_count"
+  reset_operation_counts
+}
+
+reset_key_state_many() {
+  local email="$1" count="$2" index
+
+  jq -n '[]' >"$key_state"
+  for ((index = 1; index <= count; index++)); do
+    jq --arg name "$(key_name "$email" "orphan-$index")" \
+      '. + [{name: $name, disabled: false}]' \
+      "$key_state" >"$key_state.tmp"
+    mv "$key_state.tmp" "$key_state"
+  done
+  reset_operation_counts
 }
 
 write_credentials() {
@@ -369,6 +501,16 @@ if bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" status \
   app@example.invalid test-project "$invalid_state_credentials" >/dev/null 2>&1; then
   fail "rotation normalized a trailing newline in a baseline key name"
 fi
+jq --arg name "$(key_name app@example.invalid old-key)" \
+  '.baseline_key_names = [$name, $name]' \
+  "${invalid_state_credentials}.rotation-pending.json" \
+  >"${invalid_state_credentials}.rotation-pending.json.tmp"
+mv "${invalid_state_credentials}.rotation-pending.json.tmp" \
+  "${invalid_state_credentials}.rotation-pending.json"
+if bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" status \
+  app@example.invalid test-project "$invalid_state_credentials" >/dev/null 2>&1; then
+  fail "rotation accepted duplicate names in a durable reconciliation baseline"
+fi
 write_credentials "$APP_CREDENTIALS_FILE" old-key
 
 # Retirement deletes the currently installed remote key before removing every
@@ -431,6 +573,11 @@ grep -Fq "CHOWN -- cloud-compose $tmp/apps/alpha/secrets" "$order_log" || \
 if grep -Eq 'RESTART |DISABLE |DELETE ' "$order_log"; then
   fail "distribution failure restarted consumers or changed the previous key"
 fi
+creating_sync_line="$(grep -n '^SYNC 1$' "$order_log" | cut -d: -f1)"
+creating_post_line="$(grep -n '^POST$' "$order_log" | cut -d: -f1)"
+[[ -n "$creating_sync_line" && -n "$creating_post_line" &&
+  "$creating_sync_line" -lt "$creating_post_line" ]] ||
+  fail "ordinary key creation outran its durable creating state"
 
 # A failed reload cannot advance readiness or disable the previous key.
 if FAKE_RESTART_FAIL=true FAKE_APP_ACTIVE=true bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
@@ -611,6 +758,24 @@ FAKE_DELETE_FAIL=false bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh
 [[ ! -e "${failure_retry}.rotation-pending.json" ]] || fail "delete retry did not finish rotation"
 [[ "$(<"$post_count")" == 1 ]] || fail "disable/delete retries created another replacement key"
 
+# A failed state durability barrier stops before the create request. The
+# renamed state may be visible in the live filesystem, but IAM remains
+# untouched until a later run can durably flush it.
+durability="$tmp/durability/GOOGLE_APPLICATION_CREDENTIALS"
+central_cleanup
+reset_key_state app@example.invalid old-key
+write_credentials "$durability" old-key
+export NEW_KEY_ID=durability-key
+if FAKE_SYNC_FAIL_AT=1 bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" prepare \
+  app@example.invalid test-project "$durability" >/dev/null 2>&1; then
+  fail "rotation accepted a failed pre-create state durability barrier"
+fi
+[[ "$(<"$post_count")" == 0 ]] ||
+  fail "failed state durability barrier issued a create request"
+if grep -Eq '^(DELETE |DISABLE |ENABLE )' "$order_log"; then
+  fail "failed state durability barrier mutated IAM"
+fi
+
 # First provisioning has no rollback key and therefore never disables/deletes
 # another service-account key.
 first="$tmp/first/GOOGLE_APPLICATION_CREDENTIALS"
@@ -625,6 +790,308 @@ if grep -Eq '^(DISABLE|DELETE) ' "$order_log"; then
   fail "first-time provisioning changed a key without a previous local credential"
 fi
 
+# A trusted marker on a newly formatted data filesystem authorizes the
+# module-owned app identity to delete its exact orphan baseline before creating
+# one replacement. Rotation itself leaves consumption to the bootstrap
+# boundary immediately after every enabled identity has converged.
+fresh_data_root="$tmp/fresh-data"
+fresh_marker="$fresh_data_root/.cloud-compose/fresh-filesystem"
+fresh_identity="v1:gcp-disk-id:987654321012345678"
+mkdir -p "$(dirname -- "$fresh_marker")"
+chmod 1775 "$fresh_data_root"
+chmod 0700 "$(dirname -- "$fresh_marker")"
+printf '%s\n' "$fresh_identity" >"$fresh_marker"
+chmod 0600 "$fresh_marker"
+export FAKE_FRESH_MARKER="$fresh_marker"
+export CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER="$fresh_marker"
+export CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY="$fresh_identity"
+
+# A root-owned marker copied from a snapshot of another data-disk incarnation
+# is not destructive authority. Reject it before even listing IAM keys.
+printf 'v1:gcp-disk-id:111111111111111111\n' >"$fresh_marker"
+central_cleanup
+reset_key_state_many app@example.invalid 2
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh reconciliation accepted another disk incarnation"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log" ||
+  [[ "$(<"$list_count")" != 0 ]]; then
+  fail "mismatched disk-incarnation authority reached IAM"
+fi
+printf '%s\n' "$fresh_identity" >"$fresh_marker"
+
+central_cleanup
+reset_key_state_many app@example.invalid 1
+export NEW_KEY_ID=fresh-durability-key EXPECTED_CONSUMER_KEY_ID=fresh-durability-key
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  FAKE_SYNC_FAIL_AT=1 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh reconciliation accepted a failed baseline durability barrier"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "fresh reconciliation mutated IAM before its baseline became durable"
+fi
+
+central_cleanup
+reset_key_state_many app@example.invalid 10
+export NEW_KEY_ID=fresh-key EXPECTED_CONSUMER_KEY_ID=fresh-key
+GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+[[ "$(<"$post_count")" == 1 ]] || fail "fresh managed reconciliation did not create exactly one key"
+[[ "$(grep -c '^DELETE ' "$order_log")" == 10 ]] || fail "fresh managed reconciliation did not delete its exact ten-key baseline"
+last_delete_line="$(grep -n '^DELETE ' "$order_log" | tail -n1 | cut -d: -f1)"
+post_line="$(grep -n '^POST$' "$order_log" | cut -d: -f1)"
+((last_delete_line < post_line)) || fail "fresh managed reconciliation created a key before deleting its baseline"
+first_delete_line="$(grep -n '^DELETE ' "$order_log" | head -n1 | cut -d: -f1)"
+first_sync_line="$(grep -n '^SYNC 1$' "$order_log" | cut -d: -f1)"
+second_sync_line="$(grep -n '^SYNC 2$' "$order_log" | cut -d: -f1)"
+[[ -n "$first_sync_line" && -n "$second_sync_line" &&
+  "$first_sync_line" -lt "$first_delete_line" &&
+  "$last_delete_line" -lt "$second_sync_line" &&
+  "$second_sync_line" -lt "$post_line" ]] ||
+  fail "fresh reconciliation IAM mutations outran their durable state transitions"
+jq -e --arg name "$(key_name app@example.invalid fresh-key)" \
+  'length == 1 and .[0].name == $name' "$key_state" >/dev/null ||
+  fail "fresh managed reconciliation did not converge to one replacement key"
+[[ -f "$fresh_marker" ]] || fail "key rotation consumed the shared fresh-filesystem marker inside one identity wrapper"
+
+# A delete that reaches IAM but loses its successful response retains the exact
+# baseline. The retry accepts 404 and cannot create until every baseline key is
+# absent.
+central_cleanup
+reset_key_state_many app@example.invalid 2
+export NEW_KEY_ID=fresh-retry-key EXPECTED_CONSUMER_KEY_ID=fresh-retry-key
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  FAKE_DELETE_FAIL_AFTER_MUTATION_ID=orphan-1 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted an indeterminate orphan deletion"
+fi
+jq -e '.phase == "reconciling" and (.baseline_key_names | length) == 2' \
+  "${APP_CREDENTIALS_FILE}.rotation-pending.json" >/dev/null ||
+  fail "failed orphan deletion did not retain the exact reconciliation baseline"
+[[ "$(<"$post_count")" == 0 ]] || fail "failed orphan deletion created a replacement key"
+GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  FAKE_DELETE_FAIL_AFTER_MUTATION_ID=orphan-1 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+[[ "$(<"$post_count")" == 1 ]] || fail "orphan deletion retry did not create exactly one replacement"
+grep -Fq "DELETE404 $(key_name app@example.invalid orphan-1)" "$order_log" ||
+  fail "orphan deletion retry did not accept the already-absent key"
+
+# A key created by another actor after the durable baseline snapshot is never
+# swept into the managed set, and permanently blocks creation until audited.
+central_cleanup
+reset_key_state_many app@example.invalid 1
+export NEW_KEY_ID=blocked-fresh-key EXPECTED_CONSUMER_KEY_ID=blocked-fresh-key
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  FAKE_INJECT_KEY_ON_LIST=concurrent-key \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted a concurrent key"
+fi
+[[ "$(<"$post_count")" == 0 ]] || fail "concurrent key detection issued a create"
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  FAKE_INJECT_KEY_ON_LIST=concurrent-key \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation swept a concurrent key on retry"
+fi
+jq -e --arg name "$(key_name app@example.invalid concurrent-key)" \
+  'length == 1 and .[0].name == $name' "$key_state" >/dev/null ||
+  fail "fresh managed reconciliation deleted the concurrent key"
+[[ "$(<"$post_count")" == 0 ]] || fail "concurrent key retry issued a create"
+
+# Reconciliation is unavailable to supplied identities and to any service that
+# is not exactly loaded and inactive.
+central_cleanup
+reset_key_state_many app@example.invalid 1
+export NEW_KEY_ID=unmanaged-key EXPECTED_CONSUMER_KEY_ID=unmanaged-key
+GCP_APP_SERVICE_ACCOUNT_MANAGED=false FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+if grep -Eq '^DELETE ' "$order_log"; then
+  fail "caller-supplied app identity deleted a baseline key"
+fi
+jq -e 'length == 2' "$key_state" >/dev/null ||
+  fail "caller-supplied app identity did not preserve its remote baseline"
+
+# Both independent proofs are required. A managed identity without the
+# root-owned fresh-filesystem marker follows ordinary provisioning and never
+# treats pre-existing keys as its deletion set.
+rm -f -- "$fresh_marker"
+central_cleanup
+reset_key_state_many app@example.invalid 1
+export NEW_KEY_ID=managed-without-marker EXPECTED_CONSUMER_KEY_ID=managed-without-marker
+GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+if grep -Eq '^DELETE ' "$order_log"; then
+  fail "managed app identity deleted a baseline without fresh-filesystem authority"
+fi
+jq -e 'length == 2' "$key_state" >/dev/null ||
+  fail "managed app identity without a fresh marker did not preserve its remote baseline"
+
+# Ordinary rotation cannot exceed IAM's ten-key quota and must fail before
+# persisting an ambiguous create state.
+central_cleanup
+reset_key_state_many app@example.invalid 10
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "ordinary provisioning accepted an already-full IAM key quota"
+fi
+[[ "$(<"$post_count")" == 0 ]] || fail "full ordinary key quota issued a create"
+[[ ! -e "${APP_CREDENTIALS_FILE}.rotation-pending.json" ]] ||
+  fail "full ordinary key quota persisted an ambiguous create state"
+if grep -Eq '^DELETE ' "$order_log"; then
+  fail "full ordinary key quota deleted an existing key"
+fi
+
+# Invalid identity ownership configuration fails before any IAM request.
+central_cleanup
+reset_key_state_many app@example.invalid 1
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=unexpected \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "app wrapper accepted invalid managed-identity configuration"
+fi
+[[ "$(<"$post_count")" == 0 && "$(<"$list_count")" == 0 ]] ||
+  fail "invalid managed-identity configuration reached IAM"
+
+printf '%s\n' "$fresh_identity" >"$fresh_marker"
+chmod 0600 "$fresh_marker"
+central_cleanup
+reset_key_state_many app@example.invalid 1
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=failed \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted a failed application service"
+fi
+[[ "$(<"$post_count")" == 0 ]] || fail "failed application service allowed key creation"
+if grep -Eq '^DELETE ' "$order_log"; then
+  fail "failed application service allowed orphan deletion"
+fi
+
+# A malformed, duplicate, or over-limit IAM inventory cannot be converted into
+# a deletion baseline.
+central_cleanup
+jq -n --arg name "$(key_name app@example.invalid duplicate-key)" \
+  '[{name: $name, disabled: false}, {name: $name, disabled: false}]' >"$key_state"
+reset_operation_counts
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted duplicate IAM key entries"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "duplicate IAM key inventory triggered a mutation"
+fi
+
+central_cleanup
+jq -n '[{
+  keyType: "USER_MANAGED",
+  name: "projects/other-project/serviceAccounts/other@example.invalid/keys/foreign-key",
+  disabled: false
+}]' >"$key_state"
+reset_operation_counts
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted a foreign IAM key name"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "foreign IAM key inventory triggered a mutation"
+fi
+
+central_cleanup
+reset_key_state_many app@example.invalid 11
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true FAKE_APP_STATE=inactive FAKE_APP_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "fresh managed reconciliation accepted more than IAM's key limit"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "over-limit IAM key inventory triggered a mutation"
+fi
+
+# A missing central file is recovered only when every existing distributed copy
+# is valid for the exact target and byte-identical.
+central_cleanup
+reset_key_state app@example.invalid supplied-victim-key
+write_credentials "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" supplied-victim-key
+write_credentials "$tmp/apps/beta/secrets/GOOGLE_APPLICATION_CREDENTIALS" supplied-victim-key
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "caller-supplied identity promoted distributed credentials into revocation authority"
+fi
+[[ ! -e "$APP_CREDENTIALS_FILE" ]] ||
+  fail "caller-supplied identity restored an unproven central credential"
+[[ "$(<"$post_count")" == 0 && "$(<"$list_count")" == 0 ]] ||
+  fail "caller-supplied distributed credential recovery reached IAM"
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "caller-supplied distributed credential recovery mutated IAM"
+fi
+
+central_cleanup
+reset_key_state app@example.invalid recovered-key
+write_credentials "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" recovered-key
+write_credentials "$tmp/apps/beta/secrets/GOOGLE_APPLICATION_CREDENTIALS" recovered-key
+touch -d '10 minutes ago' \
+  "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" \
+  "$tmp/apps/beta/secrets/GOOGLE_APPLICATION_CREDENTIALS"
+recovered_modified_at="$(stat -c %Y "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS")"
+GCP_APP_SERVICE_ACCOUNT_MANAGED=true ROTATION_MIN_AGE_SECONDS=86400 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null
+cmp -s "$APP_CREDENTIALS_FILE" "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" ||
+  fail "unanimous distributed credentials were not restored centrally"
+[[ "$(stat -c %Y "$APP_CREDENTIALS_FILE")" == "$recovered_modified_at" ]] ||
+  fail "distributed credential recovery reset the credential rotation age"
+[[ "$(<"$post_count")" == 0 ]] || fail "distributed credential recovery created a cloud key"
+if grep -Eq '^DELETE ' "$order_log"; then
+  fail "distributed credential recovery deleted a cloud key"
+fi
+
+central_cleanup
+reset_key_state app@example.invalid recovered-key
+write_credentials "$tmp/apps/alpha/secrets/GOOGLE_APPLICATION_CREDENTIALS" recovered-key
+write_credentials "$tmp/apps/beta/secrets/GOOGLE_APPLICATION_CREDENTIALS" conflicting-key
+if GCP_APP_SERVICE_ACCOUNT_MANAGED=true ROTATION_MIN_AGE_SECONDS=86400 \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" >/dev/null 2>&1; then
+  fail "conflicting distributed credentials were accepted"
+fi
+[[ ! -e "$APP_CREDENTIALS_FILE" ]] || fail "conflicting distributed credentials restored a central key"
+[[ "$(<"$post_count")" == 0 ]] || fail "conflicting distributed credentials created a cloud key"
+
+# Definite IAM rejection does not strand an ambiguous state. Request timeout
+# remains ambiguous and a complete response is salvageable after a late
+# transport failure.
+definite="$tmp/definite/GOOGLE_APPLICATION_CREDENTIALS"
+reset_key_state app@example.invalid old-key
+write_credentials "$definite" old-key
+export NEW_KEY_ID=definite-key
+if FAKE_POST_MODE=rejected-400 bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" prepare \
+  app@example.invalid test-project "$definite" >/dev/null 2>&1; then
+  fail "definite IAM key rejection was accepted"
+fi
+[[ ! -e "${definite}.rotation-pending.json" ]] ||
+  fail "definite IAM key rejection retained ambiguous state"
+
+timeout="$tmp/timeout/GOOGLE_APPLICATION_CREDENTIALS"
+reset_key_state app@example.invalid old-key
+write_credentials "$timeout" old-key
+export NEW_KEY_ID=timeout-key
+if FAKE_POST_MODE=ambiguous-408 bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" prepare \
+  app@example.invalid test-project "$timeout" >/dev/null 2>&1; then
+  fail "ambiguous HTTP 408 key creation was accepted"
+fi
+if FAKE_POST_MODE=success bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" prepare \
+  app@example.invalid test-project "$timeout" >/dev/null 2>&1; then
+  fail "ambiguous HTTP 408 key creation was retried"
+fi
+[[ "$(<"$post_count")" == 1 ]] || fail "ambiguous HTTP 408 issued another POST"
+jq -e '.phase == "creating"' "${timeout}.rotation-pending.json" >/dev/null ||
+  fail "ambiguous HTTP 408 did not retain creating state"
+
+late="$tmp/late/GOOGLE_APPLICATION_CREDENTIALS"
+reset_key_state app@example.invalid old-key
+write_credentials "$late" old-key
+export NEW_KEY_ID=late-key
+FAKE_POST_MODE=late-success bash "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" prepare \
+  app@example.invalid test-project "$late" >/dev/null
+jq -e '.phase == "staged" and .new_key_id == "late-key"' \
+  "${late}.rotation-pending.json" >/dev/null ||
+  fail "complete IAM response was not salvaged after a late transport failure"
+
 # The internal-service wrapper follows the same no-start rule.
 internal_email="internal-test-instance@test-project.iam.gserviceaccount.com"
 export INTERNAL_CREDENTIALS_FILE="$tmp/internal/GOOGLE_APPLICATION_CREDENTIALS"
@@ -638,5 +1105,53 @@ if grep -Fq 'RESTART cloud-compose-internal-services.service' "$order_log"; then
 fi
 jq -e '.phase == "grace"' "${INTERNAL_CREDENTIALS_FILE}.rotation-pending.json" >/dev/null || \
   fail "inactive internal service did not complete authenticated propagation"
+
+# The internal identity is always module-created and uses the same trusted
+# fresh-filesystem reconciliation before first provisioning.
+rm -f -- "$INTERNAL_CREDENTIALS_FILE" "${INTERNAL_CREDENTIALS_FILE}.rotation-"*
+reset_key_state_many "$internal_email" 10
+export NEW_KEY_ID=internal-fresh EXPECTED_CONSUMER_KEY_ID=internal-fresh
+FAKE_INTERNAL_STATE=inactive FAKE_INTERNAL_ACTIVE=false \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-internal.sh" >/dev/null
+[[ "$(<"$post_count")" == 1 ]] || fail "fresh internal reconciliation did not create exactly one key"
+jq -e --arg name "$(key_name "$internal_email" internal-fresh)" \
+  'length == 1 and .[0].name == $name' "$key_state" >/dev/null ||
+  fail "fresh internal reconciliation did not converge to one replacement key"
+
+# The internal identity uses the same exact inactive-service gate. Failed or
+# unqueryable unit state cannot authorize deletion.
+rm -f -- "$INTERNAL_CREDENTIALS_FILE" "${INTERNAL_CREDENTIALS_FILE}.rotation-"*
+reset_key_state_many "$internal_email" 1
+if FAKE_INTERNAL_STATE=failed \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-internal.sh" >/dev/null 2>&1; then
+  fail "fresh internal reconciliation accepted a failed service"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "failed internal service allowed IAM mutation"
+fi
+
+rm -f -- "$INTERNAL_CREDENTIALS_FILE" "${INTERNAL_CREDENTIALS_FILE}.rotation-"*
+reset_key_state_many "$internal_email" 1
+if FAKE_SYSTEMCTL_QUERY_FAIL=true \
+  bash "$repo_root/rootfs/home/cloud-compose/rotate-keys-internal.sh" >/dev/null 2>&1; then
+  fail "fresh internal reconciliation accepted an unqueryable service state"
+fi
+if grep -Eq '^(DELETE |POST$)' "$order_log"; then
+  fail "unqueryable internal service allowed IAM mutation"
+fi
+
+if find "$ROTATION_RUNTIME_DIR" -maxdepth 1 -type f -name 'iam-create-response.*' -print -quit |
+  grep -q .; then
+  fail "rotation retained an ephemeral IAM private-key response"
+fi
+if find "$tmp" -type f -name '.iam-create-response.*' -print -quit | grep -q .; then
+  fail "rotation wrote an IAM private-key response to persistent credential storage"
+fi
+grep -Fq 'mktemp "${ROTATION_RUNTIME_DIR}/iam-create-response.XXXXXX"' \
+  "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" ||
+  fail "IAM private-key responses are not staged under the ephemeral runtime directory"
+grep -Fq 'trap cleanup_ephemeral_create_response EXIT' \
+  "$repo_root/rootfs/home/cloud-compose/rotate-keys.sh" ||
+  fail "IAM private-key response cleanup is not registered for process exit"
 
 echo "Key rotation contract passed"

@@ -1,5 +1,11 @@
 mock_provider "cloudinit" {}
 mock_provider "google" {
+  mock_resource "google_compute_disk" {
+    override_during = plan
+    defaults = {
+      disk_id = "987654321012345678"
+    }
+  }
   mock_resource "google_service_account" {
     override_during = plan
     defaults = {
@@ -81,6 +87,17 @@ run "disables_privileged_services_by_default" {
 
   assert {
     condition = (
+      local.host_env.CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY == "v1:gcp-disk-id:987654321012345678" &&
+      strcontains(
+        local.cloud_init_yaml,
+        "--publish-fresh-marker \"v1:gcp-disk-id:987654321012345678\"",
+      )
+    )
+    error_message = "GCP cloud-init and the root runtime environment must carry the same immutable data-disk identity."
+  }
+
+  assert {
+    condition = (
       google_project_iam_member.log.member == "serviceAccount:${local.vm_service_account_email}" &&
       google_project_iam_member.monitoring.member == "serviceAccount:${local.vm_service_account_email}"
     )
@@ -138,9 +155,31 @@ run "creates_app_key_management_only_when_explicitly_enabled" {
       length(google_service_account_iam_member.app-keys) == 1 &&
       google_service_account_iam_member.app-keys[0].role == "roles/iam.serviceAccountKeyAdmin" &&
       google_service_account_iam_member.app-keys[0].member == "serviceAccount:${local.vm_service_account_email}" &&
+      local.host_env.GCP_APP_SERVICE_ACCOUNT_MANAGED == "true" &&
+      output.appGsa.managed == true &&
       local.host_env.GCP_APP_CREDENTIALS_ENABLED == "true"
     )
-    error_message = "Explicit app file credentials must scope Key Admin to the app identity and enable runtime rotation."
+    error_message = "Explicit app file credentials must scope Key Admin to the module-owned app identity and enable runtime rotation."
+  }
+}
+
+run "marks_caller_supplied_app_identity_unmanaged" {
+  command = plan
+
+  variables {
+    name                      = "gcp-contract"
+    project_id                = "test-project"
+    docker_compose_repo       = "https://github.com/libops/wp.git"
+    app_service_account_email = "existing@test-project.iam.gserviceaccount.com"
+    app_credentials_enabled   = true
+  }
+
+  assert {
+    condition = (
+      local.host_env.GCP_APP_SERVICE_ACCOUNT_MANAGED == "false" &&
+      output.appGsa.managed == false
+    )
+    error_message = "A caller-supplied app identity must never authorize managed orphan-key reconciliation."
   }
 }
 

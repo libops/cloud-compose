@@ -69,7 +69,7 @@ runcmd:
   printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
   chmod 0600 "$filesystem_prep" "$filesystem_persist"
 %{ endif }
-  bash "$filesystem_prep" '${DATA_DEVICE}' /mnt/disks/data
+  bash "$filesystem_prep" '${DATA_DEVICE}' /mnt/disks/data --publish-fresh-marker
   bash "$filesystem_prep" '${VOLUMES_DEVICE}' /mnt/disks/volumes
   mkdir -p /mnt/disks/data/docker/volumes
   if ! mountpoint -q /mnt/disks/data/docker/volumes; then
@@ -90,8 +90,10 @@ runcmd:
     cp -a /var/lib/cloud-compose/mounted-rootfs/mnt/disks/. /mnt/disks/
   fi
 %{ endif }
-  chown cloud-compose:cloud-compose /mnt/disks/data /mnt/disks/volumes
-  chmod 0775 /mnt/disks/data /mnt/disks/volumes
+  chown root:cloud-compose /mnt/disks/data
+  chmod 1775 /mnt/disks/data
+  chown cloud-compose:cloud-compose /mnt/disks/volumes
+  chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
   rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
   bash /home/cloud-compose/start-cloud-compose-bootstrap.sh

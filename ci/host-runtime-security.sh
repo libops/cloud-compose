@@ -176,8 +176,8 @@ assert_contains "$host_init" 'chown root:root /home/cloud-compose'
 assert_contains "$host_init" "-exec chown root:root {} +"
 assert_contains "$host_init" '/home/cloud-compose/.sitectl \'
 assert_contains "$host_init" 'install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"'
-assert_contains "$host_init" 'for mutable_root in /mnt/disks/data /mnt/disks/volumes; do'
-assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose "$mutable_root"'
+assert_contains "$host_init" 'install -d -m 1775 -o root -g cloud-compose /mnt/disks/data'
+assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/volumes'
 assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops'
 if grep -A12 -F 'source_compose_app_env()' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" | \
     grep -Eq 'source[[:space:]]+.*COMPOSE_APPS_ENV_DIR'; then
