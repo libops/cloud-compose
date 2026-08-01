@@ -97,7 +97,8 @@ Example request:
   "org_public_id": "org-uuid",
   "deployment_id": "deployment-uuid",
   "git_ref": "refs/pull/123/head",
-  "git_branch": "feature-branch"
+  "git_branch": "feature-branch",
+  "rollout_arg1": "manifest-app-key"
 }
 ```
 
@@ -117,6 +118,11 @@ variable before `runtime.compose.rollout` runs:
 - `ROLLOUT_ARG1`
 - `ROLLOUT_ARG2`
 - `ROLLOUT_ARG3`
+
+For bin-packed hosts, set `rollout_arg1` to the exact app key from
+`compose_projects`. The shared dispatcher maps that value to
+`CLOUD_COMPOSE_APP` only for the rollout lifecycle and validates it against the
+manifest before running any command. Omit it to retain the primary-app default.
 
 The generated rollout script runs from the checked-out compose repository after
 sourcing `/home/cloud-compose/profile.sh`. The default contract prefers
@@ -140,3 +146,20 @@ Salt, operator-driven deploys, and the authenticated rollout service all use the
 same lifecycle contract. Override `runtime.compose.rollout` only when the whole
 command contract needs to change, and preserve the deploy, healthcheck, and
 non-production verification gates in any override.
+
+## DigitalOcean and Linode
+
+The same service is available through `digitalocean.rollout` and
+`linode.rollout`. Supply the same pinned release URL/digest, HTTPS JWKS URI,
+audience, and optional claims used on GCP. Non-GCP providers deliberately have
+no broad default control-plane network: enabling rollout requires explicit
+source CIDRs, which are added to the provider firewall for only the rollout
+port. The resulting `rollout` output contains the private host, port, and JWT
+audience. The Linux runtime installs the verified binary and enables the same
+systemd service; request payloads and per-app targeting are identical on every
+cloud.
+
+Ansible and Salt accept the same settings under `runtime.rollout`; they write
+the `ROLLOUT_*` host environment, install the digest-pinned binary, and start
+the unit. They deliberately do not own a cloud firewall. Authorize the exact
+controller CIDR at the host or upstream firewall before enabling the listener.

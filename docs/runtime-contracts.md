@@ -324,6 +324,12 @@ and its network-fetched package build scripts execute only after the metadata
 firewall is installed and use the bridge network, so they cannot inherit the
 host network's root exemption.
 
+The GCP COS VM image name is a reviewed manual pin. Renovate has no built-in
+GCP Compute image-family datasource, and the shared LibOps preset does not add
+one, so the repository intentionally carries no non-functional Renovate marker
+for this value. Review the COS release notes and update all three GCP defaults
+together when promoting the host OS.
+
 The GCP power-button Terraform dependency is sourced from a full Git commit,
 not a mutable branch or tag archive. Advance that commit deliberately with a
 reviewed plan; provider lockfiles do not checksum remote Terraform modules.
@@ -667,10 +673,37 @@ that unit in as a dependency. Each dump is written under a private staging
 directory, checked for non-zero size and valid gzip structure, and renamed into
 the daily final path only after validation. An invalid pre-existing daily file
 fails closed for operator review instead of being treated as a completed backup.
-Cloud-compose does not delete retained backups automatically; downstream
-operators must define reviewed retention and off-host recovery policy.
+One app failure is recorded without skipping the remaining bin-packed apps; the
+service exits non-zero after attempting all of them. Dumps older than
+`MARIADB_BACKUP_RETENTION_DAYS` (14 by default) are pruned from each validated
+app directory so they cannot fill the shared data disk indefinitely.
+
+Local dumps remain on the same failure-domain disk as application data.
+Downstream operators must still define reviewed encrypted off-host retention
+and restore tests. GCP production enables crash-consistent scheduled disk
+snapshots by default; `guest_flush = false` is deliberate because the logical
+dump supplies the application-consistent recovery artifact. DigitalOcean and
+Linode boot-disk backup toggles do not include attached volumes; see the
+provider guide before claiming disaster-recovery coverage.
+
+Terraform owns the attached data and Docker-volume disks. A normal
+`terraform destroy` deletes them; GCP production snapshots are retained, but
+non-production or explicitly snapshot-disabled stacks may have no recovery
+copy. Review every disk delete in the saved plan and create an independent
+snapshot/export before intentional teardown. The module does not use an
+unconditional `prevent_destroy` because that would also block explicit,
+operator-approved retirement.
 
 ## Power Management
+
+On GCP, application ports are not public VM ingress. With power management
+enabled, the VM firewall admits every distinct manifest app port only from the
+Cloud Run Direct VPC subnet; each app is reached through its Cloud Run/LB
+frontend. With power management disabled, cloud-compose opens no application
+port. Therefore HTTP-01/Let's Encrypt presets require a separately managed
+frontend/firewall path on GCP and must not be assumed to work against the VM's
+public IP. DigitalOcean and Linode provider firewalls directly admit each
+distinct app port from their configured web source ranges.
 
 `gcp.power_management.enabled` is disabled by default and gates GCP-specific
 cost-saving behavior:
@@ -830,6 +863,28 @@ an unrelated prior run's resources. Because `0.10.2` predates independent
 sitectl package-version selectors, its baseline bootstrap still resolves the
 then-current compatible package releases; the test freezes module source and
 state shape, not that legacy package repository response.
+
+## Private repository credentials
+
+Keep every `docker_compose_repo` URL credential-free. For a private HTTPS
+repository, render a short-lived forge token from Vault to a root-controlled
+staging file, then use the template command hook to install it as
+`/home/cloud-compose/.config/git/credentials` owned by `cloud-compose` with
+mode `0600`. Configure the `cloud-compose` user's global Git credential helper
+once as:
+
+```sh
+git config --global credential.helper \
+  'store --file=/home/cloud-compose/.config/git/credentials'
+```
+
+The credential file uses Git's normal credential-store format, for example
+`https://x-access-token:TOKEN@github.com`. Scope the token to read only the
+single repository, rotate it through Vault Agent, and never put it in the repo
+URL, Terraform, cloud-init, `.env`, logs, or state. SSH deploy keys are also
+valid when installed out of band with a pinned `known_hosts`, but cloud-compose
+does not create or store private keys. Public repositories need no credential
+configuration.
 
 ## Hosted smoke-test credentials
 

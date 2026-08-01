@@ -62,6 +62,13 @@ is meaningful: it disables that phase and is not replaced by the default.
 Runtime feature switches must be YAML booleans, not quoted strings; ambiguous
 values are rejected before host mutation.
 
+Set `cloud_compose_runtime.rollout` to enable the same authenticated rollout
+listener used by Terraform. Supply a pinned HTTPS `release_url`, its lowercase
+`release_sha256`, an HTTPS `jwks_uri`, `jwt_audience`, and optional JSON-object
+`custom_claims`. The role installs and starts the service, but deliberately does
+not own the host or upstream firewall: restrict the configured port (8081 by
+default) to the trusted signal source before enabling it.
+
 The role installs lifecycle dispatchers as `root:cloud-compose` mode `0750` and
 the root-consumed `.env`, project/application JSON, and managed-artifact
 manifest as `root:cloud-compose` mode `0640`. Reapplying the role restores that
