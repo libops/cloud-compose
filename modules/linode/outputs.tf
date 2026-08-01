@@ -41,3 +41,13 @@ output "sitectl_package_versions" {
   value       = module.runtime.sitectl_package_versions
   description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
 }
+
+
+output "rollout" {
+  value = var.linode.rollout.enabled ? {
+    host     = coalesce(linode_instance.cloud_compose.private_ip_address, one(setsubtract(linode_instance.cloud_compose.ipv4, [linode_instance.cloud_compose.private_ip_address])))
+    port     = var.linode.rollout.port
+    audience = var.linode.rollout.jwt_audience
+  } : null
+  description = "Authenticated rollout endpoint details."
+}

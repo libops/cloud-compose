@@ -11,7 +11,13 @@ source "$profile_path"
 source "$compose_apps_path"
 
 BACKUP_ROOT="${MARIADB_BACKUP_ROOT:-/mnt/disks/data/backups/mariadb}"
+BACKUP_RETENTION_DAYS="${MARIADB_BACKUP_RETENTION_DAYS:-14}"
 today="$(date -u +%Y%m%d)"
+
+if [[ ! "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || ((10#$BACKUP_RETENTION_DAYS < 1)); then
+    echo "MARIADB_BACKUP_RETENTION_DAYS must be a positive integer" >&2
+    exit 2
+fi
 
 acquire_cloud_compose_lifecycle_lock mariadb-backup
 
@@ -65,17 +71,39 @@ backup_app() (
         echo "MariaDB backup did not produce a valid gzip artifact for ${app}" >&2
         return 1
     fi
-    chmod 0640 "$staging_output"
+    chmod 0640 "$staging_output" || return 1
     if [[ -e "$output" || -L "$output" ]]; then
         echo "MariaDB backup target appeared during staging: $output" >&2
         return 1
     fi
-    mv -- "$staging_output" "$output"
+    mv -- "$staging_output" "$output" || return 1
+    if [[ -L "$output" || ! -f "$output" || ! -s "$output" ]] || ! gzip -t -- "$output"; then
+        echo "MariaDB backup was not published as a valid artifact for ${app}: ${output}" >&2
+        return 1
+    fi
     echo "MariaDB backup completed for ${app}: ${output}"
 )
 
 apps=()
 compose_app_names_array apps
+failures=0
 for app in "${apps[@]}"; do
-    backup_app "$app"
+    if ! backup_app "$app"; then
+        echo "MariaDB backup failed for ${app}; continuing with remaining apps" >&2
+        failures=$((failures + 1))
+    fi
 done
+
+# Prune only regular, non-symlink dump files beneath each validated app
+# directory. This keeps a broken or high-churn app from filling the shared data
+# disk and taking down its bin-packed neighbors.
+for app in "${apps[@]}"; do
+    backup_dir="${BACKUP_ROOT}/${app}"
+    [[ -d "$backup_dir" && ! -L "$backup_dir" ]] || continue
+    find "$backup_dir" -xdev -type f -name '*.sql.gz' -mtime "+${BACKUP_RETENTION_DAYS}" -delete
+done
+
+if ((failures > 0)); then
+    echo "MariaDB backup completed with ${failures} failed app(s)" >&2
+    exit 1
+fi

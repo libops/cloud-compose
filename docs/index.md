@@ -23,6 +23,21 @@ the same lifecycle path used by later rollouts.
 - Existing-host deployment through Ansible or Salt
 - Nightly MariaDB backups through systemd timers
 
+## Who owns what
+
+| Surface | Owner | Change path |
+|---|---|---|
+| VM identity, network/firewall, attached disks, provider snapshots | Terraform provider entrypoint | Reviewed plan/apply; changes may replace the VM but preserve provider-managed disks only where the plan says so |
+| Host packages, systemd units, pinned support binaries | cloud-compose runtime | Terraform replacement/bootstrap, or Ansible/Salt for an existing host |
+| App source revision on an existing VM | Authenticated rollout endpoint or operator-run `/home/cloud-compose/rollout` | `sitectl deploy` against an explicit ref and manifest app key |
+| App Compose behavior and health verification | sitectl plugin/component definitions | Versioned plugin release and normal lifecycle commands |
+| Secrets and private forge credentials | Vault/operator secret delivery | Short-lived files rendered outside Terraform state |
+| Logical backup retention and off-host disaster recovery | cloud-compose timer plus operator-owned storage policy | Local dumps are pruned after 14 days; independent copies and restore tests remain an operator responsibility |
+
+Any cloud-init byte can change the GCP boot-disk identity and replace the VM;
+cloud-init is bootstrap configuration, not the day-2 app update channel. Keep
+routine source deployments in rollout and application behavior in sitectl.
+
 ## Start here
 
 - [Runtime contracts](runtime-contracts.md) explains the VM/app contract.

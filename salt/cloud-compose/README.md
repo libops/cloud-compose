@@ -65,6 +65,13 @@ empty list disables that phase and is preserved instead of restoring a default.
 Runtime feature switches must be YAML booleans, not quoted strings; ambiguous
 values are rejected before host mutation.
 
+Set `cloud_compose.runtime.rollout` to enable the same authenticated rollout
+listener used by Terraform. Supply a pinned HTTPS `release_url`, its lowercase
+`release_sha256`, an HTTPS `jwks_uri`, `jwt_audience`, and optional JSON-object
+`custom_claims`. The formula installs and starts the service, but deliberately
+does not own the host or upstream firewall: restrict the configured port (8081
+by default) to the trusted signal source before enabling it.
+
 The formula installs lifecycle dispatchers as `root:cloud-compose` mode `0750`
 and the root-consumed `.env`, project/application JSON, and managed-artifact
 manifest as `root:cloud-compose` mode `0640`. Reapplying the state restores that

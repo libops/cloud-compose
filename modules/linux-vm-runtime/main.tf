@@ -233,6 +233,16 @@ host_env = {
   VAULT_ROLE                           = trimspace(var.vault_role)
   VAULT_AGENT_ENABLED                  = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
   VAULT_AUTH_METHOD                    = var.vault_auth_method
+  ROLLOUT_ENABLED                      = tostring(var.rollout_enabled)
+  ROLLOUT_DOWNLOAD_URL                 = trimspace(var.rollout_release_url)
+  ROLLOUT_DOWNLOAD_SHA256              = trimspace(var.rollout_release_sha256)
+  ROLLOUT_PORT                         = tostring(var.rollout_port)
+  ROLLOUT_JWKS_URI                     = trimspace(var.rollout_jwks_uri)
+  ROLLOUT_JWT_AUD                      = trimspace(var.rollout_jwt_audience)
+  ROLLOUT_CUSTOM_CLAIMS                = trimspace(var.rollout_custom_claims)
+  ROLLOUT_CMD                          = "/bin/bash"
+  ROLLOUT_ARGS                         = "/home/cloud-compose/rollout"
+  ROLLOUT_LOCK_FILE                    = "/mnt/disks/data/rollout.lock"
   VAULT_AGENT_TOKEN_PATH               = var.vault_agent_token_path
   LIBOPS_MANAGED_RUNTIME_ENABLED       = tostring(var.libops_managed_runtime_enabled)
   LIBOPS_INTERNAL_SERVICES_ENABLED     = tostring(var.libops_internal_services_enabled)
@@ -330,6 +340,7 @@ cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
   APPLICATION_ENV_FILE_CONTENT   = local.application_env_file_content
   VAULT_AGENT_FILES              = local.vault_agent_files
   MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file
+  ROLLOUT_RUNCMD                 = var.rollout_enabled ? "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1" : ""
   ROOTFS_ARCHIVE_ENABLED         = local.rootfs_archive_url != ""
   ROOTFS_ARCHIVE_PREPARE_COMMAND = local.rootfs_archive_prepare_command
   ROOTFS_ARCHIVE_INSTALL_COMMAND = local.rootfs_archive_install_command

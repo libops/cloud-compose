@@ -59,7 +59,7 @@ output "backend" {
 }
 
 output "rollout" {
-  value       = null
+  value       = module.digitalocean.rollout
   description = "Optional rollout API endpoint details."
 }
 

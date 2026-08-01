@@ -19,12 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: DigitalOcean ISLE
+          - name: DigitalOcean WordPress
             kind: app
             provider: digitalocean
-            template: isle
+            template: wp
             environment: cloud-smoke-cleanup-digitalocean
-            concurrency_group: cloud-compose-smoke-digitalocean-isle
+            concurrency_group: cloud-compose-smoke-digitalocean-wp
           - name: Linode WordPress
             kind: app
             provider: linode

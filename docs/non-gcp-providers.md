@@ -14,6 +14,8 @@ DigitalOcean and Linode callers that previously selected `cloud_provider` on
 the root module must move to their provider-specific source path as a separately
 reviewed state migration. Terraform cannot conditionally load a statically
 declared child module's provider, even when that module has `count = 0`.
+The compatibility root is frozen to GCP compatibility fixes on 2027-02-01;
+new features belong in the provider entrypoints and shared runtime modules.
 
 ## Migrating A 1.x Root Deployment
 
@@ -84,6 +86,15 @@ and runs `resize2fs` after a provider volume grows; increasing either Terraform
 volume size therefore exposes the added capacity on the next boot without
 reformatting the filesystem. Never shrink these volume inputs.
 
+DigitalOcean and Linode attach volumes after instance creation, so first-boot
+cloud-init waits up to ten minutes for each stable `/dev/disk/by-id` path. If a
+provider attachment exceeds that window, bootstrap fails closed before Docker
+or app data can land on the boot disk. After the provider reports both volumes
+attached, rerun the idempotent bootstrap with `sudo cloud-init clean --logs
+--reboot`; the filesystem helper recognizes existing ext4 filesystems and the
+bootstrap contract safely resumes. Do not manually format the device to clear
+the failure.
+
 Provider VM backup toggles do **not** protect application state:
 DigitalOcean's `droplet.backups` covers the Droplet disk but excludes attached
 Volumes, and Linode's `instance.backups_enabled` excludes Block Storage. The
@@ -116,6 +127,14 @@ contract equivalent to GCP IAM for Vault Agent. The GCP entrypoints resolve
 entrypoints resolve it to `consumer-managed`. When the Terraform-managed agent
 is enabled with `consumer-managed`, supply the auth stanza through
 `runtime.vault.agent_additional_config` or a rootfs overlay.
+
+For a supported keyless-to-Terraform pattern, use
+`modules/vault-approle-auto-auth` and pass its `agent_additional_config` output
+to that field. The helper accepts only file paths: deliver a short-lived or
+response-wrapped secret ID out of band into a root-owned `0600` file. Vault
+Agent removes that file after reading it and writes its renewable token to the
+configured sink. Never place a role ID, secret ID, wrapping token, or rendered
+HCL containing one in Terraform variables or state.
 
 Provider-neutral `runtime.users` applies on every cloud. DigitalOcean and Linode
 also accept users under their provider-specific `ssh.users` map; a

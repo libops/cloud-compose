@@ -270,7 +270,7 @@ main() {
         return 2
     fi
 
-    wait_seconds="${FILESYSTEM_DEVICE_WAIT_SECONDS:-120}"
+    wait_seconds="${FILESYSTEM_DEVICE_WAIT_SECONDS:-600}"
     if [[ ! "$wait_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || ((10#$wait_seconds > 600)); then
         log "FILESYSTEM_DEVICE_WAIT_SECONDS must be an integer from 1 through 600"
         return 2

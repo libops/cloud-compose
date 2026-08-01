@@ -59,7 +59,7 @@ output "backend" {
 }
 
 output "rollout" {
-  value       = null
+  value       = module.linode.rollout
   description = "Optional rollout API endpoint details."
 }
 

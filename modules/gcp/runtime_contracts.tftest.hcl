@@ -305,6 +305,7 @@ run "distinguishes_inherited_and_explicit_core_only_project_packages" {
       }
       core-only = {
         docker_compose_repo = "https://github.com/libops/wp.git"
+        ingress_port        = 81
         sitectl_packages    = []
       }
     }

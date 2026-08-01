@@ -39,3 +39,12 @@ output "sitectl_package_versions" {
   value       = module.runtime.sitectl_package_versions
   description = "Effective release selector for every installed sitectl package; values may be exact tags or latest."
 }
+
+output "rollout" {
+  value = var.digitalocean.rollout.enabled ? {
+    host     = digitalocean_droplet.cloud_compose.ipv4_address_private
+    port     = var.digitalocean.rollout.port
+    audience = var.digitalocean.rollout.jwt_audience
+  } : null
+  description = "Authenticated rollout endpoint details."
+}

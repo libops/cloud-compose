@@ -122,6 +122,13 @@ with tempfile.TemporaryDirectory(prefix="cloud-compose-input-contract.") as temp
         payload["projects"][0]["project_dir"] = project_dir
         reject(label, payload, "project_dir")
 
+    duplicate_ports = copy.deepcopy(safe_payload)
+    duplicate_ports["projects"] = [
+        {"name": "alpha", "project_dir": str(data_root / "alpha"), "ingress_port": 8080},
+        {"name": "beta", "project_dir": str(data_root / "beta"), "ingress_port": 8080},
+    ]
+    reject("duplicate project ports", duplicate_ports, "ingress ports must be unique")
+
     artifact_cases = []
 
     def artifact_case(label, field, value, expected):

@@ -193,7 +193,7 @@ variable "data_disk_size_gb" {
 variable "os" {
   type        = string
   default     = "cos-125-19216-220-185"
-  description = "The host OS to install on the GCP instance"
+  description = "Reviewed Container-Optimized OS image name. Renovate cannot discover GCP image-family members; update this pin manually from the COS release notes."
 }
 
 variable "docker_compose_repo" {
@@ -238,7 +238,9 @@ variable "compose_projects" {
   default = {}
 
   validation {
-    condition = alltrue([
+    condition = length(distinct([
+      for _, app in var.compose_projects : coalesce(try(app.ingress_port, null), var.ingress_port)
+      ])) == length(var.compose_projects) && alltrue([
       for name, app in var.compose_projects :
       can(regex("^[a-z][a-z0-9-]*$", name)) &&
       trimspace(app.docker_compose_repo) != "" &&
@@ -246,7 +248,7 @@ variable "compose_projects" {
       coalesce(try(app.ingress_port, null), var.ingress_port) <= 65535 &&
       floor(coalesce(try(app.ingress_port, null), var.ingress_port)) == coalesce(try(app.ingress_port, null), var.ingress_port)
     ])
-    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be a whole number between 1 and 65535."
+    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and every app must use a unique whole-number ingress_port between 1 and 65535."
   }
 }
 

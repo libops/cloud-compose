@@ -171,7 +171,9 @@ variable "compose_projects" {
   default = {}
 
   validation {
-    condition = alltrue([
+    condition = length(distinct([
+      for _, app in var.compose_projects : coalesce(try(app.ingress_port, null), var.ingress_port)
+      ])) == length(var.compose_projects) && alltrue([
       for name, app in var.compose_projects :
       can(regex("^[a-z][a-z0-9-]*$", name)) &&
       trimspace(app.docker_compose_repo) != "" &&
@@ -179,7 +181,7 @@ variable "compose_projects" {
       coalesce(try(app.ingress_port, null), var.ingress_port) <= 65535 &&
       floor(coalesce(try(app.ingress_port, null), var.ingress_port)) == coalesce(try(app.ingress_port, null), var.ingress_port)
     ])
-    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress_port must be a whole number between 1 and 65535."
+    error_message = "compose_projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and every app must use a unique whole-number ingress_port between 1 and 65535."
   }
 }
 
@@ -222,6 +224,48 @@ variable "docker_compose_rollout" {
   ]
   nullable    = false
   description = "Commands used by rollout triggers. GIT_REF/GIT_BRANCH selects a source ref; without one, sitectl reconciles the current checkout."
+}
+
+variable "rollout_enabled" {
+  type        = bool
+  default     = false
+  description = "Install and enable the authenticated provider-neutral rollout service."
+}
+
+variable "rollout_release_url" {
+  type        = string
+  default     = ""
+  description = "Pinned HTTPS rollout-service binary URL."
+}
+
+variable "rollout_release_sha256" {
+  type        = string
+  default     = ""
+  description = "Lowercase SHA256 digest for the rollout-service binary."
+}
+
+variable "rollout_port" {
+  type        = number
+  default     = 8081
+  description = "Authenticated rollout listener port."
+}
+
+variable "rollout_jwks_uri" {
+  type        = string
+  default     = ""
+  description = "HTTPS JWKS URI used to authenticate rollout requests."
+}
+
+variable "rollout_jwt_audience" {
+  type        = string
+  default     = ""
+  description = "Required rollout JWT audience."
+}
+
+variable "rollout_custom_claims" {
+  type        = string
+  default     = ""
+  description = "Optional JSON object of additional required JWT claims."
 }
 
 variable "sitectl_packages" {

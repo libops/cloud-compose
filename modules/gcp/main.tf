@@ -493,7 +493,10 @@ app_service_account_managed = var.app_service_account_email == ""
 app_credentials_enabled            = var.app_credentials_enabled
 internal_services_enabled          = var.libops_internal_services_enabled || var.power_management_enabled
 internal_services_compose_profiles = var.power_management_enabled ? "lightsout" : ""
-scheduled_snapshots_enabled        = var.production && var.run_snapshots
+# Production snapshots are crash-consistent (`guest_flush = false`). MariaDB
+# logical dumps run before the snapshot window and provide application-level
+# consistency without coupling disk snapshots to a guest-agent implementation.
+scheduled_snapshots_enabled = var.production && var.run_snapshots
 # have prod snapshot begin near the initial run so non-prod overlays can
 # discover a production snapshot; non-production plans avoid snapshot resources.
 snapshot_start_time = local.scheduled_snapshots_enabled ? formatdate("h:00", time_static.snapshot_time_static[0].rfc3339) : "00:00"
@@ -1293,7 +1296,7 @@ resource "google_compute_firewall" "allow-cloud-run-ingress" {
 
   allow {
     protocol = "tcp"
-    ports    = [tostring(local.primary_compose_project.ingress_port)]
+    ports    = sort(distinct([for _, app in local.compose_projects : tostring(app.ingress_port)]))
   }
 
   target_tags = [local.network_namespace]

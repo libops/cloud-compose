@@ -33,6 +33,15 @@ cloud_compose_bootstrap_poll_interval: 15
 cloud_compose_extra_env: {}
 cloud_compose_runtime: {}
 
+cloud_compose_default_rollout_service:
+  enabled: false
+  release_url: ""
+  release_sha256: ""
+  port: 8081
+  jwks_uri: ""
+  jwt_audience: ""
+  custom_claims: ""
+
 cloud_compose_default_ingress:
   letsencrypt: false
   bot_mitigation: false

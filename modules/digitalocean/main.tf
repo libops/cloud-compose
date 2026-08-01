@@ -33,6 +33,13 @@ module "runtime" {
   docker_compose_up       = local.compose.up
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
+  rollout_enabled         = local.do.rollout.enabled
+  rollout_release_url     = local.do.rollout.release_url
+  rollout_release_sha256  = local.do.rollout.release_sha256
+  rollout_port            = local.do.rollout.port
+  rollout_jwks_uri        = local.do.rollout.jwks_uri
+  rollout_jwt_audience    = local.do.rollout.jwt_audience
+  rollout_custom_claims   = local.do.rollout.custom_claims
 
   sitectl_packages         = local.sitectl.packages
   sitectl_version          = local.sitectl.version
@@ -174,6 +181,15 @@ resource "digitalocean_firewall" "cloud_compose" {
       protocol         = "tcp"
       port_range       = inbound_rule.value
       source_addresses = local.do.firewall.web_source_addresses
+    }
+  }
+
+  dynamic "inbound_rule" {
+    for_each = local.do.rollout.enabled ? [local.do.rollout] : []
+    content {
+      protocol         = "tcp"
+      port_range       = tostring(inbound_rule.value.port)
+      source_addresses = inbound_rule.value.source_addresses
     }
   }
 
