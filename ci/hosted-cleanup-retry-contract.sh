@@ -113,9 +113,9 @@ state="$(run_wrapper sweep-linode ci/cloud-smoke.sh sweep-linode-wp)"
 assert_status "$state" 0
 assert_runner_call "$state" 'linode sweep --scope application --target linode-wp --run-id 123456789'
 
-state="$(run_wrapper sweep-digitalocean ci/cloud-smoke.sh sweep-digitalocean-isle)"
+state="$(run_wrapper sweep-digitalocean ci/cloud-smoke.sh sweep-digitalocean-wp)"
 assert_status "$state" 0
-assert_runner_call "$state" 'digitalocean sweep --scope application --target digitalocean-isle --run-id 123456789'
+assert_runner_call "$state" 'digitalocean sweep --scope application --target digitalocean-wp --run-id 123456789'
 
 state="$(run_wrapper sweep-config-management ci/config-management-cloud-smoke.sh sweep-ansible-drupal)"
 assert_status "$state" 0

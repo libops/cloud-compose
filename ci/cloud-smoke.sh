@@ -14,7 +14,7 @@ Usage:
   ci/cloud-smoke.sh sweep-<provider>-<template>
 
 Examples:
-  ci/cloud-smoke.sh digitalocean-isle
+  ci/cloud-smoke.sh digitalocean-wp
   ci/cloud-smoke.sh linode-wp
   ci/cloud-smoke.sh gcp-wp
 
@@ -58,7 +58,7 @@ require_env() {
 }
 
 default_targets() {
-  printf '%s\n' "${CLOUD_COMPOSE_SMOKE_TARGETS:-digitalocean-isle linode-wp gcp-wp}"
+  printf '%s\n' "${CLOUD_COMPOSE_SMOKE_TARGETS:-digitalocean-wp linode-wp gcp-wp}"
 }
 
 valid_template() {

@@ -2,8 +2,8 @@
 .PHONY: terraform-fmt terraform-fmt-check terraform-validate terraform-validate-contract terraform-lint-check terraform-docs terraform-docs-check
 .PHONY: config-management-cloud-smoke config-management-cloud-smoke-ansible-drupal config-management-cloud-smoke-salt-drupal
 .PHONY: destroy-config-management-cloud-smoke destroy-config-management-cloud-smoke-ansible-drupal destroy-config-management-cloud-smoke-salt-drupal
-.PHONY: smoke-test-clouds smoke-test smoke-test-digitalocean-isle smoke-test-linode-wp smoke-test-gcp-wp
-.PHONY: destroy-smoke destroy-smoke-digitalocean-isle destroy-smoke-linode-wp destroy-smoke-gcp-wp
+.PHONY: smoke-test-clouds smoke-test smoke-test-digitalocean-isle smoke-test-digitalocean-wp smoke-test-linode-wp smoke-test-gcp-wp
+.PHONY: destroy-smoke destroy-smoke-digitalocean-isle destroy-smoke-digitalocean-wp destroy-smoke-linode-wp destroy-smoke-gcp-wp
 .PHONY: docs docs-docker-build docs-build docs-serve docs-preview docs-clean
 
 DOCS_IMAGE ?= cloud-compose-docs
@@ -166,6 +166,9 @@ smoke-test: cloud-compose-ci
 smoke-test-digitalocean-isle:
 	$(MAKE) smoke-test PROVIDER=digitalocean TEMPLATE=isle
 
+smoke-test-digitalocean-wp:
+	$(MAKE) smoke-test PROVIDER=digitalocean TEMPLATE=wp
+
 smoke-test-linode-wp:
 	$(MAKE) smoke-test PROVIDER=linode TEMPLATE=wp
 
@@ -179,6 +182,9 @@ destroy-smoke: cloud-compose-ci
 
 destroy-smoke-digitalocean-isle:
 	$(MAKE) destroy-smoke PROVIDER=digitalocean TEMPLATE=isle
+
+destroy-smoke-digitalocean-wp:
+	$(MAKE) destroy-smoke PROVIDER=digitalocean TEMPLATE=wp
 
 destroy-smoke-linode-wp:
 	$(MAKE) destroy-smoke PROVIDER=linode TEMPLATE=wp
