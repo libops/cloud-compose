@@ -520,7 +520,7 @@ fi
 
 configure_sitectl_context() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local host port user context plugin environment site project_name project_dir compose_project_name
+  local host port user context plugin environment site project_dir compose_project_name
 
   host="$(jq -r '.host' "$output_json")"
   port="$(jq -r '.ssh_port' "$output_json")"
@@ -529,7 +529,6 @@ configure_sitectl_context() {
   plugin="$(jq -r '.plugin' "$output_json")"
   environment="$(jq -r '.environment' "$output_json")"
   site="$(jq -r '.site' "$output_json")"
-  project_name="$(jq -r '.project_name' "$output_json")"
   project_dir="$(jq -r '.project_dir' "$output_json")"
   compose_project_name="$(jq -r '.compose_project_name' "$output_json")"
 
@@ -543,10 +542,10 @@ configure_sitectl_context() {
     --site "$site" \
     --plugin "$plugin" \
     --environment "$environment" \
-    --project-name "$project_name" \
     --compose-project-name "$compose_project_name" \
     --docker-socket /var/run/docker.sock \
     --env-file .env \
+    --yolo \
     --default
 }
 
