@@ -58,6 +58,8 @@ assert_contains "$unit_dir/cloud-compose-key-rotation.service" 'TimeoutStartSec=
 assert_contains "$unit_dir/cloud-compose-key-rotation.service" 'RequiresMountsFor=/mnt/disks/data'
 assert_contains "$unit_dir/cloud-compose-vault-agent.service" 'RequiresMountsFor=/mnt/disks/data'
 assert_contains "$unit_dir/cloud-compose-rollout.service" 'RequiresMountsFor=/mnt/disks/data'
+assert_contains "$unit_dir/cloud-compose-rollout.service" 'User=cloud-compose'
+assert_contains "$unit_dir/cloud-compose-rollout.service" 'Group=cloud-compose'
 assert_contains "$unit_dir/libops-managed-runtime.service" 'RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes'
 
 docker_mount_dropin="$unit_dir/docker.service.d/cloud-compose-mounts.conf"

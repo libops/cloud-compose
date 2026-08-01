@@ -9,7 +9,7 @@ users:
   groups:
   - docker
   sudo:
-  - ALL=(ALL) NOPASSWD:ALL
+  - ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
@@ -55,7 +55,7 @@ runcmd:
     chown cloud-compose:cloud-compose /home/cloud-compose/.ssh/authorized_keys
     chmod 0600 /home/cloud-compose/.ssh/authorized_keys
     install -d -m 0755 /etc/sudoers.d
-    printf 'cloud-compose ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/90-cloud-compose
+    printf 'cloud-compose ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service\n' >/etc/sudoers.d/90-cloud-compose
     chmod 0440 /etc/sudoers.d/90-cloud-compose
   }
 
@@ -95,5 +95,8 @@ runcmd:
   chown cloud-compose:cloud-compose /mnt/disks/volumes
   chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
+%{ if ROLLOUT_RUNCMD != "" ~}
+  ${ROLLOUT_RUNCMD}
+%{ endif ~}
   rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
   bash /home/cloud-compose/start-cloud-compose-bootstrap.sh

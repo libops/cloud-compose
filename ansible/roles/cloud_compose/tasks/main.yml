@@ -55,6 +55,7 @@
     _cc_sitectl: "{{ cloud_compose_runtime.sitectl | default({}) }}"
     _cc_managed: "{{ cloud_compose_runtime.managed_runtime | default({}) }}"
     _cc_vault: "{{ cloud_compose_runtime.vault | default({}) }}"
+    _cc_rollout_service: "{{ cloud_compose_default_rollout_service | combine(cloud_compose_runtime.rollout | default({}), recursive=True) }}"
     _cc_extra_env: "{{ cloud_compose_runtime.extra_env | default(cloud_compose_extra_env) }}"
 
 - name: Require valid cloud-compose runtime sections and template
@@ -64,6 +65,7 @@
       - _cc_sitectl is mapping
       - _cc_managed is mapping
       - _cc_vault is mapping
+      - (cloud_compose_runtime.rollout | default({})) is mapping
       - (_cc_compose.ingress | default({})) is mapping
       - (_cc_compose.projects | default({})) is mapping
       - (_cc_compose.primary | default('')) is string
@@ -78,6 +80,23 @@
       - (_cc_vault.agent_enabled | default(false)) is boolean
       - not (_cc_vault.agent_enabled | default(false))
     fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, and Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible)."
+
+- name: Require safe rollout service settings
+  ansible.builtin.assert:
+    that:
+      - _cc_rollout_service.enabled is boolean
+      - not (_cc_rollout_service.enabled | bool) or (_cc_rollout_service.release_url is string and _cc_rollout_service.release_url is match('^https://[^\\s]+$'))
+      - not (_cc_rollout_service.enabled | bool) or (_cc_rollout_service.release_sha256 is string and _cc_rollout_service.release_sha256 is match('^[0-9a-f]{64}$'))
+      - not (_cc_rollout_service.enabled | bool) or (_cc_rollout_service.jwks_uri is string and _cc_rollout_service.jwks_uri is match('^https://[^\\s]+$'))
+      - not (_cc_rollout_service.enabled | bool) or (_cc_rollout_service.jwt_audience is string and (_cc_rollout_service.jwt_audience | trim | length) > 0)
+      - _cc_rollout_service.port is number
+      - _cc_rollout_service.port is not boolean
+      - _cc_rollout_service.port >= 1
+      - _cc_rollout_service.port <= 65535
+      - _cc_rollout_service.port == (_cc_rollout_service.port | int)
+      - _cc_rollout_service.custom_claims is string
+      - (_cc_rollout_service.custom_claims | trim | length) == 0 or ((_cc_rollout_service.custom_claims | from_json) is mapping)
+    fail_msg: "runtime.rollout requires a boolean enabled flag, pinned HTTPS release, HTTPS JWKS URI, non-empty audience, valid port, and custom_claims empty or a JSON object. The operator remains responsible for restricting the host/network firewall to trusted signal sources."
 
 - name: Resolve cloud-compose template defaults
   ansible.builtin.set_fact:
@@ -328,6 +347,12 @@
       - _cc_primary_key in _cc_compose_projects
     fail_msg: "cloud_compose_runtime.compose.primary must match a cloud_compose_runtime.compose.projects key."
 
+- name: Require unique application ingress ports
+  ansible.builtin.assert:
+    that:
+      - (_cc_compose_projects.values() | map(attribute='ingress_port') | map('int') | unique | length) == (_cc_compose_projects | length)
+    fail_msg: "Compose project ingress ports must be unique on a shared host."
+
 - name: Select primary cloud-compose project
   ansible.builtin.set_fact:
     _cc_primary_project: "{{ _cc_compose_projects[_cc_primary_key] }}"
@@ -406,6 +431,13 @@
       LIBOPS_INTERNAL_SERVICES_ENABLED: "{{ _cc_internal_services_enabled | ternary('true', 'false') }}"
       LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE: "{{ (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update)) | ternary('true', 'false') }}"
       INTERNAL_SERVICES_COMPOSE_PROFILES: ""
+      ROLLOUT_ENABLED: "{{ (_cc_rollout_service.enabled | bool) | ternary('true', 'false') }}"
+      ROLLOUT_DOWNLOAD_URL: "{{ _cc_rollout_service.release_url }}"
+      ROLLOUT_DOWNLOAD_SHA256: "{{ _cc_rollout_service.release_sha256 }}"
+      ROLLOUT_PORT: "{{ _cc_rollout_service.port | int }}"
+      ROLLOUT_JWKS_URI: "{{ _cc_rollout_service.jwks_uri }}"
+      ROLLOUT_JWT_AUD: "{{ _cc_rollout_service.jwt_audience }}"
+      ROLLOUT_CUSTOM_CLAIMS: "{{ _cc_rollout_service.custom_claims }}"
 
 - name: Keep host controls separate from application environment
   ansible.builtin.set_fact:
@@ -571,6 +603,11 @@
   ansible.builtin.systemd:
     daemon_reload: true
   when: cloud_compose_reload_systemd | bool
+
+- name: Install and start authenticated rollout service
+  ansible.builtin.command:
+    cmd: bash "{{ cloud_compose_home }}/deploy-rollout.sh"
+  when: _cc_rollout_service.enabled | bool
 
 - name: Clear cloud-compose bootstrap marker
   ansible.builtin.file:

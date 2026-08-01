@@ -54,6 +54,13 @@
 {% set docker = runtime_sections.docker if runtime_sections.docker is mapping else {} %}
 {% set managed = runtime_sections.managed_runtime if runtime_sections.managed_runtime is mapping else {} %}
 {% set vault = runtime_sections.vault if runtime_sections.vault is mapping else {} %}
+{% set raw_rollout_service = runtime.get('rollout', {}) %}
+{% if raw_rollout_service is mapping %}
+{% set rollout_service = raw_rollout_service %}
+{% else %}
+{% set rollout_service = {} %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout must be a map') %}
+{% endif %}
 {% set raw_extra_env = runtime.get('extra_env', cc.get('extra_env', {})) %}
 {% if raw_extra_env is mapping %}
 {% set extra_env = raw_extra_env %}
@@ -133,6 +140,31 @@
 {% endif %}
 {% if vault.get('agent_enabled', False) %}
 {% set ignored = invalid_runtime_inputs.append('Vault Agent is currently supported only by Terraform providers; set vault.agent_enabled=false for Salt') %}
+{% endif %}
+{% set rollout_enabled = rollout_service.get('enabled', False) %}
+{% set rollout_port = rollout_service.get('port', 8081) %}
+{% if rollout_enabled is not boolean %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.enabled must be a boolean') %}
+{% endif %}
+{% if rollout_port is boolean or rollout_port is not number or rollout_port < 1 or rollout_port > 65535 or rollout_port != (rollout_port | int) %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.port must be a whole number between 1 and 65535') %}
+{% endif %}
+{% if rollout_enabled is sameas true %}
+{% if rollout_service.get('release_url', '') is not string or not (rollout_service.get('release_url', '') is match('^https://[^\\s]+$')) %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.release_url must be HTTPS') %}
+{% endif %}
+{% if rollout_service.get('release_sha256', '') is not string or not (rollout_service.get('release_sha256', '') is match('^[0-9a-f]{64}$')) %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.release_sha256 must be a lowercase SHA-256 digest') %}
+{% endif %}
+{% if rollout_service.get('jwks_uri', '') is not string or not (rollout_service.get('jwks_uri', '') is match('^https://[^\\s]+$')) %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.jwks_uri must be HTTPS') %}
+{% endif %}
+{% if rollout_service.get('jwt_audience', '') is not string or not rollout_service.get('jwt_audience', '') | trim %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.jwt_audience must be non-empty') %}
+{% endif %}
+{% endif %}
+{% if rollout_service.get('custom_claims', '') is not string %}
+{% set ignored = invalid_runtime_inputs.append('runtime.rollout.custom_claims must be empty or a JSON object string') %}
 {% endif %}
 {% set internal_services_enabled = managed.get('internal_services_enabled') if 'internal_services_enabled' in managed else cc.get('internal_services_enabled', False) %}
 {% set managed_runtime_enabled = managed.get('enabled', cc.get('managed_runtime_enabled', True)) %}
@@ -393,6 +425,13 @@
 {% set ignored = invalid_runtime_inputs.append('compose.primary must match a compose.projects key') %}
 {% endif %}
 {% set primary_project = compose_projects.get(primary_key, {}) %}
+{% set ingress_ports = [] %}
+{% for project in compose_projects.values() %}
+{% set ignored = ingress_ports.append(project.get('ingress_port')) %}
+{% endfor %}
+{% if ingress_ports | unique | list | length != ingress_ports | length %}
+{% set ignored = invalid_runtime_inputs.append('Compose project ingress ports must be unique on a shared host') %}
+{% endif %}
 {% set all_packages = sitectl_packages | list %}
 {% for project in compose_projects.values() %}
 {% for package in project.get('sitectl_packages', []) %}
@@ -458,6 +497,13 @@
   'LIBOPS_INTERNAL_SERVICES_ENABLED': 'true' if internal_services_enabled else 'false',
   'LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE': 'true' if internal_services_auto_update else 'false',
   'INTERNAL_SERVICES_COMPOSE_PROFILES': ''
+  ,'ROLLOUT_ENABLED': 'true' if rollout_enabled is sameas true else 'false'
+  ,'ROLLOUT_DOWNLOAD_URL': rollout_service.get('release_url', '')
+  ,'ROLLOUT_DOWNLOAD_SHA256': rollout_service.get('release_sha256', '')
+  ,'ROLLOUT_PORT': rollout_port
+  ,'ROLLOUT_JWKS_URI': rollout_service.get('jwks_uri', '')
+  ,'ROLLOUT_JWT_AUD': rollout_service.get('jwt_audience', '')
+  ,'ROLLOUT_CUSTOM_CLAIMS': rollout_service.get('custom_claims', '')
 } %}
 {% set managed_artifacts = managed.get('artifacts', cc.get('managed_artifacts', [])) %}
 {% set validation_payload = {'projects': compose_projects.values() | list, 'artifacts': managed_artifacts} %}
@@ -701,6 +747,18 @@ cloud-compose-systemd-reload:
     - name: service.systemctl_reload
     - onchanges:
       - file: cloud-compose-rootfs
+{% endif %}
+
+{% if rollout_enabled is sameas true %}
+cloud-compose-rollout-service:
+  cmd.run:
+    - name: bash /home/cloud-compose/deploy-rollout.sh
+    - require:
+      - file: cloud-compose-env
+      - file: cloud-compose-rootfs
+{% if reload_systemd %}
+      - module: cloud-compose-systemd-reload
+{% endif %}
 {% endif %}
 
 {% if force_bootstrap is sameas true %}

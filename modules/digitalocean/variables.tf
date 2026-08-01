@@ -39,8 +39,33 @@ variable "digitalocean" {
       ssh_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
       web_source_addresses = optional(list(string), ["0.0.0.0/0", "::/0"])
     }), {})
+
+    rollout = optional(object({
+      enabled          = optional(bool, false)
+      release_url      = optional(string, "")
+      release_sha256   = optional(string, "")
+      port             = optional(number, 8081)
+      jwks_uri         = optional(string, "")
+      jwt_audience     = optional(string, "")
+      custom_claims    = optional(string, "")
+      source_addresses = optional(list(string), [])
+    }), {})
   })
   default = {}
+
+  validation {
+    condition = !var.digitalocean.rollout.enabled || (
+      can(regex("^https://[^[:space:]]+$", var.digitalocean.rollout.release_url)) &&
+      can(regex("^[0-9a-f]{64}$", var.digitalocean.rollout.release_sha256)) &&
+      can(regex("^https://[^[:space:]]+$", var.digitalocean.rollout.jwks_uri)) &&
+      trimspace(var.digitalocean.rollout.jwt_audience) != "" &&
+      var.digitalocean.rollout.port >= 1 && var.digitalocean.rollout.port <= 65535 && floor(var.digitalocean.rollout.port) == var.digitalocean.rollout.port &&
+      length(var.digitalocean.rollout.source_addresses) > 0 &&
+      alltrue([for cidr in var.digitalocean.rollout.source_addresses : can(cidrhost(cidr, 0))]) &&
+      (trimspace(var.digitalocean.rollout.custom_claims) == "" || can(keys(jsondecode(var.digitalocean.rollout.custom_claims))))
+    )
+    error_message = "Enabled DigitalOcean rollout requires pinned HTTPS release/JWKS inputs, a JWT audience, valid JSON-object claims, a valid port, and explicit source CIDRs."
+  }
 }
 
 variable "runtime" {
@@ -186,6 +211,7 @@ variable "runtime" {
       var.runtime.compose.ingress_port >= 1 &&
       var.runtime.compose.ingress_port <= 65535 &&
       floor(var.runtime.compose.ingress_port) == var.runtime.compose.ingress_port &&
+      length(distinct([for _, app in var.runtime.compose.projects : coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)])) == length(var.runtime.compose.projects) &&
       alltrue([
         for name, app in var.runtime.compose.projects :
         can(regex("^[a-z][a-z0-9-]*$", name)) &&
@@ -195,7 +221,7 @@ variable "runtime" {
         floor(coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)) == coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)
       ])
     )
-    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress ports must be whole numbers between 1 and 65535."
+    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and every app must use a unique whole-number ingress port between 1 and 65535."
   }
 
   validation {

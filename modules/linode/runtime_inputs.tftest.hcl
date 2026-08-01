@@ -86,6 +86,37 @@ run "rejects_unsafe_authorized_username" {
   expect_failures = [var.linode]
 }
 
+run "rejects_public_rollout_listener" {
+  command = plan
+
+  variables {
+    name = "contract-test"
+    linode = {
+      instance = {
+        authorized_keys = ["ssh-ed25519 AAAATEST"]
+        private_ip      = false
+      }
+      rollout = {
+        enabled        = true
+        release_url    = "https://example.invalid/cloud-compose-rollout"
+        release_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        jwks_uri       = "https://example.invalid/.well-known/jwks.json"
+        jwt_audience   = "cloud-compose"
+        source_ipv4    = ["10.0.0.0/8"]
+      }
+    }
+    runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      compose = {
+        repo = "https://github.com/libops/wp.git"
+      }
+    }
+  }
+
+  expect_failures = [var.linode]
+}
+
 run "rejects_archive_without_checksum" {
   command = plan
 

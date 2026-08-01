@@ -5,8 +5,8 @@ Wants=network-online.target
 RequiresMountsFor=/mnt/disks/data
 
 [Service]
-User=root
-Group=root
+User=cloud-compose
+Group=cloud-compose
 WorkingDirectory=/mnt/disks/data
 ExecStart=/bin/bash /home/cloud-compose/run-rollout-service.sh
 Restart=on-failure

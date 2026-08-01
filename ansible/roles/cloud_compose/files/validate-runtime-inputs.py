@@ -34,6 +34,7 @@ def validate_project_paths(projects, data_root):
     if not isinstance(projects, list):
         return ["Compose projects must be a list after adapter normalization."]
 
+    ingress_ports = []
     for index, project in enumerate(projects):
         label = f"project[{index}]"
         if not isinstance(project, dict):
@@ -41,6 +42,9 @@ def validate_project_paths(projects, data_root):
             continue
         if isinstance(project.get("name"), str) and project["name"]:
             label = f"project {project['name']!r}"
+        port = project.get("ingress_port")
+        if isinstance(port, int) and not isinstance(port, bool):
+            ingress_ports.append(port)
         path = project.get("project_dir")
         if not normalized_absolute_path(path):
             errors.append(
@@ -64,6 +68,8 @@ def validate_project_paths(projects, data_root):
                 f"{label} project_dir resolves outside the fixed {data_root} boundary: "
                 f"{path!r} -> {resolved!r}."
             )
+    if len(set(ingress_ports)) != len(ingress_ports):
+        errors.append("Compose project ingress ports must be unique on a shared host.")
     return errors
 
 

@@ -59,7 +59,7 @@ variable "gcp" {
     }), {})
 
     snapshots = optional(object({
-      enabled = optional(bool, false)
+      enabled = optional(bool, true)
     }), {})
 
     overlay = optional(object({
@@ -334,6 +334,7 @@ variable "runtime" {
       var.runtime.compose.ingress_port >= 1 &&
       var.runtime.compose.ingress_port <= 65535 &&
       floor(var.runtime.compose.ingress_port) == var.runtime.compose.ingress_port &&
+      length(distinct([for _, app in var.runtime.compose.projects : coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)])) == length(var.runtime.compose.projects) &&
       alltrue([
         for name, app in var.runtime.compose.projects :
         can(regex("^[a-z][a-z0-9-]*$", name)) &&
@@ -343,7 +344,7 @@ variable "runtime" {
         floor(coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)) == coalesce(try(app.ingress_port, null), var.runtime.compose.ingress_port)
       ])
     )
-    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and ingress ports must be whole numbers between 1 and 65535."
+    error_message = "runtime.compose.projects keys must match ^[a-z][a-z0-9-]*$, docker_compose_repo is required, and every app must use a unique whole-number ingress port between 1 and 65535."
   }
 
   validation {

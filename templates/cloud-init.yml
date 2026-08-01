@@ -9,7 +9,7 @@ users:
   groups:
   - docker
   sudo:
-  - ALL=(ALL) NOPASSWD:ALL
+  - ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}

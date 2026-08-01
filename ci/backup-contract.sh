@@ -25,7 +25,7 @@ cat >"$tmp/compose-apps.sh" <<'EOF'
 #!/usr/bin/env bash
 compose_app_names_array() {
   local -n result="$1"
-  result=(alpha)
+  read -r -a result <<<"${FAKE_APPS:-alpha}"
 }
 source_compose_app_env() {
   SITECTL_CONTEXT_NAME="$1-context"
@@ -35,6 +35,13 @@ EOF
 cat >"$tmp/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 [[ "${1:-}" == "is-active" && "${FAKE_APP_ACTIVE:-true}" == "true" ]]
+EOF
+cat >"$tmp/bin/mv" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${FAKE_MV_FAIL:-false}" == "true" ]]; then
+  exit 1
+fi
+exec /usr/bin/mv "$@"
 EOF
 cat >"$tmp/bin/sitectl" <<'EOF'
 #!/usr/bin/env bash
@@ -52,11 +59,15 @@ done
 printf 'CALL\n' >>"${SITECTL_LOG:?}"
 case "${FAKE_BACKUP_MODE:-success}" in
   success) printf 'SQL backup\n' | gzip -c >"$output" ;;
+  fail-alpha)
+    if [[ "$output" == */alpha/* ]]; then exit 1; fi
+    printf 'SQL backup\n' | gzip -c >"$output"
+    ;;
   partial) printf 'not gzip\n' >"$output"; exit 1 ;;
   *) exit 1 ;;
 esac
 EOF
-chmod +x "$tmp/bin/systemctl" "$tmp/bin/sitectl"
+chmod +x "$tmp/bin/systemctl" "$tmp/bin/mv" "$tmp/bin/sitectl"
 
 export TEST_BIN="$tmp/bin"
 export LOCK_LOG="$tmp/lock.log"
@@ -92,9 +103,36 @@ fi
 [[ "$(find "$MARIADB_BACKUP_ROOT/alpha" -maxdepth 1 -type d -name '*.staging.*' | wc -l)" == 0 ]] || \
   fail "failed backup retained staging data"
 
+if FAKE_APP_ACTIVE=true FAKE_MV_FAIL=true bash "$backup_script" >/dev/null 2>&1; then
+  fail "failed final publish was reported as successful"
+fi
+[[ -z "$(find "$MARIADB_BACKUP_ROOT/alpha" -maxdepth 1 -type f -name '*.sql.gz' -print -quit)" ]] || \
+  fail "failed final publish left a final backup artifact"
+
 printf 'corrupt\n' >"$MARIADB_BACKUP_ROOT/alpha/$(date -u +%Y%m%d)-alpha.sql.gz"
 if FAKE_APP_ACTIVE=true bash "$backup_script" >/dev/null 2>&1; then
   fail "corrupt existing backup was treated as complete"
+fi
+
+rm -rf -- "$MARIADB_BACKUP_ROOT"
+: >"$SITECTL_LOG"
+if FAKE_APP_ACTIVE=true FAKE_APPS='alpha beta' FAKE_BACKUP_MODE=fail-alpha \
+  bash "$backup_script" >/dev/null 2>&1; then
+  fail "one failed app did not produce an aggregate failure"
+fi
+[[ -s "$MARIADB_BACKUP_ROOT/beta/$(date -u +%Y%m%d)-beta.sql.gz" ]] || \
+  fail "one failed app prevented a neighbor backup"
+
+old_backup="$MARIADB_BACKUP_ROOT/beta/20000101-beta.sql.gz"
+printf 'old backup\n' | gzip -c >"$old_backup"
+touch -d '30 days ago' "$old_backup"
+FAKE_APP_ACTIVE=true FAKE_APPS=beta MARIADB_BACKUP_RETENTION_DAYS=14 \
+  bash "$backup_script" >/dev/null
+[[ ! -e "$old_backup" ]] || fail "expired backup was not pruned"
+
+if FAKE_APP_ACTIVE=true MARIADB_BACKUP_RETENTION_DAYS=zero \
+  bash "$backup_script" >/dev/null 2>&1; then
+  fail "invalid retention was accepted"
 fi
 
 echo "Backup contract passed"

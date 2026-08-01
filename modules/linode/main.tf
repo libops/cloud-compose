@@ -36,6 +36,13 @@ module "runtime" {
   docker_compose_up       = local.compose.up
   docker_compose_down     = local.compose.down
   docker_compose_rollout  = local.compose.rollout
+  rollout_enabled         = local.linode.rollout.enabled
+  rollout_release_url     = local.linode.rollout.release_url
+  rollout_release_sha256  = local.linode.rollout.release_sha256
+  rollout_port            = local.linode.rollout.port
+  rollout_jwks_uri        = local.linode.rollout.jwks_uri
+  rollout_jwt_audience    = local.linode.rollout.jwt_audience
+  rollout_custom_claims   = local.linode.rollout.custom_claims
 
   sitectl_packages         = local.sitectl.packages
   sitectl_version          = local.sitectl.version
@@ -160,6 +167,19 @@ resource "linode_firewall" "cloud_compose" {
       ports    = inbound.value
       ipv4     = local.linode.firewall.web_source_ipv4
       ipv6     = local.linode.firewall.web_source_ipv6
+    }
+  }
+
+
+  dynamic "inbound" {
+    for_each = local.linode.rollout.enabled ? [local.linode.rollout] : []
+    content {
+      label    = "rollout"
+      action   = "ACCEPT"
+      protocol = "TCP"
+      ports    = tostring(inbound.value.port)
+      ipv4     = inbound.value.source_ipv4
+      ipv6     = inbound.value.source_ipv6
     }
   }
 
