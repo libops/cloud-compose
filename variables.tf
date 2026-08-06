@@ -132,6 +132,7 @@ variable "gcp" {
       "e2-micro",
       "e2-small",
       "e2-medium",
+      "n2d-standard-2",
       "n4-standard-2",
       "n4-standard-4",
       "n4-standard-8",

@@ -986,11 +986,11 @@ resource "google_compute_instance" "cloud-compose" {
     }
     precondition {
       condition = (
-        startswith(var.machine_type, "e2") ?
+        startswith(var.machine_type, "e2") || startswith(var.machine_type, "n2d") ?
         contains(["pd-ssd", "pd-standard"], var.disk_type) :
         true
       )
-      error_message = "When using an 'e2' machine type, 'disk_type' must be 'pd-ssd' or 'pd-standard'."
+      error_message = "E2 and N2D machine types require disk_type pd-ssd or pd-standard."
     }
     precondition {
       condition     = !var.rollout_enabled || trimspace(var.rollout_release_url) != ""

@@ -114,13 +114,14 @@ variable "disk_type" {
 variable "machine_type" {
   type        = string
   default     = "n4-standard-2"
-  description = "VM machine type (General-purpose series that support Hyperdisk Balanced"
+  description = "Reviewed general-purpose VM machine type."
 
   validation {
     condition = contains([
       "e2-micro",
       "e2-small",
       "e2-medium",
+      "n2d-standard-2",
       "n4-standard-2",
       "n4-standard-4",
       "n4-standard-8",
@@ -137,7 +138,7 @@ variable "machine_type" {
       "c4-standard-48",
       "c4-standard-96",
     ], var.machine_type)
-    error_message = "The 'machine_type' must be from a General-Purpose family that supports Hyperdisk Balanced (C4, or N4 series)"
+    error_message = "machine_type must be an explicitly reviewed general-purpose profile."
   }
 }
 

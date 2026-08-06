@@ -29,7 +29,7 @@ variable "gcp_zone" {
 
 variable "gcp_machine_type" {
   type        = string
-  default     = "e2-medium"
+  default     = "n2d-standard-2"
   description = "Google Compute Engine machine type."
 }
 
