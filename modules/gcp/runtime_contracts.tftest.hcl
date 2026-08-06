@@ -127,6 +127,42 @@ run "sizes_application_data_independently" {
   }
 }
 
+run "accepts_n2d_with_standard_persistent_disk" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    machine_type        = "n2d-standard-2"
+    disk_type           = "pd-standard"
+  }
+
+  assert {
+    condition = (
+      google_compute_instance.cloud-compose.machine_type == "n2d-standard-2" &&
+      google_compute_disk.boot.type == "pd-standard" &&
+      google_compute_disk.data.type == "pd-standard" &&
+      google_compute_disk.docker-volumes.type == "pd-standard"
+    )
+    error_message = "The GCP module must apply the reviewed N2D and Persistent Disk profile to the VM and all disks."
+  }
+}
+
+run "rejects_n2d_with_hyperdisk_balanced" {
+  command = plan
+
+  variables {
+    name                = "gcp-contract"
+    project_id          = "test-project"
+    docker_compose_repo = "https://github.com/libops/wp.git"
+    machine_type        = "n2d-standard-2"
+    disk_type           = "hyperdisk-balanced"
+  }
+
+  expect_failures = [google_compute_instance.cloud-compose]
+}
+
 run "rejects_fractional_application_data_size" {
   command = plan
 

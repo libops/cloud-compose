@@ -97,6 +97,32 @@ run "gcp_entrypoint_forwards_application_data_size" {
   }
 }
 
+run "gcp_entrypoint_accepts_n2d_with_standard_persistent_disk" {
+  command = plan
+
+  variables {
+    name     = "template-versions"
+    template = "wp"
+    gcp = {
+      project_id = "test-project"
+      instance = {
+        machine_type = "n2d-standard-2"
+      }
+      disks = {
+        type = "pd-standard"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      local.gcp_instance.machine_type == "n2d-standard-2" &&
+      local.gcp_disks.type == "pd-standard"
+    )
+    error_message = "The GCP provider entrypoint must accept the reviewed N2D and Persistent Disk profile."
+  }
+}
+
 run "accepts_direct_cloud_run_proxy_depth" {
   command = plan
 

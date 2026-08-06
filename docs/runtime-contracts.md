@@ -250,6 +250,12 @@ a controlled reboot after the apply so cloud-init reruns filesystem preparation
 and `resize2fs`, then verify the mounted ext4 capacity. Never reduce the input
 after the disk exists.
 
+The reviewed `n2d-standard-2` profile is available for workloads that need a
+non-E2 capacity pool. N2D deployments must select `pd-standard` or `pd-ssd`;
+the module rejects `hyperdisk-balanced` because N2D supports Persistent Disk
+and Hyperdisk Throughput, not Hyperdisk Balanced. See Google's
+[N2D disk compatibility](https://cloud.google.com/compute/docs/general-purpose-machines#n2d_series).
+
 Every Compose `project_dir` must be a normalized descendant of the fixed
 `/mnt/disks/data` ownership boundary. Terraform rejects paths such as `/`,
 `/etc`, repeated separators, and dot-segment traversal during planning. The
