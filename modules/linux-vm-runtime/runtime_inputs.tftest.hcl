@@ -311,11 +311,11 @@ run "embeds_filesystem_helpers_without_archive" {
       local.rootfs_file_permissions["etc/cloud-compose/unrelated-config"] == "0644" &&
       strcontains(
         local.write_files_content,
-        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
       ) &&
       strcontains(
         local.write_files_content,
-        "- path: \"/etc/cloud-compose/unrelated-config\"\n  permissions: \"0644\"",
+        "- path: \"/etc/cloud-compose/unrelated-config\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
       )
     )
     error_message = "Embedded Linux VM overlays must make only the configured off-host backup driver executable."
