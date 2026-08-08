@@ -589,11 +589,11 @@ run "renders_verified_archive_before_downstream_overlay" {
       local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
       strcontains(
         local.write_files_content,
-        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
       ) &&
       strcontains(
         local.write_files_content,
-        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose-overlay-marker\"\n  permissions: \"0644\"",
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose-overlay-marker\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
       )
     )
     error_message = "Archive-backed GCP overlays must make only the configured off-host backup driver executable."
@@ -618,11 +618,11 @@ run "renders_embedded_offhost_backup_driver_executable" {
       local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
       strcontains(
         local.write_files_content,
-        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
       ) &&
       strcontains(
         local.write_files_content,
-        "- path: \"/etc/cloud-compose-overlay-marker\"\n  permissions: \"0644\"",
+        "- path: \"/etc/cloud-compose-overlay-marker\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
       )
     )
     error_message = "Embedded GCP overlays must make only the configured off-host backup driver executable."
