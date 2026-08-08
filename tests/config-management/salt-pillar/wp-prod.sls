@@ -10,6 +10,9 @@ cloud_compose:
   internal_services_auto_update: true
   template: wp
   runtime:
+    disaster_recovery:
+      required: false
+      driver_path: /usr/local/libexec/cloud-compose/salt-offhost
     extra_env:
       BASH_ENV: /tmp/cloud-compose-salt-untrusted-bash-env
       LD_PRELOAD: /tmp/cloud-compose-salt-untrusted-preload.so

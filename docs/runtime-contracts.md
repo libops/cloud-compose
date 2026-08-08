@@ -661,9 +661,10 @@ a pinned checksum intentionally fail as soon as the branch content changes.
 
 ## Backups
 
-`cloud-compose-mariadb-backup.timer` runs nightly between 9pm and 7am EST. It
-uses a fixed randomized delay so deployments spread out across that window while
-keeping a stable schedule on each VM. The timer executes:
+`cloud-compose-mariadb-backup.timer` runs the local-backup and off-host handoff
+flow nightly between 9pm and 7am EST. It uses a fixed randomized delay so
+deployments spread out across that window while keeping a stable schedule on
+each VM. The unprivileged local phase executes:
 
 ```bash
 sitectl mariadb backup --context "$SITECTL_CONTEXT_NAME" --gzip --output "$path"
@@ -684,13 +685,24 @@ service exits non-zero after attempting all of them. Dumps older than
 `MARIADB_BACKUP_RETENTION_DAYS` (14 by default) are pruned from each validated
 app directory so they cannot fill the shared data disk indefinitely.
 
-Local dumps remain on the same failure-domain disk as application data.
-Downstream operators must still define reviewed encrypted off-host retention
-and restore tests. GCP production enables crash-consistent scheduled disk
-snapshots by default; `guest_flush = false` is deliberate because the logical
-dump supplies the application-consistent recovery artifact. DigitalOcean and
-Linode boot-disk backup toggles do not include attached volumes; see the
-provider guide before claiming disaster-recovery coverage.
+Local dumps remain on the same failure-domain disk as application data and are
+never disaster recovery. Set `runtime.disaster_recovery.required = true` only
+after installing the operator-owned root driver. The root handoff runs after
+the local service, including when the daily dump already exists, and requires a
+strict atomic receipt proving encrypted off-host coverage of each app's logical
+database, checkout/bind files, named volumes, and resolved service-mount
+topology. A weekly timer requires a challenge-bound proof that the driver
+restored all three coverage classes into a disposable recovery environment,
+verified integrity, and destroyed that environment. Storage-vendor settings
+and credentials stay behind the driver and never enter Terraform, cloud-init,
+the host environment, or logs. The complete interface and receipt schemas are
+in [Disaster recovery](disaster-recovery.md).
+
+GCP production enables crash-consistent scheduled disk snapshots by default;
+`guest_flush = false` is deliberate because the logical dump supplies the
+application-consistent database artifact. DigitalOcean and Linode boot-disk
+backup toggles do not include attached volumes. None of those provider-local
+copies replace the independent driver receipt and restore proof.
 
 Terraform owns the attached data and Docker-volume disks. A normal
 `terraform destroy` deletes them; GCP production snapshots are retained, but

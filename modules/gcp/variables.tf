@@ -608,6 +608,27 @@ variable "rootfs_archive_sha256" {
   description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
 }
 
+variable "offhost_backup_required" {
+  type        = bool
+  default     = false
+  description = "Require nightly encrypted off-host coverage and scheduled disposable restore proofs from an operator-owned driver. Same-disk MariaDB dumps are retained but are not disaster recovery."
+}
+
+variable "offhost_backup_driver_path" {
+  type        = string
+  default     = "/usr/local/libexec/cloud-compose/offhost-backup-driver"
+  description = "Absolute path to the operator-supplied, root-owned provider-neutral DR driver. The driver owns its credentials; do not pass them through Terraform."
+
+  validation {
+    condition = (
+      can(regex("^/[A-Za-z0-9._/+:-]+$", var.offhost_backup_driver_path)) &&
+      !strcontains(var.offhost_backup_driver_path, "//") &&
+      length(regexall("(^|/)\\.\\.?(/|$)", var.offhost_backup_driver_path)) == 0
+    )
+    error_message = "offhost_backup_driver_path must be a safe absolute path without whitespace or dot segments."
+  }
+}
+
 variable "extra_env" {
   type        = map(string)
   default     = {}

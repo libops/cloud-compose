@@ -141,6 +141,7 @@ ansible_invalid_cases=(
   invalid-primary
   invalid-template
   invalid-vault
+  invalid-disaster-recovery
   invalid-package
   invalid-host-ack
   invalid-project-dir-root
@@ -206,6 +207,7 @@ run_invalid_ansible_case invalid-internal-services 'internal-services stack is G
 run_invalid_ansible_case invalid-primary 'compose.primary must match'
 run_invalid_ansible_case invalid-template 'template must name a supported app'
 run_invalid_ansible_case invalid-vault 'Vault Agent is currently supported only by Terraform'
+run_invalid_ansible_case invalid-disaster-recovery 'driver_path must be a safe absolute path'
 run_invalid_ansible_case invalid-package 'sitectl packages must use valid release package names'
 run_invalid_ansible_case invalid-host-ack 'dedicated_host_acknowledged=true'
 run_invalid_ansible_case invalid-project-dir-root 'project_dir must be a normalized non-root absolute path'
@@ -257,6 +259,8 @@ projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_tex
 project = projects["isle-prod"]
 
 assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
+assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
+assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"] == "/usr/local/libexec/cloud-compose/ansible-offhost"
 assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/isle-prod"
 assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
 assert env["SITECTL_PLUGIN"] == "isle"
@@ -447,6 +451,8 @@ assert project["ingress"]["domain"] == expected_domain
 assert Path(expected_project_dir).is_dir()
 
 if expected_name == "wp-prod":
+    assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
+    assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"] == "/usr/local/libexec/cloud-compose/salt-offhost"
     assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
         "sitectl": "v1.0.0",
         "sitectl-wp": "v1.0.0",
@@ -581,6 +587,7 @@ run_invalid_salt_case invalid-internal-services 'internal-services stack is GCP-
 run_invalid_salt_case invalid-primary 'compose.primary must match'
 run_invalid_salt_case invalid-template 'template must name a supported cloud-compose app'
 run_invalid_salt_case invalid-vault 'Vault Agent is currently supported only by Terraform'
+run_invalid_salt_case invalid-disaster-recovery 'driver_path must be a safe absolute path'
 run_invalid_salt_case invalid-package 'invalid installed package'
 run_invalid_salt_case invalid-host-ack 'dedicated_host_acknowledged=true'
 run_invalid_salt_case invalid-project-dir-root 'project_dir must be a normalized non-root absolute path'

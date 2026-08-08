@@ -27,6 +27,9 @@ assert_contains() {
 [[ -f "$unit_dir/cloud-compose-bootstrap.service" ]] || fail "retryable bootstrap unit is missing"
 [[ -f "$unit_dir/cloud-compose-internal-services.service" && -f "$unit_dir/cloud-compose-internal-services.timer" ]] || \
   fail "namespaced internal-services units are missing"
+[[ -f "$unit_dir/cloud-compose-offhost-backup.service" ]] || fail "off-host backup service is missing"
+[[ -f "$unit_dir/cloud-compose-restore-test.service" && -f "$unit_dir/cloud-compose-restore-test.timer" ]] || \
+  fail "scheduled restore-test units are missing"
 
 assert_contains "$unit_dir/cloud-compose.service" 'Requires=docker.service cloud-compose-metadata-firewall.service'
 assert_contains "$unit_dir/cloud-compose.service" 'RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes'
@@ -50,6 +53,18 @@ assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'LogRateLimitBurst=1
 assert_contains "$unit_dir/cloud-compose-internal-services.service" 'Requires=cloud-compose.service cloud-compose-metadata-firewall.service'
 assert_contains "$unit_dir/cloud-compose.service" 'TimeoutStartSec=1h'
 assert_contains "$unit_dir/cloud-compose-mariadb-backup.service" 'TimeoutStartSec=12h'
+assert_contains "$unit_dir/cloud-compose-mariadb-backup.service" 'User=cloud-compose'
+assert_contains "$unit_dir/cloud-compose-mariadb-backup.timer" 'Unit=cloud-compose-offhost-backup.service'
+assert_contains "$unit_dir/cloud-compose-offhost-backup.service" 'Requires=cloud-compose-mariadb-backup.service'
+assert_contains "$unit_dir/cloud-compose-offhost-backup.service" 'After=cloud-compose-mariadb-backup.service network-online.target'
+assert_contains "$unit_dir/cloud-compose-offhost-backup.service" 'User=root'
+assert_contains "$unit_dir/cloud-compose-offhost-backup.service" 'UMask=0077'
+assert_contains "$unit_dir/cloud-compose-offhost-backup.service" 'TimeoutStartSec=24h'
+assert_contains "$unit_dir/cloud-compose-restore-test.service" 'User=root'
+assert_contains "$unit_dir/cloud-compose-restore-test.service" 'UMask=0077'
+assert_contains "$unit_dir/cloud-compose-restore-test.service" 'TimeoutStartSec=24h'
+assert_contains "$unit_dir/cloud-compose-restore-test.timer" 'OnCalendar=Sun *-*-* 03:00:00'
+assert_contains "$unit_dir/cloud-compose-restore-test.timer" 'Persistent=true'
 if grep -Fq 'Wants=cloud-compose.service' "$unit_dir/cloud-compose-mariadb-backup.service"; then
   fail "backup service starts an intentionally inactive application"
 fi
@@ -98,6 +113,9 @@ assert_contains "$run_script" 'systemctl disable --now libops-managed-runtime.ti
 assert_contains "$run_script" 'systemctl enable --now cloud-compose-docker-prune.timer'
 assert_contains "$run_script" 'systemctl disable --now cloud-compose-docker-prune.timer cloud-compose-docker-prune.service'
 assert_contains "$run_script" 'systemctl enable --now cloud-compose-mariadb-backup.timer'
+assert_contains "$run_script" 'runtime_enabled "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}"'
+assert_contains "$run_script" 'systemctl enable --now cloud-compose-restore-test.timer'
+assert_contains "$run_script" 'systemctl disable --now cloud-compose-restore-test.timer cloud-compose-restore-test.service'
 
 migration_script="$repo_root/rootfs/home/cloud-compose/migrate-legacy-systemd-units.sh"
 migration_tmp="$(mktemp -d)"

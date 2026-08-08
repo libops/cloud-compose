@@ -42,7 +42,8 @@
   'sitectl': runtime.get('sitectl', {}),
   'docker': runtime.get('docker', {}),
   'managed_runtime': runtime.get('managed_runtime', {}),
-  'vault': runtime.get('vault', {})
+  'vault': runtime.get('vault', {}),
+  'disaster_recovery': runtime.get('disaster_recovery', {})
 } %}
 {% for section_name, section_value in runtime_sections.items() %}
 {% if section_value is not mapping %}
@@ -54,6 +55,7 @@
 {% set docker = runtime_sections.docker if runtime_sections.docker is mapping else {} %}
 {% set managed = runtime_sections.managed_runtime if runtime_sections.managed_runtime is mapping else {} %}
 {% set vault = runtime_sections.vault if runtime_sections.vault is mapping else {} %}
+{% set disaster_recovery = runtime_sections.disaster_recovery if runtime_sections.disaster_recovery is mapping else {} %}
 {% set raw_rollout_service = runtime.get('rollout', {}) %}
 {% if raw_rollout_service is mapping %}
 {% set rollout_service = raw_rollout_service %}
@@ -140,6 +142,14 @@
 {% endif %}
 {% if vault.get('agent_enabled', False) %}
 {% set ignored = invalid_runtime_inputs.append('Vault Agent is currently supported only by Terraform providers; set vault.agent_enabled=false for Salt') %}
+{% endif %}
+{% set offhost_backup_required = disaster_recovery.get('required', False) %}
+{% set offhost_backup_driver = disaster_recovery.get('driver_path', '/usr/local/libexec/cloud-compose/offhost-backup-driver') %}
+{% if offhost_backup_required is not boolean %}
+{% set ignored = invalid_runtime_inputs.append('runtime.disaster_recovery.required must be a boolean') %}
+{% endif %}
+{% if offhost_backup_driver is not string or not (offhost_backup_driver is match('^/[A-Za-z0-9._/+:-]+$')) or '//' in offhost_backup_driver or '/./' in offhost_backup_driver or '/../' in offhost_backup_driver or offhost_backup_driver.endswith('/.') or offhost_backup_driver.endswith('/..') %}
+{% set ignored = invalid_runtime_inputs.append('runtime.disaster_recovery.driver_path must be a safe absolute path without whitespace or dot segments') %}
 {% endif %}
 {% set rollout_enabled = rollout_service.get('enabled', False) %}
 {% set rollout_port = rollout_service.get('port', 8081) %}
@@ -464,6 +474,8 @@
   'CLOUD_COMPOSE_INSTANCE_NAME': name,
   'CLOUD_COMPOSE_APPS': compose_projects.keys() | list | join(' '),
   'CLOUD_COMPOSE_PRIMARY_APP': primary_key,
+  'CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED': 'true' if offhost_backup_required is sameas true else 'false',
+  'CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER': offhost_backup_driver,
   'COMPOSE_PROJECTS_FILE': home ~ '/compose-projects.json',
   'COMPOSE_PROJECT_NAME': primary_project.get('compose_project_name', compose_project_name),
   'COMPOSE_BIND_PORT': primary_project.get('ingress_port', ingress_port),

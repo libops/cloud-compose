@@ -226,6 +226,9 @@ for marker in (
     "item.value.sitectl_packages | default(_cc_sitectl_packages)",
     "(_cc_managed.enabled | default(cloud_compose_managed_runtime_enabled)) is boolean",
     "(_cc_vault.agent_enabled | default(false)) is boolean",
+    "(_cc_disaster_recovery.required | default(false)) is boolean",
+    "CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED",
+    "CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER",
 ):
     if marker not in ansible_tasks:
         fail(f"Ansible template package-version parity marker is missing: {marker!r}")
@@ -247,6 +250,9 @@ for marker in (
     "all_packages = sitectl_packages | list",
     "'managed_runtime.enabled': managed_runtime_enabled",
     "'vault.agent_enabled': vault.get('agent_enabled', False)",
+    "runtime_sections.disaster_recovery",
+    "CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED",
+    "CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER",
     "run_bootstrap is sameas true",
 ):
     if marker not in salt_state:
@@ -359,6 +365,7 @@ adapter_fixture_markers = {
     "invalid-lifecycle": "- 42",
     "invalid-project-lifecycle": "docker_compose_up: not-a-list",
     "invalid-internal-services": "internal_services_enabled: true",
+    "invalid-disaster-recovery": "driver_path: /usr/local/libexec/cloud-compose/../untrusted",
 }
 for fixture_name, marker in adapter_fixture_markers.items():
     for relative_path in (

@@ -55,6 +55,7 @@
     _cc_sitectl: "{{ cloud_compose_runtime.sitectl | default({}) }}"
     _cc_managed: "{{ cloud_compose_runtime.managed_runtime | default({}) }}"
     _cc_vault: "{{ cloud_compose_runtime.vault | default({}) }}"
+    _cc_disaster_recovery: "{{ cloud_compose_runtime.disaster_recovery | default({}) }}"
     _cc_rollout_service: "{{ cloud_compose_default_rollout_service | combine(cloud_compose_runtime.rollout | default({}), recursive=True) }}"
     _cc_extra_env: "{{ cloud_compose_runtime.extra_env | default(cloud_compose_extra_env) }}"
 
@@ -65,6 +66,7 @@
       - _cc_sitectl is mapping
       - _cc_managed is mapping
       - _cc_vault is mapping
+      - _cc_disaster_recovery is mapping
       - (cloud_compose_runtime.rollout | default({})) is mapping
       - (_cc_compose.ingress | default({})) is mapping
       - (_cc_compose.projects | default({})) is mapping
@@ -79,7 +81,12 @@
       - (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update)) is boolean
       - (_cc_vault.agent_enabled | default(false)) is boolean
       - not (_cc_vault.agent_enabled | default(false))
-    fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, and Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible)."
+      - (_cc_disaster_recovery.required | default(false)) is boolean
+      - (_cc_disaster_recovery.driver_path | default('/usr/local/libexec/cloud-compose/offhost-backup-driver')) is string
+      - (_cc_disaster_recovery.driver_path | default('/usr/local/libexec/cloud-compose/offhost-backup-driver')) is match('^/[A-Za-z0-9._/+:-]+$')
+      - "'//' not in (_cc_disaster_recovery.driver_path | default('/usr/local/libexec/cloud-compose/offhost-backup-driver'))"
+      - (_cc_disaster_recovery.driver_path | default('/usr/local/libexec/cloud-compose/offhost-backup-driver') | regex_search('(^|/)\\.\\.?(/|$)')) is none
+    fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible), and disaster_recovery.driver_path must be a safe absolute path without whitespace or dot segments."
 
 - name: Require safe rollout service settings
   ansible.builtin.assert:
@@ -136,6 +143,8 @@
     _cc_down_commands: "{{ _cc_compose.down | default(cloud_compose_default_down) }}"
     _cc_rollout_commands: "{{ _cc_compose.rollout | default(cloud_compose_default_rollout) }}"
     _cc_internal_services_enabled: "{{ _cc_managed.internal_services_enabled | default(cloud_compose_internal_services_enabled) }}"
+    _cc_offhost_backup_required: "{{ _cc_disaster_recovery.required | default(false) }}"
+    _cc_offhost_backup_driver: "{{ _cc_disaster_recovery.driver_path | default('/usr/local/libexec/cloud-compose/offhost-backup-driver') }}"
 
 - name: Reject GCP-only internal services on an on-prem host
   ansible.builtin.assert:
@@ -398,6 +407,8 @@
       CLOUD_COMPOSE_INSTANCE_NAME: "{{ cloud_compose_name }}"
       CLOUD_COMPOSE_APPS: "{{ _cc_compose_projects.keys() | list | join(' ') }}"
       CLOUD_COMPOSE_PRIMARY_APP: "{{ _cc_primary_key }}"
+      CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED: "{{ _cc_offhost_backup_required | ternary('true', 'false') }}"
+      CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER: "{{ _cc_offhost_backup_driver }}"
       COMPOSE_PROJECTS_FILE: "{{ cloud_compose_home }}/compose-projects.json"
       COMPOSE_PROJECT_NAME: "{{ _cc_primary_project.compose_project_name }}"
       COMPOSE_BIND_PORT: "{{ _cc_primary_project.ingress_port }}"

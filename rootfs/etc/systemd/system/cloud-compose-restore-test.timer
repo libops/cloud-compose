@@ -1,0 +1,13 @@
+[Unit]
+Description=Test Cloud Compose off-host recovery weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=6h
+FixedRandomDelay=true
+AccuracySec=1min
+Unit=cloud-compose-restore-test.service
+
+[Install]
+WantedBy=timers.target

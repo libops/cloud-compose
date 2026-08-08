@@ -113,4 +113,9 @@ else
   systemctl disable --now cloud-compose-docker-prune.timer cloud-compose-docker-prune.service >/dev/null 2>&1 || true
 fi
 systemctl enable --now cloud-compose-mariadb-backup.timer
+if runtime_enabled "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}"; then
+  systemctl enable --now cloud-compose-restore-test.timer
+else
+  systemctl disable --now cloud-compose-restore-test.timer cloud-compose-restore-test.service >/dev/null 2>&1 || true
+fi
 cloud_compose_publish_marker "$durable_bootstrap_marker"

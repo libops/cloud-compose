@@ -62,6 +62,21 @@ is meaningful: it disables that phase and is not replaced by the default.
 Runtime feature switches must be YAML booleans, not quoted strings; ambiguous
 values are rejected before host mutation.
 
+The provider-neutral disaster-recovery interface is shared with Terraform:
+
+```yaml
+cloud_compose_runtime:
+  disaster_recovery:
+    required: true
+    driver_path: /usr/local/libexec/cloud-compose/offhost-backup-driver
+```
+
+Install that executable and its credentials separately as root. The role
+renders only the boolean requirement and executable path; storage endpoints,
+credentials, encryption keys, and retention policy must not be placed in
+inventory. See [the driver contract](../docs/disaster-recovery.md) for receipt
+and scheduled restore-proof requirements.
+
 Set `cloud_compose_runtime.rollout` to enable the same authenticated rollout
 listener used by Terraform. Supply a pinned HTTPS `release_url`, its lowercase
 `release_sha256`, an HTTPS `jwks_uri`, `jwt_audience`, and optional JSON-object

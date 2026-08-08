@@ -1,0 +1,16 @@
+- name: Reject unsafe disaster-recovery driver settings
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cloud_compose_name: invalid-disaster-recovery
+    cloud_compose_template: wp
+    cloud_compose_dedicated_host_acknowledged: true
+    cloud_compose_install_packages: false
+    cloud_compose_reload_systemd: false
+    cloud_compose_run_bootstrap: false
+    cloud_compose_runtime:
+      disaster_recovery:
+        required: true
+        driver_path: /usr/local/libexec/cloud-compose/../untrusted
+  roles:
+    - role: cloud_compose

@@ -102,13 +102,14 @@ nightly MariaDB dumps under `/mnt/disks/data/backups` are useful for logical
 recovery, but they live on the same data volume and are not disaster recovery.
 Also, `terraform destroy` intentionally deletes both managed volumes.
 
-Before production, establish an independently owned offsite policy for both
-volumes (provider volume snapshots where available, or encrypted export to
-separate object storage/account), define retention separately from this
-application state, and test a restore into disposable new volumes. A restore is
-complete only after the Compose projects start, `sitectl healthcheck` passes,
-and representative files plus database records are verified. Do not enable a
-boot-disk backup toggle and record the application as protected.
+Before production, install an operator-owned driver and set
+`runtime.disaster_recovery.required = true`. The provider-neutral handoff
+requires encrypted off-host coverage for the logical database, application
+files, and complete Compose volume topology, then schedules restore tests into
+a disposable recovery environment. The exact driver and proof contract is in
+[Disaster recovery](disaster-recovery.md). Retention and credentials remain
+operator-owned. Do not enable a boot-disk backup toggle and record the
+application as protected.
 
 Fedora CoreOS should use the CoreOS installer path. Debian and Ubuntu should use
 the apt installer path. Both paths install the same minimum runtime surface:
