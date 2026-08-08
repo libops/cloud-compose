@@ -20,10 +20,15 @@ release set. Override individual selectors with
 `runtime.sitectl.package_versions` when intentionally testing or promoting a
 different compatible release set.
 
-All presets use their coordinated sitectl v1.0.0 core/plugin release set. The
-ISLE preset selects the `libops/isle` v1.1.0 template; every other application
-preset remains on its v1.0.0 template contract. Keep each preset's complete
-template and package set together when promoting an override.
+Renovate tracks both the Compose tags and sitectl release tags in the registry.
+Its pull requests are promotion candidates: keep the complete compatible set
+together and require the hosted application smoke before merging them.
+
+All presets pin sitectl v1.8.2 plus the latest reviewed application plugin.
+ISLE selects the `libops/isle` v1.3.0 template, Drupal and WordPress select
+their v1.1.0 templates, and the remaining application templates stay on
+v1.0.0. Keep each preset's complete template and package set together when
+promoting an override.
 
 GCP deployments have two Terraform ownership layers. Apply
 [`modules/gcp-foundation`](modules/gcp-foundation/README.md) once per service

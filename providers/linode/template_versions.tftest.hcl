@@ -33,8 +33,8 @@ run "custom_package_set_merges_only_applicable_template_versions" {
   }
 
   assert {
-    condition     = local.runtime.compose.branch == "v1.1.0"
-    error_message = "The Linode entrypoint must inherit the ISLE v1.1.0 template branch when no override is supplied."
+    condition     = local.runtime.compose.branch == "v1.3.0"
+    error_message = "The Linode entrypoint must inherit the ISLE v1.3.0 template branch when no override is supplied."
   }
 
   assert {
@@ -65,7 +65,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v1.0.0"
+      sitectl = "v1.8.2"
     }
     error_message = "The Linode entrypoint must preserve an explicit core-only package set."
   }

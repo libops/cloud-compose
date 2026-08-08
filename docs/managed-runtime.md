@@ -26,11 +26,11 @@ core and plugins independently. The provider-neutral
 backward-compatible fallback only for an installed package with neither a
 template selector nor an explicit per-package selector.
 
-All presets select coordinated sitectl v1 release packages. The ISLE preset
-uses the `libops/isle` v1.1.0 template with sitectl, sitectl-drupal, and
-sitectl-isle v1.0.0. Every other application preset remains on its v1.0.0
-template contract. Override the template or package selectors only as one
-reviewed, compatible release set.
+All presets pin sitectl v1.8.2 with a reviewed application plugin. ISLE uses
+the `libops/isle` v1.3.0 template with sitectl-drupal v1.3.0 and sitectl-isle
+v1.5.0. Drupal and WordPress use their v1.1.0 templates; the other application
+templates remain on v1.0.0. Override the template or package selectors only as
+one reviewed, compatible release set.
 
 Omitting `runtime.sitectl.packages` selects the template's package set. An
 explicit list replaces that set; `packages = []` or `packages = ["sitectl"]`
@@ -51,9 +51,9 @@ runtime = {
       "sitectl-isle",
     ]
     package_versions = {
-      sitectl          = "v1.0.0"
-      sitectl-drupal   = "v1.0.0"
-      sitectl-isle     = "v1.0.0"
+      sitectl          = "v1.8.2"
+      sitectl-drupal   = "v1.3.0"
+      sitectl-isle     = "v1.5.0"
     }
     plugin = "isle"
   }

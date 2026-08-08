@@ -6,7 +6,7 @@
     "packages": ["sitectl"],
     "extra_env": {},
     "package_versions": {
-      "sitectl": "v1.0.0"
+      "sitectl": "v1.8.2"
     }
   },
   "templates": {
@@ -17,8 +17,8 @@
       "packages": ["sitectl", "sitectl-archivesspace"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-archivesspace": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-archivesspace": "v2.0.0"
       }
     },
     "ojs": {
@@ -28,44 +28,44 @@
       "packages": ["sitectl", "sitectl-ojs"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-ojs": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-ojs": "v1.2.0"
       }
     },
     "isle": {
       "repo": "https://github.com/libops/isle",
-      "branch": "v1.1.0",
+      "branch": "v1.3.0",
       "plugin": "isle",
       "packages": ["sitectl", "sitectl-drupal", "sitectl-isle"],
       "extra_env": {
         "ISLANDORA_TAG": "6.3.19"
       },
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-drupal": "v1.0.0",
-        "sitectl-isle": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-drupal": "v1.3.0",
+        "sitectl-isle": "v1.5.0"
       }
     },
     "drupal": {
       "repo": "https://github.com/libops/drupal.git",
-      "branch": "v1.0.0",
+      "branch": "v1.1.0",
       "plugin": "drupal",
       "packages": ["sitectl", "sitectl-drupal"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-drupal": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-drupal": "v1.3.0"
       }
     },
     "wp": {
       "repo": "https://github.com/libops/wp.git",
-      "branch": "v1.0.0",
+      "branch": "v1.1.0",
       "plugin": "wp",
       "packages": ["sitectl", "sitectl-wp"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-wp": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-wp": "v2.0.0"
       }
     },
     "omeka-s": {
@@ -75,8 +75,8 @@
       "packages": ["sitectl", "sitectl-omeka-s"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-omeka-s": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-omeka-s": "v1.2.0"
       }
     },
     "omeka-classic": {
@@ -86,8 +86,8 @@
       "packages": ["sitectl", "sitectl-omeka-classic"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.0.0",
-        "sitectl-omeka-classic": "v1.0.0"
+        "sitectl": "v1.8.2",
+        "sitectl-omeka-classic": "v1.2.0"
       }
     }
   }
