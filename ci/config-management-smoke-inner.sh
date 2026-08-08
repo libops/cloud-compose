@@ -229,99 +229,7 @@ ansible-playbook \
 
 verify_lifecycle_lock_contract
 
-python - <<'PY'
-import json
-import grp
-import os
-import stat
-import subprocess
-from pathlib import Path
-
-def load_runtime_env(path):
-    result = subprocess.run(
-        [
-            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
-            "bash", "--noprofile", "--norc", "-c",
-            "source /home/cloud-compose/profile.sh; env -0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return {
-        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
-        for entry in result.stdout.split(b"\0") if b"=" in entry
-    }
-
-env = load_runtime_env(Path("/home/cloud-compose/.env"))
-application_env = json.loads(Path("/home/cloud-compose/application-env.json").read_text())
-
-projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
-project = projects["isle-prod"]
-
-assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
-assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"] == "/usr/local/libexec/cloud-compose/ansible-offhost"
-assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/isle-prod"
-assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
-assert env["SITECTL_PLUGIN"] == "isle"
-assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
-assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-    "sitectl": "v1.0.0",
-    "sitectl-drupal": "v1.0.0",
-    "sitectl-isle": "v1.0.0",
-}
-assert project["docker_compose_repo"] == "https://github.com/libops/isle"
-assert project["project_dir"] == "/mnt/disks/data/libops/isle/isle-prod"
-assert project["ingress"]["domain"] == "isle.example.edu"
-assert project["sitectl_plugin"] == "isle"
-assert project["init_commands"] == []
-assert project["up_commands"] == []
-assert project["down_commands"] == ["app-down-command"]
-assert project["rollout_commands"] == ["global-rollout-command"]
-assert Path("/mnt/disks/data/libops/isle/isle-prod").is_dir()
-assert "BASH_ENV" not in env
-assert "LD_PRELOAD" not in env
-assert "PORT" not in env
-assert application_env["BASH_ENV"] == "/tmp/cloud-compose-ansible-untrusted-bash-env"
-assert application_env["LD_PRELOAD"] == "/tmp/cloud-compose-ansible-untrusted-preload.so"
-assert application_env["PORT"] == "9999"
-assert application_env["CONTRACT_BACKTICKS"] == "`touch /tmp/cloud-compose-ansible-backtick-injection`"
-assert application_env["CONTRACT_BACKSLASH"] == "a\\path\\ends\\"
-assert application_env["CONTRACT_COMMAND_SUB"] == "$(touch /tmp/cloud-compose-ansible-command-injection)"
-assert application_env["CONTRACT_DOLLARS"] == "$HOME ${HOME}"
-assert application_env["CONTRACT_QUOTES"] == 'a "double" and a single quote: O\'Reilly'
-assert application_env["CONTRACT_WHITESPACE"] == "  leading and trailing  "
-assert application_env["CONTRACT_MULTILINE"] == "line one\nline two"
-assert not Path("/tmp/cloud-compose-ansible-backtick-injection").exists()
-assert not Path("/tmp/cloud-compose-ansible-command-injection").exists()
-
-for path in [
-    "/home/cloud-compose/init",
-    "/home/cloud-compose/up",
-    "/home/cloud-compose/down",
-    "/home/cloud-compose/rollout",
-    "/home/cloud-compose/run.sh",
-    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
-]:
-    assert Path(path).exists(), path
-    assert os.access(path, os.X_OK), path
-
-cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
-for path, expected_mode in {
-    "/home/cloud-compose/init": 0o750,
-    "/home/cloud-compose/up": 0o750,
-    "/home/cloud-compose/down": 0o750,
-    "/home/cloud-compose/rollout": 0o750,
-    "/home/cloud-compose/.env": 0o640,
-    "/home/cloud-compose/application-env.json": 0o640,
-    "/home/cloud-compose/compose-projects.json": 0o640,
-    "/home/cloud-compose/managed-runtime-artifacts.tsv": 0o640,
-}.items():
-    metadata = Path(path).stat()
-    assert metadata.st_uid == 0, (path, metadata.st_uid)
-    assert metadata.st_gid == cloud_compose_gid, (path, metadata.st_gid)
-    assert stat.S_IMODE(metadata.st_mode) == expected_mode, (path, oct(stat.S_IMODE(metadata.st_mode)))
-PY
+python /work/ci/config-management-smoke-assert.py ansible-runtime
 
 rm -rf /home/cloud-compose /mnt/disks
 
@@ -383,137 +291,17 @@ run_salt_case() {
     --config-dir=/tmp/salt/etc \
     --out=json \
     state.apply cloud-compose >/tmp/cloud-compose-salt-noop.json
-  python - <<'PY'
-import json
-from pathlib import Path
-
-states = json.loads(Path("/tmp/cloud-compose-salt-noop.json").read_text())["local"]
-lock_states = [
-    state for state_id, state in states.items()
-    if "|-cloud-compose-lifecycle-lock_|-" in state_id
-]
-assert len(lock_states) == 1, lock_states
-assert lock_states[0]["result"] is True, lock_states[0]
-assert lock_states[0]["changes"] == {}, lock_states[0]
-PY
+  python /work/ci/config-management-smoke-assert.py salt-noop
 
   python -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
-  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" "$expected_project_dir" "$expected_compose_project_name" <<'PY'
-import json
-import grp
-import os
-import stat
-import subprocess
-import sys
-from pathlib import Path
-
-expected_name, expected_repo, expected_plugin, expected_package, expected_domain, expected_project_dir, expected_compose_project_name = sys.argv[1:]
-
-def load_runtime_env(path):
-    result = subprocess.run(
-        [
-            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
-            "bash", "--noprofile", "--norc", "-c",
-            "source /home/cloud-compose/profile.sh; env -0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return {
-        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
-        for entry in result.stdout.split(b"\0") if b"=" in entry
-    }
-
-env = load_runtime_env(Path("/home/cloud-compose/.env"))
-application_env = json.loads(Path("/home/cloud-compose/application-env.json").read_text())
-
-projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
-project = projects[expected_name]
-artifact_manifest = Path("/home/cloud-compose/managed-runtime-artifacts.tsv").read_text()
-
-assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["CLOUD_COMPOSE_APPS"] == expected_name
-assert env["CLOUD_COMPOSE_PRIMARY_APP"] == expected_name
-assert env["DOCKER_COMPOSE_DIR"] == expected_project_dir
-assert env["DOCKER_COMPOSE_REPO"] == expected_repo
-assert env["COMPOSE_PROJECT_NAME"] == expected_compose_project_name, (
-    env["COMPOSE_PROJECT_NAME"], expected_compose_project_name
-)
-assert env["SITECTL_PLUGIN"] == expected_plugin
-assert expected_package in env["SITECTL_PACKAGES"].split()
-assert project["docker_compose_repo"] == expected_repo
-assert project["project_dir"] == expected_project_dir
-assert project["compose_project_name"] == expected_compose_project_name, (
-    project["compose_project_name"], expected_compose_project_name
-)
-assert project["sitectl_plugin"] == expected_plugin
-assert project["ingress"]["domain"] == expected_domain
-assert Path(expected_project_dir).is_dir()
-
-if expected_name == "wp-prod":
-    assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
-    assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"] == "/usr/local/libexec/cloud-compose/salt-offhost"
-    assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v1.0.0",
-        "sitectl-wp": "v1.0.0",
-    }
-    assert "BASH_ENV" not in env
-    assert "LD_PRELOAD" not in env
-    assert "PORT" not in env
-    assert application_env["BASH_ENV"] == "/tmp/cloud-compose-salt-untrusted-bash-env"
-    assert application_env["LD_PRELOAD"] == "/tmp/cloud-compose-salt-untrusted-preload.so"
-    assert application_env["PORT"] == "9999"
-    assert application_env["CONTRACT_BACKTICKS"] == "`touch /tmp/cloud-compose-salt-backtick-injection`"
-    assert application_env["CONTRACT_BACKSLASH"] == "a\\path\\ends\\"
-    assert application_env["CONTRACT_COMMAND_SUB"] == "$(touch /tmp/cloud-compose-salt-command-injection)"
-    assert application_env["CONTRACT_DOLLARS"] == "$HOME ${HOME}"
-    assert application_env["CONTRACT_QUOTES"] == 'a "double" and a single quote: O\'Reilly'
-    assert application_env["CONTRACT_WHITESPACE"] == "  leading and trailing  "
-    assert application_env["CONTRACT_MULTILINE"] == "line one\nline two"
-    assert env["LIBOPS_MANAGED_RUNTIME_ENABLED"] == "false"
-    assert env["LIBOPS_INTERNAL_SERVICES_ENABLED"] == "false"
-    assert env["LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE"] == "false"
-    assert project["init_commands"] == []
-    assert project["up_commands"] == []
-    assert project["down_commands"] == ["app-down-command"]
-    assert project["rollout_commands"] == ["global-rollout-command"]
-    assert "contract-agent\thttps://example.invalid/contract-agent\t" in artifact_manifest
-    assert "\t/usr/local/bin/contract-agent\t0750\troot\troot\tcloud-compose.service" in artifact_manifest
-    assert not Path("/tmp/cloud-compose-salt-backtick-injection").exists()
-    assert not Path("/tmp/cloud-compose-salt-command-injection").exists()
-elif expected_name == "drupal-prod":
-    assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v1.0.0",
-        "sitectl-drupal": "v1.0.0",
-    }
-
-for path in [
-    "/home/cloud-compose/init",
-    "/home/cloud-compose/up",
-    "/home/cloud-compose/down",
-    "/home/cloud-compose/rollout",
-    "/home/cloud-compose/run.sh",
-    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
-]:
-    assert Path(path).exists(), path
-    assert os.access(path, os.X_OK), path
-
-cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
-for path, expected_mode in {
-    "/home/cloud-compose/init": 0o750,
-    "/home/cloud-compose/up": 0o750,
-    "/home/cloud-compose/down": 0o750,
-    "/home/cloud-compose/rollout": 0o750,
-    "/home/cloud-compose/.env": 0o640,
-    "/home/cloud-compose/application-env.json": 0o640,
-    "/home/cloud-compose/compose-projects.json": 0o640,
-    "/home/cloud-compose/managed-runtime-artifacts.tsv": 0o640,
-}.items():
-    metadata = Path(path).stat()
-    assert metadata.st_uid == 0, (path, metadata.st_uid)
-    assert metadata.st_gid == cloud_compose_gid, (path, metadata.st_gid)
-    assert stat.S_IMODE(metadata.st_mode) == expected_mode, (path, oct(stat.S_IMODE(metadata.st_mode)))
-PY
+  python /work/ci/config-management-smoke-assert.py salt-runtime \
+    "$expected_name" \
+    "$expected_repo" \
+    "$expected_plugin" \
+    "$expected_package" \
+    "$expected_domain" \
+    "$expected_project_dir" \
+    "$expected_compose_project_name"
 }
 
 run_salt_case \
@@ -524,7 +312,7 @@ run_salt_case \
   sitectl-wp \
   wp.example.edu \
   /mnt/disks/data/libops/wp.git/wp-prod \
-  libops-wp-v1-0-0
+  libops-wp-v1-1-0
 
 run_salt_case \
   drupal-prod \
@@ -534,7 +322,7 @@ run_salt_case \
   sitectl-drupal \
   drupal.example.edu \
   /mnt/disks/data/libops/drupal.git/drupal-prod \
-  libops-drupal-v1-0-0
+  libops-drupal-v1-1-0
 
 run_invalid_salt_case() {
   local invalid_case="$1" expected="$2"
