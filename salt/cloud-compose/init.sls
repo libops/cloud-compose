@@ -773,9 +773,10 @@ cloud-compose-rollout-service:
       - file: cloud-compose-rootfs
       - cmd: cloud-compose-lifecycle-lock
       - cmd: cloud-compose-rootfs-script-modes
-{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
-      - file: cloud-compose-lifecycle-{{ lifecycle }}
-{% endfor %}
+      - file: cloud-compose-lifecycle-init
+      - file: cloud-compose-lifecycle-up
+      - file: cloud-compose-lifecycle-down
+      - file: cloud-compose-lifecycle-rollout
 {% if reload_systemd %}
       - module: cloud-compose-systemd-reload
 {% endif %}
