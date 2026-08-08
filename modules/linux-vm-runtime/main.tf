@@ -152,7 +152,7 @@ managed_runtime_artifact_lines = [
     try(artifact.restart, ""),
   ])
 ]
-managed_runtime_artifacts_content = join("\n", local.managed_runtime_artifact_lines)
+managed_runtime_artifacts_content = length(local.managed_runtime_artifact_lines) == 0 ? "\n" : "${join("\n", local.managed_runtime_artifact_lines)}\n"
 managed_runtime_artifacts_file    = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
       owner: "root:root"

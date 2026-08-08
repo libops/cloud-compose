@@ -282,12 +282,13 @@ managed_runtime_artifact_lines = [
     try(artifact.restart, ""),
   ])
 ]
-managed_runtime_artifacts_file = <<-EOT
+managed_runtime_artifacts_content = length(local.managed_runtime_artifact_lines) == 0 ? "\n" : "${join("\n", local.managed_runtime_artifact_lines)}\n"
+managed_runtime_artifacts_file    = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
       owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
-      content: ${jsonencode(base64gzip(join("\n", local.managed_runtime_artifact_lines)))}
+      content: ${jsonencode(base64gzip(local.managed_runtime_artifacts_content))}
 EOT
 vault_agent_template_stanzas = join("\n", [
   for template in var.vault_agent_templates : <<-EOT
