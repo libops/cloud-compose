@@ -25,6 +25,17 @@ run "renders_safe_ssh_values" {
     condition     = strcontains(output.cloud_init, "name: ${jsonencode("app_operator")}")
     error_message = "SSH usernames must be YAML encoded as literal values."
   }
+
+  assert {
+    condition = (
+      strcontains(output.cloud_init, "path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh") &&
+      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh state") &&
+      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh status") &&
+      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh dump") &&
+      strcontains(output.cloud_init, "install -m 0755 -o root -g root")
+    )
+    error_message = "Cloud-init must install one root-owned diagnostics program with exact passwordless sudo commands."
+  }
 }
 
 run "normalizes_minimal_compose_project" {

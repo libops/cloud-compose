@@ -3,6 +3,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"
+readonly smoke_healthcheck_program="/home/cloud-compose/smoke-healthcheck.sh"
 
 usage() {
   cat <<'EOF'
@@ -377,42 +379,36 @@ wait_for_ssh() {
   return 1
 }
 
+remote_diagnostics_available() {
+  local home_dir="$1" key_path="$2" host="$3" port="$4" user="$5"
+
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "test -x ${diagnostics_program}" >/dev/null 2>&1
+}
+
 remote_bootstrap_state() {
   local home_dir="$1" key_path="$2" host="$3" port="$4" user="$5"
 
-  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set +e
-if [ -f /home/cloud-compose/.cloud-compose-bootstrap-complete ]; then
-  echo complete
-  exit 0
-fi
-bootstrap_load_state=\"\$(systemctl show --property=LoadState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
-if [ \"\$bootstrap_load_state\" = loaded ]; then
-  bootstrap_active_state=\"\$(systemctl show --property=ActiveState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
-  bootstrap_sub_state=\"\$(systemctl show --property=SubState --value -- cloud-compose-bootstrap.service 2>/dev/null)\"
-  case \"\$bootstrap_active_state:\$bootstrap_sub_state\" in
-    active:* | activating:* | *:auto-restart)
-      echo active
-      exit 0
-      ;;
-  esac
-elif [ \"\$bootstrap_load_state\" = not-found ] &&
-  systemctl is-active --quiet cloud-compose; then
-  # Releases before retryable bootstrap have no durable unit or marker; their
-  # active application service remains the compatibility completion signal.
-  echo complete
-  exit 0
-fi
-if systemctl is-active --quiet cloud-final.service; then
-  echo active
-  exit 0
-fi
-if pgrep -f \"[/]home/cloud-compose/run[.]sh|[/]home/cloud-compose/[h]ost-conf[.]sh|[/]home/cloud-compose/[h]ost-init[.]sh|[/]home/cloud-compose/[a]pp-init[.]sh|[/]home/cloud-compose/[i]nstall-dependencies|[a]pt-get|[r]pm-ostree|[d]ocker run|[s]itectl|[g]it clone\" >/dev/null; then
-  echo active
-  exit 0
-fi
-echo idle
-exit 1
-'" 2>/dev/null || true
+  if remote_diagnostics_available "$home_dir" "$key_path" "$host" "$port" "$user"; then
+    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "sudo -n ${diagnostics_program} state" 2>/dev/null || true
+    return
+  fi
+
+  # The pinned upgrade fixture predates the checked-in diagnostics program.
+  # Keep its compatibility probes simple and non-interactive.
+  if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "test -f /home/cloud-compose/.cloud-compose-bootstrap-complete" >/dev/null 2>&1; then
+    echo complete
+  elif ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "systemctl is-active --quiet cloud-compose.service" >/dev/null 2>&1; then
+    echo complete
+  elif ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "systemctl is-active --quiet cloud-final.service" >/dev/null 2>&1; then
+    echo active
+  else
+    echo idle
+  fi
 }
 
 wait_for_cloud_init() {
@@ -421,25 +417,47 @@ wait_for_cloud_init() {
   local deadline
   local status_output
   local bootstrap_state
-  local last_dump=0
+  local diagnostics_available
 
   timeout_seconds="$(boot_timeout_seconds)"
   deadline=$((SECONDS + timeout_seconds))
 
   echo "Waiting for cloud-init on ${host}"
   while (( SECONDS < deadline )); do
+    diagnostics_available=false
+    if remote_diagnostics_available "$home_dir" "$key_path" "$host" "$port" "$user"; then
+      diagnostics_available=true
+    fi
     bootstrap_state="$(remote_bootstrap_state "$home_dir" "$key_path" "$host" "$port" "$user")"
     if [[ "$bootstrap_state" == "complete" ]]; then
       return 0
     fi
 
-    status_output="$(
-      ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-        "if command -v cloud-init >/dev/null 2>&1; then sudo cloud-init status --long 2>&1; else echo 'cloud-init not installed'; fi" 2>&1 || true
-    )"
+    if [[ "$diagnostics_available" == "true" ]]; then
+      status_output="$(
+        ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+          "sudo -n ${diagnostics_program} status" 2>&1 || true
+      )"
+    else
+      status_output="$(
+        ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+          "cloud-init status --long" 2>&1 || true
+      )"
+    fi
     printf '%s\n' "$status_output"
 
     if grep -q '^status: done' <<<"$status_output"; then
+      if [[ "$diagnostics_available" == "true" ]]; then
+        if [[ "$bootstrap_state" == "active" ]]; then
+          echo "cloud-init is done while cloud-compose bootstrap is still active; continuing"
+          sleep 30
+          continue
+        fi
+        echo "cloud-init completed without the Cloud Compose readiness marker" >&2
+        return 1
+      fi
+      # The pinned upgrade fixture predates the durable readiness marker.
+      # Retain cloud-init completion as its final compatibility signal.
       return 0
     fi
     if grep -q '^status: error' <<<"$status_output"; then
@@ -449,24 +467,6 @@ wait_for_cloud_init() {
         continue
       fi
       return 1
-    fi
-
-    if (( SECONDS - last_dump >= 120 )); then
-      last_dump=$SECONDS
-      ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set +e
-echo \"--- active bootstrap processes ---\"
-ps -eo pid,ppid,stat,etime,args | grep -E \"cloud-init|runcmd|run.sh|host-conf|host-init|app-init|install-dependencies|apt-get|docker|sitectl|git clone\" | grep -v grep
-echo \"--- cloud-compose bootstrap unit ---\"
-sudo journalctl -u cloud-compose-bootstrap --no-pager -n 160
-echo \"--- legacy cloud-compose bootstrap log (when present) ---\"
-if sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log; then
-  sudo tail -n 160 /home/cloud-compose/run.log
-else
-  echo \"Legacy bootstrap log is not present\"
-fi
-echo \"--- /var/log/cloud-init-output.log ---\"
-sudo tail -n 120 /var/log/cloud-init-output.log
-'" || true
     fi
 
     sleep 30
@@ -482,40 +482,50 @@ dump_remote_logs() {
   quoted_project_dir="$(shell_quote "$project_dir")"
 
   echo "Dumping smoke-test diagnostics from ${host}" >&2
-  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set +e
-echo \"--- cloud-init status ---\"
-sudo cloud-init status --long
-echo \"--- /var/log/cloud-init-output.log ---\"
-sudo tail -n 400 /var/log/cloud-init-output.log
-echo \"--- /var/log/cloud-init.log ---\"
-sudo tail -n 400 /var/log/cloud-init.log
-echo \"--- cloud-init runcmd ---\"
-sudo sed -n '1,240p' /var/lib/cloud/instance/scripts/runcmd
-echo \"--- cloud-compose bootstrap unit ---\"
-sudo journalctl -u cloud-compose-bootstrap --no-pager -n 400
-echo \"--- legacy cloud-compose bootstrap log (when present) ---\"
-if sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log; then
-  sudo tail -n 400 /home/cloud-compose/run.log
-else
-  echo \"Legacy bootstrap log is not present\"
-fi
-echo \"--- cloud-compose unit ---\"
-sudo journalctl -u cloud-compose --no-pager -n 300
-echo \"--- lifecycle lock permissions ---\"
-sudo stat -Lc '%A %a %U:%G %u:%g %n' /run/lock/cloud-compose /run/lock/cloud-compose/lifecycle.lock
-echo \"--- docker ps ---\"
-sudo docker ps -a
-echo \"--- docker compose ps ---\"
-if [ -d ${quoted_project_dir} ]; then
-  if command -v runuser >/dev/null 2>&1; then
-    runuser -u cloud-compose -- env HOME=/home/cloud-compose PROJECT_DIR=${quoted_project_dir} bash -lc \"source /home/cloud-compose/profile.sh && cd \\\"\$PROJECT_DIR\\\" && docker compose ps\"
-  else
-    sudo -u cloud-compose env HOME=/home/cloud-compose PROJECT_DIR=${quoted_project_dir} bash -lc \"source /home/cloud-compose/profile.sh && cd \\\"\$PROJECT_DIR\\\" && docker compose ps\"
+  if remote_diagnostics_available "$home_dir" "$key_path" "$host" "$port" "$user"; then
+    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "sudo -n ${diagnostics_program} dump" || true
+    return
   fi
-else
-  echo \"Project directory ${project_dir} is not present yet\"
-fi
-'" || true
+
+  # Compatibility diagnostics for the pinned pre-program upgrade fixture.
+  echo "--- legacy cloud-init status ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "cloud-init status --long" || true
+  echo "--- legacy /var/log/cloud-init-output.log ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "tail -n 400 /var/log/cloud-init-output.log" || true
+  echo "--- legacy /var/log/cloud-init.log ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "tail -n 400 /var/log/cloud-init.log" || true
+  echo "--- legacy cloud-init runcmd ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "sed -n 1,240p /var/lib/cloud/instance/scripts/runcmd" || true
+  echo "--- legacy cloud-compose bootstrap unit ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "systemctl status cloud-compose-bootstrap.service --no-pager" || true
+  echo "--- legacy cloud-compose bootstrap log ---"
+  if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "test -f /home/cloud-compose/run.log" >/dev/null 2>&1 &&
+    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "test ! -L /home/cloud-compose/run.log" >/dev/null 2>&1; then
+    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "tail -n 400 /home/cloud-compose/run.log" || true
+  else
+    echo "Legacy bootstrap log is not present"
+  fi
+  echo "--- legacy cloud-compose unit ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "sudo -n /usr/bin/systemctl status cloud-compose.service" || true
+  echo "--- legacy lifecycle lock permissions ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "stat -Lc '%A %a %U:%G %u:%g %n' /run/lock/cloud-compose /run/lock/cloud-compose/lifecycle.lock" || true
+  echo "--- legacy docker ps ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "docker ps -a" || true
+  echo "--- legacy docker compose ps ---"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "docker compose --project-directory ${quoted_project_dir} ps" || true
 }
 
 configure_sitectl_context() {
@@ -564,11 +574,17 @@ run_healthcheck() {
     user="$(jq -r '.ssh_user' "$output_json")"
     quoted_context="$(shell_quote "$context")"
 
-    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set -euo pipefail
-export HOME=/home/cloud-compose
-source /home/cloud-compose/profile.sh
-exec sitectl healthcheck --context ${quoted_context} --persist --format table
-'"
+    if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "test -x ${smoke_healthcheck_program}" >/dev/null 2>&1; then
+      ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+        "${smoke_healthcheck_program} ${quoted_context}"
+    else
+      # The pinned 0.10.2 upgrade fixture predates the checked-in wrapper.
+      # Invoke its sitectl binary directly with the environment profile's
+      # stable path settings, without sending an embedded shell program.
+      ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+        "env HOME=/home/cloud-compose DOCKER_CONFIG=/mnt/disks/data/docker-config PATH=/home/cloud-compose/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin sitectl healthcheck --context ${quoted_context} --persist --format table"
+    fi
     return
   fi
 

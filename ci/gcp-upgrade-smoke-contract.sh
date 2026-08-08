@@ -47,16 +47,33 @@ grep -Fq "provider_tag_cleanup gcp-wp \"\$run_id\"" "$script" ||
   fail "upgrade runner does not finish cleanup with the verified provider sweep"
 grep -Fq 'target_env gcp-wp' "$script" ||
   fail "upgrade cleanup does not load the concrete GCP WordPress target environment"
-[[ "$(grep -Fc 'sudo test -f /home/cloud-compose/run.log && sudo test ! -L /home/cloud-compose/run.log' "$shared_smoke")" -eq 2 ]] ||
-  fail "shared smoke diagnostics do not retain guarded legacy bootstrap logs for the pinned baseline"
-grep -Fq 'bootstrap_load_state=\"\$(systemctl show --property=LoadState --value -- cloud-compose-bootstrap.service' "$shared_smoke" ||
-  fail "shared smoke readiness does not distinguish retryable bootstrap from the legacy baseline"
-grep -Fq 'active:* | activating:* | *:auto-restart)' "$shared_smoke" ||
-  fail "shared smoke readiness can abandon the bootstrap unit during its restart delay"
-grep -Fq 'elif [ \"\$bootstrap_load_state\" = not-found ] &&' "$shared_smoke" ||
-  fail "shared smoke readiness does not restrict legacy fallback to an absent bootstrap unit"
-grep -Fq 'systemctl is-active --quiet cloud-compose; then' "$shared_smoke" ||
+grep -Fq 'readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"' "$shared_smoke" ||
+  fail "shared smoke diagnostics do not use the checked-in privileged program"
+for diagnostics_command in state status dump; do
+  grep -Fq "sudo -n \${diagnostics_program} ${diagnostics_command}" "$shared_smoke" ||
+    fail "shared smoke diagnostics do not invoke the ${diagnostics_command} command non-interactively"
+done
+grep -Fq 'test -f /home/cloud-compose/.cloud-compose-bootstrap-complete' "$shared_smoke" ||
+  fail "shared smoke readiness lost its pinned-baseline marker compatibility probe"
+grep -Fq 'systemctl is-active --quiet cloud-compose.service' "$shared_smoke" ||
   fail "shared smoke readiness lost its pre-bootstrap-unit compatibility signal"
+grep -Fq 'cloud-init completed without the Cloud Compose readiness marker' "$shared_smoke" ||
+  fail "current smoke readiness can still accept cloud-init completion without durable application readiness"
+grep -Fq 'The pinned upgrade fixture predates the durable readiness marker.' "$shared_smoke" ||
+  fail "legacy cloud-init completion is not explicitly confined to the pinned upgrade fixture"
+grep -Fq 'test ! -L /home/cloud-compose/run.log' "$shared_smoke" ||
+  fail "shared smoke diagnostics do not retain a guarded legacy bootstrap log fallback"
+grep -Fq 'sudo -n /usr/bin/systemctl status cloud-compose.service' "$shared_smoke" ||
+  fail "shared smoke diagnostics do not limit pinned-baseline sudo to its existing exact command"
+grep -Fq 'readonly smoke_healthcheck_program="/home/cloud-compose/smoke-healthcheck.sh"' "$shared_smoke" ||
+  fail "shared smoke healthcheck does not use the checked-in host wrapper"
+grep -Fq '"${smoke_healthcheck_program} ${quoted_context}"' "$shared_smoke" ||
+  fail "shared smoke healthcheck does not invoke the checked-in host wrapper directly"
+grep -Fq 'env HOME=/home/cloud-compose DOCKER_CONFIG=/mnt/disks/data/docker-config PATH=/home/cloud-compose/bin:' "$shared_smoke" ||
+  fail "shared smoke healthcheck lost its direct pinned-baseline fallback"
+if sed -n '/^run_healthcheck()/,/^}/p' "$shared_smoke" | grep -Fq 'bash -lc'; then
+  fail "shared smoke healthcheck still sends an embedded Bash program over SSH"
+fi
 grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must match GITHUB_RUN_ID in GitHub Actions' "$script" ||
   fail "hosted cleanup ownership is not bound to the actual GitHub run id"
 grep -Fq 'CLOUD_COMPOSE_SMOKE_RUN_ID must be set explicitly outside GitHub Actions' "$script" ||

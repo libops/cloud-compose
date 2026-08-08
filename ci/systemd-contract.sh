@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 unit_dir="$repo_root/rootfs/etc/systemd/system"
+diagnostics_program="$repo_root/rootfs/usr/local/sbin/cloud-compose-diagnostics.sh"
+smoke_healthcheck_program="$repo_root/rootfs/home/cloud-compose/smoke-healthcheck.sh"
 
 fail() {
   echo "systemd contract: $*" >&2
@@ -25,6 +27,8 @@ assert_contains() {
 [[ -f "$unit_dir/cloud-compose-vault-agent.service" ]] || fail "namespaced Vault Agent unit is missing"
 [[ -f "$unit_dir/cloud-compose-overlay.service" ]] || fail "Docker overlay mount unit is missing"
 [[ -f "$unit_dir/cloud-compose-bootstrap.service" ]] || fail "retryable bootstrap unit is missing"
+[[ -x "$diagnostics_program" ]] || fail "checked-in Cloud Compose diagnostics program is missing or not executable"
+[[ -x "$smoke_healthcheck_program" ]] || fail "checked-in smoke healthcheck wrapper is missing or not executable"
 [[ -f "$unit_dir/cloud-compose-internal-services.service" && -f "$unit_dir/cloud-compose-internal-services.timer" ]] || \
   fail "namespaced internal-services units are missing"
 [[ -f "$unit_dir/cloud-compose-offhost-backup.service" ]] || fail "off-host backup service is missing"
@@ -51,7 +55,13 @@ assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'SyslogLevelPrefix=n
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'LogRateLimitIntervalSec=30s'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'LogRateLimitBurst=1000'
 assert_contains "$unit_dir/cloud-compose-internal-services.service" 'Requires=cloud-compose.service cloud-compose-metadata-firewall.service'
-assert_contains "$unit_dir/cloud-compose.service" 'TimeoutStartSec=1h'
+assert_contains "$unit_dir/cloud-compose.service" 'TimeoutStartSec=90min'
+assert_contains "$diagnostics_program" 'usage: ${diagnostics_program} state|status|dump'
+assert_contains "$diagnostics_program" 'readonly PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+assert_contains "$diagnostics_program" '--- Cloud Compose provisioning heartbeat ---'
+assert_contains "$diagnostics_program" 'ps -p "$main_pid" -o pid=,ppid=,stat=,etime=,comm='
+assert_contains "$smoke_healthcheck_program" 'source /home/cloud-compose/profile.sh'
+assert_contains "$smoke_healthcheck_program" 'exec sitectl healthcheck --context "$context" --persist --format table'
 assert_contains "$unit_dir/cloud-compose-mariadb-backup.service" 'TimeoutStartSec=12h'
 assert_contains "$unit_dir/cloud-compose-mariadb-backup.service" 'User=cloud-compose'
 assert_contains "$unit_dir/cloud-compose-mariadb-backup.timer" 'Unit=cloud-compose-offhost-backup.service'

@@ -10,6 +10,9 @@ users:
   - docker
   sudo:
   - ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service
+  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh state
+  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh status
+  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh dump
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
@@ -26,6 +29,11 @@ users:
 %{ endfor ~}
 
 write_files:
+- path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
+  owner: root:root
+  permissions: "0600"
+  encoding: b64
+  content: ${DIAGNOSTICS_SCRIPT_B64}
 ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
@@ -55,7 +63,12 @@ runcmd:
     chown cloud-compose:cloud-compose /home/cloud-compose/.ssh/authorized_keys
     chmod 0600 /home/cloud-compose/.ssh/authorized_keys
     install -d -m 0755 /etc/sudoers.d
-    printf 'cloud-compose ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service\n' >/etc/sudoers.d/90-cloud-compose
+    printf '%s\n' \
+      'cloud-compose ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service' \
+      'cloud-compose ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh state' \
+      'cloud-compose ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh status' \
+      'cloud-compose ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh dump' \
+      >/etc/sudoers.d/90-cloud-compose
     chmod 0440 /etc/sudoers.d/90-cloud-compose
   }
 
@@ -90,6 +103,10 @@ runcmd:
     cp -a /var/lib/cloud-compose/mounted-rootfs/mnt/disks/. /mnt/disks/
   fi
 %{ endif }
+  install -d -m 0755 -o root -g root /usr/local/sbin
+  install -m 0755 -o root -g root \
+    /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh \
+    /usr/local/sbin/cloud-compose-diagnostics.sh
   chown root:cloud-compose /mnt/disks/data
   chmod 1775 /mnt/disks/data
   chown cloud-compose:cloud-compose /mnt/disks/volumes

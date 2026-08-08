@@ -18,7 +18,10 @@ ExecStart=/bin/bash /home/cloud-compose/up
 ExecStop=/bin/bash /home/cloud-compose/down
 Restart=on-failure
 RestartSec=30s
-TimeoutStartSec=1h
+# run.sh allows application convergence to take 75 minutes. Keep systemd's
+# ceiling above that application budget so the service manager cannot kill a
+# healthy first boot before the caller's bounded wait reports its own result.
+TimeoutStartSec=90min
 TimeoutStopSec=15min
 
 [Install]

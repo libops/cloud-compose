@@ -464,6 +464,7 @@ rollout_runcmd = var.rollout_enabled ? [
   "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
 ] : []
 cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
+  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootFs}/usr/local/sbin/cloud-compose-diagnostics.sh"),
   FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
   FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
   FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",

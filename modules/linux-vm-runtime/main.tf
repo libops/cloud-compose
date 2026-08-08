@@ -333,6 +333,7 @@ rootfs_archive_install_command = local.rootfs_archive_url != "" ? local.rootfs_a
 cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
   CLOUD_COMPOSE_SSH_KEYS         = var.cloud_compose_ssh_keys
   SSH_USERS                      = var.ssh_users
+  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootfs}/usr/local/sbin/cloud-compose-diagnostics.sh")
   DATA_DEVICE                    = var.data_device
   VOLUMES_DEVICE                 = var.volumes_device
   WRITE_FILES_CONTENT            = local.write_files_content
