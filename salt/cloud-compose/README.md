@@ -72,7 +72,7 @@ cloud_compose:
   runtime:
     disaster_recovery:
       required: true
-      driver_path: /usr/local/libexec/cloud-compose/offhost-backup-driver
+      driver_path: /etc/cloud-compose/libexec/offhost-backup-driver
 ```
 
 Install that executable and its credentials separately as root. The formula

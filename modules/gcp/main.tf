@@ -232,11 +232,15 @@ locals {
       }
     }
   )
+  rootfs_file_permissions = {
+    for file in setunion(local.base_files, local.additional_files) :
+    file => endswith(file, ".sh") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
+  }
 
   write_files_content = join("\n", [
     for file, config in local.all_files : <<-EOT
       - path: ${jsonencode(config.destination)}
-        permissions: ${jsonencode(endswith(file, ".sh") ? "0755" : "0644")}
+        permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(config.source)))}
 EOT
@@ -447,10 +451,11 @@ rootfs_archive_command_raw   = <<-EOT
       printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
       tar --no-same-owner -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
       rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
-      if [ -z "$rootfs_dir" ]; then
+      if [ -z "$rootfs_dir" ] || [ ! -d "$rootfs_dir" ]; then
         echo "rootfs directory not found in $archive_url" >&2
         exit 1
       fi
+      chown -hR 0:0 -- "$rootfs_dir"
       cp -a "$rootfs_dir"/. /
       if [ -d "$overlay_dir" ]; then
         cp -a "$overlay_dir"/. /
@@ -464,7 +469,7 @@ rollout_runcmd = var.rollout_enabled ? [
   "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
 ] : []
 cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
-  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootFs}/usr/local/sbin/cloud-compose-diagnostics.sh"),
+  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"),
   FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
   FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
   FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",

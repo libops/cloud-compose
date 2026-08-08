@@ -156,10 +156,13 @@ with `systemctl status cloud-compose-bootstrap cloud-compose`. Bootstrap output
 uses a fixed `info` priority and has no unit-specific Fluent Bit input, so raw
 bootstrap output is not forwarded to Cloud Logging; systemd's own service
 failures remain available to the existing warning-level collector.
-Root systemd jobs enter through `/usr/local/libexec/cloud-compose`, validate
-the root-owned home scripts and control inputs, and only then execute their
-allowlisted `/home/cloud-compose` program. Application services retain their
-unprivileged execution model.
+Root systemd jobs enter through `/etc/cloud-compose/libexec`, validate the
+root-owned home scripts and control inputs, and only then execute their
+allowlisted `/home/cloud-compose` program. The privileged entrypoints,
+diagnostics command, and checked-in `jq` programs live below
+`/etc/cloud-compose/{libexec,bin,jq}` because COS permits cloud-init to rebuild
+that stateless tree while its `/usr` filesystem is immutable. Application
+services retain their unprivileged execution model.
 
 ## Sitectl
 
@@ -336,7 +339,9 @@ release versions and the Alpine tag/digest pair; review those changes as
 supply-chain updates rather than accepting an unpinned replacement. The image
 and its network-fetched package build scripts execute only after the metadata
 firewall is installed and use the bridge network, so they cannot inherit the
-host network's root exemption.
+host network's root exemption. The build itself is a checked-in shell program
+mounted read-only into the container and invoked by path, keeping the audited
+program out of cloud-init and Docker command arguments.
 
 The GCP COS VM image name is a reviewed manual pin. Renovate has no built-in
 GCP Compute image-family datasource, and the shared LibOps preset does not add
@@ -662,10 +667,12 @@ used, it must be an HTTPS URL without whitespace and
 `runtime.rootfs_archive_sha256` is mandatory with a 64-character SHA-256
 digest. Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer,
 downloads to a temporary path, and verifies the complete file before extracting
-its `rootfs` directory. The GCP path stages
-the caller's packaged rootfs overlay and reapplies it after the archive, so
-consumer overrides still win. Use an immutable archive URL; a moving branch and
-a pinned checksum intentionally fail as soon as the branch content changes.
+its `rootfs` directory. Both archive installers normalize the verified tree to
+UID/GID `0:0` before loading a helper or copying it onto the host, so Git forge
+source-archive ownership cannot leak into the privileged runtime. The GCP path
+stages the caller's packaged rootfs overlay and reapplies it after the archive,
+so consumer overrides still win. Use an immutable archive URL; a moving branch
+and a pinned checksum intentionally fail as soon as the branch content changes.
 
 ## Backups
 
@@ -860,7 +867,7 @@ deploy the same
 the legacy runtime's branch-only clone behavior without following a moving
 branch. Its `gcp.cloud_init.initcmd` disables both generations of the
 internal-service timer after cloud-init writes the units but before the
-root-owned `/usr/local/libexec/cloud-compose/run-bootstrap.sh` entrypoint
+root-owned `/etc/cloud-compose/libexec/run-bootstrap.sh` entrypoint
 starts the potentially long bootstrap, so the disposable VM cannot suspend
 itself. The runner checks the units again after each boot.
 Only the ephemeral runner key is authorized, and SSH is limited to that

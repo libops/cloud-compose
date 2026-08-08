@@ -13,8 +13,8 @@ cmp -s "$validator" "$salt_validator" || {
 
 ansible_tasks="$repo_root/ansible/roles/cloud_compose/tasks/main.yml"
 salt_state="$repo_root/salt/cloud-compose/init.sls"
-root_program_runner="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-root-program.sh"
-rollout_runner="bash /usr/local/libexec/cloud-compose/run-root-program.sh deploy-rollout.sh"
+root_program_runner="$repo_root/rootfs/etc/cloud-compose/libexec/run-root-program.sh"
+rollout_runner="bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh"
 
 contract_fail() {
   echo "config-management input contract: $1" >&2
@@ -217,9 +217,9 @@ if "files/validate-runtime-inputs.py" not in ansible_tasks:
     fail("Ansible does not execute the shared host-input validator")
 if "--data-root" in ansible_tasks:
     fail("Ansible makes the production project ownership boundary configurable")
-if "cmd: bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh" not in ansible_tasks:
+if "cmd: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh" not in ansible_tasks:
     fail("Ansible bypasses the retryable bootstrap service")
-if "cmd: bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" not in ansible_tasks:
+if "cmd: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh" not in ansible_tasks:
     fail("Ansible does not validate bootstrap readiness evidence")
 if 'cmd: bash "{{ cloud_compose_home }}/run.sh"' in ansible_tasks:
     fail("Ansible still invokes the one-shot bootstrap script directly")
@@ -233,9 +233,9 @@ salt_gate = salt_state.find("cloud-compose-host-inputs-valid:")
 salt_first_mutation = salt_state.find("cloud-compose-packages:")
 if salt_gate < 0 or salt_first_mutation < 0 or salt_gate > salt_first_mutation:
     fail("Salt host-input validation does not precede its first host mutation")
-if "bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh" not in salt_state:
+if "bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh" not in salt_state:
     fail("Salt bypasses the retryable bootstrap service")
-if "bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" not in salt_state:
+if "bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh" not in salt_state:
     fail("Salt does not validate bootstrap readiness evidence")
 if "home ~ '/run.sh'" in salt_state:
     fail("Salt still invokes the one-shot bootstrap script directly")
@@ -411,7 +411,7 @@ adapter_fixture_markers = {
     "invalid-lifecycle": "- 42",
     "invalid-project-lifecycle": "docker_compose_up: not-a-list",
     "invalid-internal-services": "internal_services_enabled: true",
-    "invalid-disaster-recovery": "driver_path: /usr/local/libexec/cloud-compose/../untrusted",
+    "invalid-disaster-recovery": "driver_path: /etc/cloud-compose/libexec/../untrusted",
 }
 for fixture_name, marker in adapter_fixture_markers.items():
     for relative_path in (

@@ -616,7 +616,7 @@ variable "offhost_backup_required" {
 
 variable "offhost_backup_driver_path" {
   type        = string
-  default     = "/usr/local/libexec/cloud-compose/offhost-backup-driver"
+  default     = "/etc/cloud-compose/libexec/offhost-backup-driver"
   description = "Absolute path to the operator-supplied, root-owned provider-neutral DR driver. The driver owns its credentials; do not pass them through Terraform."
 
   validation {

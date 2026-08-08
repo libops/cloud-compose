@@ -21,10 +21,18 @@ tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | awk '
 '
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/home/cloud-compose/run.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
-    grep -Fx 'rootfs/usr/local/libexec/cloud-compose/run-bootstrap.sh' >/dev/null
+    grep -Fx 'rootfs/etc/cloud-compose/libexec/run-bootstrap.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
-    grep -Fx 'rootfs/usr/local/libexec/cloud-compose/run-root-program.sh' >/dev/null
+    grep -Fx 'rootfs/etc/cloud-compose/libexec/run-root-program.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
-    grep -Fx 'rootfs/usr/local/share/cloud-compose/jq/offhost-validate-manifest.jq' >/dev/null
+    grep -Fx 'rootfs/etc/cloud-compose/libexec/build-cos-make.sh' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh' >/dev/null
+if tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -E '^rootfs/usr/' >/dev/null; then
+    echo "Rootfs package contains a Cloud Compose-owned immutable /usr path" >&2
+    exit 1
+fi
 
 echo "Rootfs package contract passed"

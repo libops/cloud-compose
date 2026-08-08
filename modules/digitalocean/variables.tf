@@ -78,7 +78,7 @@ variable "runtime" {
 
     disaster_recovery = optional(object({
       required    = optional(bool, false)
-      driver_path = optional(string, "/usr/local/libexec/cloud-compose/offhost-backup-driver")
+      driver_path = optional(string, "/etc/cloud-compose/libexec/offhost-backup-driver")
     }), {})
 
     compose = optional(object({

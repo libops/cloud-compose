@@ -4,8 +4,8 @@
 # The caller must enable `set -euo pipefail` before sourcing this file.
 
 CLOUD_COMPOSE_DR_STATE_ROOT="${CLOUD_COMPOSE_DR_STATE_ROOT:-/mnt/disks/data/.cloud-compose-disaster-recovery}"
-CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="${CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER:-/usr/local/libexec/cloud-compose/offhost-backup-driver}"
-CLOUD_COMPOSE_JQ_PROGRAM_DIR="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/usr/local/share/cloud-compose/jq}"
+CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="${CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER:-/etc/cloud-compose/libexec/offhost-backup-driver}"
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/etc/cloud-compose/jq}"
 
 cloud_compose_dr_is_required() {
     case "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}" in

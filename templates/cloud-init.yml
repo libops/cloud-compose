@@ -10,9 +10,9 @@ users:
   - docker
   sudo:
   - ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service
-  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh state
-  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh status
-  - ALL=(root) NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh dump
+  - ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh state
+  - ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh status
+  - ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh dump
 %{ if length(CLOUD_COMPOSE_SSH_KEYS) > 0 ~}
   ssh_authorized_keys:
 %{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
@@ -90,10 +90,10 @@ runcmd:
 ${ROOTFS_ARCHIVE_COMMAND}
 - |
   set -eu
-  install -d -m 0755 -o root -g root /usr/local/sbin
+  install -d -m 0755 -o root -g root /etc/cloud-compose/bin
   install -m 0755 -o root -g root \
     /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh \
-    /usr/local/sbin/cloud-compose-diagnostics.sh
+    /etc/cloud-compose/bin/cloud-compose-diagnostics.sh
   test -f /run/cloud-compose-filesystems-ready || {
     echo "Cloud Compose filesystems were not prepared; refusing application initialization" >&2
     exit 1
@@ -107,11 +107,11 @@ ${ROOTFS_ARCHIVE_COMMAND}
   chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
   rm -f /var/lib/cloud-compose/bootstrap-complete
-  bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh
+  bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
 %{ if length(ADDITIONAL_RUNCMD) > 0 ~}
 - |
   set -eu
-  bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh
+  bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
 %{ for CMD in ADDITIONAL_RUNCMD ~}
   ${indent(2, CMD)}
 %{ endfor ~}

@@ -16,13 +16,19 @@ root, bind mount, named volume, and service-mount topology in the manifest.
 Install the reviewed driver and all of its configuration out of band. The file
 and every directory in its path must be root-owned, must not be a symlink or be
 group/world writable, and the executable must have exactly one hard link.
+`/etc/cloud-compose/libexec/offhost-backup-driver` is the portable default on
+COS and conventional Linux hosts. An explicit safe absolute path remains
+supported when an operator manages the driver elsewhere. Because COS rebuilds
+`/etc` at boot, provide the driver through the configured rootfs overlay or an
+equivalent startup provisioner there; a one-time manual copy will not survive a
+reboot. Keep credentials outside that overlay.
 Then enable the provider-neutral runtime input:
 
 ```hcl
 runtime = {
   disaster_recovery = {
     required    = true
-    driver_path = "/usr/local/libexec/cloud-compose/offhost-backup-driver"
+    driver_path = "/etc/cloud-compose/libexec/offhost-backup-driver"
   }
 }
 ```

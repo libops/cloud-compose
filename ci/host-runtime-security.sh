@@ -177,7 +177,7 @@ fi
 assert_contains "$host_init" 'chown root:root /home/cloud-compose'
 assert_contains "$host_init" "-exec chown root:root {} +"
 assert_contains "$host_init" 'Unsafe Cloud Compose lifecycle dispatcher:'
-assert_contains "$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh" \
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/bootstrap-security.sh" \
   'Cloud Compose control input is not root-controlled'
 assert_contains "$host_init" '/home/cloud-compose/.sitectl \'
 assert_contains "$host_init" 'install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"'
@@ -243,12 +243,39 @@ if grep -Fq 'rotate-keys' "$repo_root/rootfs/home/cloud-compose/docker-prune.sh"
   fail "provider-neutral Docker prune still invokes GCP key rotation"
 fi
 
-archive_source="$repo_root/modules/linux-vm-runtime/main.tf"
-verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
-extract_line="$(grep -n 'tar --no-same-owner -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
-[[ -n "$verify_line" && -n "$extract_line" && "$verify_line" -lt "$extract_line" ]] || \
-  fail "rootfs archive is not verified before ownership-safe extraction"
-assert_contains "$repo_root/modules/gcp/main.tf" 'tar --no-same-owner -xzf "$tmp/rootfs.tar.gz"'
+for archive_source in \
+  "$repo_root/modules/linux-vm-runtime/main.tf" \
+  "$repo_root/modules/gcp/main.tf"; do
+  verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
+  extract_line="$(grep -n 'tar --no-same-owner -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+  normalize_line="$(grep -n 'chown -hR 0:0 -- "\$rootfs_dir"' "$archive_source" | head -n 1 | cut -d: -f1)"
+  copy_line="$(grep -n 'cp -a "\$rootfs_dir"/. /' "$archive_source" | head -n 1 | cut -d: -f1)"
+  [[ -n "$verify_line" && -n "$extract_line" && -n "$normalize_line" && -n "$copy_line" &&
+    "$verify_line" -lt "$extract_line" && "$extract_line" -lt "$normalize_line" &&
+    "$normalize_line" -lt "$copy_line" ]] || \
+    fail "$archive_source does not verify, ownership-safe extract, then normalize the rootfs to root"
+done
+
+if [[ -n "$(git -C "$repo_root" ls-files 'rootfs/usr/**')" ]]; then
+  fail "Cloud Compose-owned rootfs programs still target immutable /usr"
+fi
+for trusted_program in \
+  rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh \
+  rootfs/etc/cloud-compose/libexec/build-cos-make.sh \
+  rootfs/etc/cloud-compose/libexec/bootstrap-security.sh \
+  rootfs/etc/cloud-compose/libexec/run-bootstrap.sh \
+  rootfs/etc/cloud-compose/libexec/run-root-program.sh \
+  rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq; do
+  [[ -f "$repo_root/$trusted_program" ]] || fail "COS-safe trusted program is missing: $trusted_program"
+done
+for cloud_init_template in \
+  "$repo_root/templates/cloud-init.yml" \
+  "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
+  assert_contains "$cloud_init_template" 'install -d -m 0755 -o root -g root /etc/cloud-compose/bin'
+  if grep -Eq '^[[:space:]]*- path: /usr/|install -d[^#]* /usr/local' "$cloud_init_template"; then
+    fail "$cloud_init_template writes Cloud Compose-owned programs beneath immutable /usr"
+  fi
+done
 
 for variables_file in \
   "$repo_root/variables.tf" \

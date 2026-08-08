@@ -29,9 +29,9 @@ run "renders_safe_ssh_values" {
   assert {
     condition = (
       strcontains(output.cloud_init, "path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh") &&
-      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh state") &&
-      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh status") &&
-      strcontains(output.cloud_init, "NOPASSWD:/usr/local/sbin/cloud-compose-diagnostics.sh dump") &&
+      strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh state") &&
+      strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh status") &&
+      strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh dump") &&
       strcontains(output.cloud_init, "install -m 0755 -o root -g root")
     )
     error_message = "Cloud-init must install one root-owned diagnostics program with exact passwordless sudo commands."
@@ -207,14 +207,16 @@ run "renders_verified_rootfs_archive" {
   command = plan
 
   variables {
-    name                  = "contract-test"
-    provider_name         = "linode"
-    region                = "us-east"
-    data_device           = "/dev/test-data"
-    volumes_device        = "/dev/test-volumes"
-    docker_compose_repo   = "https://github.com/libops/wp.git"
-    rootfs_archive_url    = "https://example.invalid/cloud-compose-$(id).tar.gz"
-    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    name                       = "contract-test"
+    provider_name              = "linode"
+    region                     = "us-east"
+    data_device                = "/dev/test-data"
+    volumes_device             = "/dev/test-volumes"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    rootfs_archive_url         = "https://example.invalid/cloud-compose-$(id).tar.gz"
+    rootfs_archive_sha256      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
   }
 
   assert {
@@ -225,16 +227,18 @@ run "renders_verified_rootfs_archive" {
   assert {
     condition = (
       strcontains(output.cloud_init, "tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"") &&
+      strcontains(output.cloud_init, "chown -hR 0:0 -- \"$rootfs_dir\"") &&
       strcontains(output.cloud_init, "install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"") &&
       strcontains(output.cloud_init, "bash \"$filesystem_prep\"") &&
       strcontains(output.cloud_init, "bash \"$filesystem_persist\"") &&
       strcontains(output.cloud_init, "cp -a \"$rootfs_dir\"/. /") &&
       length(split("sha256sum -c -", output.cloud_init)[0]) < length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) &&
-      length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) < length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) &&
+      length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) < length(split("chown -hR 0:0 -- \"$rootfs_dir\"", output.cloud_init)[0]) &&
+      length(split("chown -hR 0:0 -- \"$rootfs_dir\"", output.cloud_init)[0]) < length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) &&
       length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) < length(split("bash \"$filesystem_prep\"", output.cloud_init)[0]) &&
       length(split("bash \"$filesystem_persist\"", output.cloud_init)[0]) < length(split("cp -a \"$rootfs_dir\"/. /", output.cloud_init)[0])
     )
-    error_message = "Archive cloud-init must verify and extract before loading its helpers, then install the rootfs only after filesystem preparation and persistence."
+    error_message = "Archive cloud-init must verify, extract, and normalize root ownership before loading its helpers, then install the rootfs only after filesystem preparation and persistence."
   }
 
   assert {
@@ -260,18 +264,36 @@ run "renders_verified_rootfs_archive" {
     )
     error_message = "Archive URLs must be rendered as base64 data rather than executable shell syntax."
   }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose/unrelated-config"] == "0644" &&
+      strcontains(
+        split(base64encode("/etc/cloud-compose/libexec/custom-offhost-driver"), local.archive_additional_rootfs_commands)[1],
+        "chmod 0755 \"$destination\"",
+      ) &&
+      strcontains(
+        split(base64encode("/etc/cloud-compose/unrelated-config"), local.archive_additional_rootfs_commands)[1],
+        "chmod 0644 \"$destination\"",
+      )
+    )
+    error_message = "Archive-backed Linux VM overlays must make only the configured off-host backup driver executable."
+  }
 }
 
 run "embeds_filesystem_helpers_without_archive" {
   command = plan
 
   variables {
-    name                = "contract-test"
-    provider_name       = "digitalocean"
-    region              = "nyc3"
-    data_device         = "/dev/test-data"
-    volumes_device      = "/dev/test-volumes"
-    docker_compose_repo = "https://github.com/libops/wp.git"
+    name                       = "contract-test"
+    provider_name              = "digitalocean"
+    region                     = "nyc3"
+    data_device                = "/dev/test-data"
+    volumes_device             = "/dev/test-volumes"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
   }
 
   assert {
@@ -281,6 +303,22 @@ run "embeds_filesystem_helpers_without_archive" {
       !strcontains(output.cloud_init, "archive_url_b64=")
     )
     error_message = "Inline cloud-init must retain the embedded filesystem-helper bootstrap when no archive is configured."
+  }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose/unrelated-config"] == "0644" &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/unrelated-config\"\n  permissions: \"0644\"",
+      )
+    )
+    error_message = "Embedded Linux VM overlays must make only the configured off-host backup driver executable."
   }
 }
 

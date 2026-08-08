@@ -4,10 +4,10 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 unit_dir="$repo_root/rootfs/etc/systemd/system"
-diagnostics_program="$repo_root/rootfs/usr/local/sbin/cloud-compose-diagnostics.sh"
+diagnostics_program="$repo_root/rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"
 smoke_healthcheck_program="$repo_root/rootfs/home/cloud-compose/smoke-healthcheck.sh"
-bootstrap_security="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh"
-root_program_runner="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-root-program.sh"
+bootstrap_security="$repo_root/rootfs/etc/cloud-compose/libexec/bootstrap-security.sh"
+root_program_runner="$repo_root/rootfs/etc/cloud-compose/libexec/run-root-program.sh"
 
 fail() {
   echo "systemd contract: $*" >&2
@@ -48,8 +48,8 @@ assert_contains "$unit_dir/cloud-compose.service" 'RestartSec=30s'
 if grep -Fq 'ConditionPathExists=' "$unit_dir/cloud-compose-bootstrap.service"; then
   fail "bootstrap still trusts an unvalidated marker path condition"
 fi
-assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecCondition=/bin/bash /usr/local/libexec/cloud-compose/bootstrap-required.sh'
-assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-bootstrap.sh'
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecCondition=/bin/bash /etc/cloud-compose/libexec/bootstrap-required.sh'
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecStart=/bin/bash /etc/cloud-compose/libexec/run-bootstrap.sh'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'Restart=on-failure'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'RestartSec=30s'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'TimeoutStartSec=2h'
@@ -73,8 +73,8 @@ assert_contains "$bootstrap_security" '"$payload" == "ready"'
 assert_contains "$bootstrap_security" 'cloud_compose_secure_runtime_home()'
 assert_contains "$root_program_runner" 'cloud_compose_secure_runtime_home'
 assert_contains "$root_program_runner" 'Unsupported Cloud Compose root program:'
-[[ -f "$repo_root/rootfs/usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" ]] || \
-  fail "validated bootstrap readiness gate is missing"
+[[ -x "$repo_root/rootfs/etc/cloud-compose/libexec/require-bootstrap-ready.sh" ]] || \
+  fail "validated bootstrap readiness gate is missing or not executable"
 assert_contains "$diagnostics_program" '--- Cloud Compose provisioning heartbeat ---'
 assert_contains "$diagnostics_program" 'ps -p "$main_pid" -o pid=,ppid=,stat=,etime=,comm='
 assert_contains "$smoke_healthcheck_program" 'source /home/cloud-compose/profile.sh'
@@ -116,9 +116,9 @@ assert_contains "$docker_metadata_dropin" 'Requires=cloud-compose-metadata-firew
 assert_contains "$docker_metadata_dropin" 'After=cloud-compose-metadata-firewall-pre.service'
 assert_contains "$metadata_pre_unit" 'Before=docker.service'
 assert_contains "$metadata_pre_unit" 'WantedBy=multi-user.target'
-assert_contains "$metadata_pre_unit" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh configure-metadata-firewall.sh pre-docker'
+assert_contains "$metadata_pre_unit" 'ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh configure-metadata-firewall.sh pre-docker'
 assert_contains "$unit_dir/cloud-compose-overlay.service" 'Before=docker.service cloud-compose.service'
-assert_contains "$unit_dir/cloud-compose-overlay.service" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh mount-overlays.sh'
+assert_contains "$unit_dir/cloud-compose-overlay.service" 'ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh mount-overlays.sh'
 for root_home_unit in \
   cloud-compose-docker-prune.service \
   cloud-compose-key-rotation.service \
@@ -132,7 +132,7 @@ for root_home_unit in \
   if grep -Eq '^Exec(Start|StartPre|StartPost|Stop|StopPost)=/bin/bash /home/cloud-compose/' "$unit_dir/$root_home_unit"; then
     fail "$root_home_unit executes historically writable home code without the root-owned launcher"
   fi
-  assert_contains "$unit_dir/$root_home_unit" '/usr/local/libexec/cloud-compose/run-root-program.sh'
+  assert_contains "$unit_dir/$root_home_unit" '/etc/cloud-compose/libexec/run-root-program.sh'
 done
 if grep -Eq '^(After|Before|BindsTo|PartOf|Requires|Requisite|Wants)=.*cloud-compose-bootstrap\\.service' \
   "$unit_dir/cloud-compose.service"; then

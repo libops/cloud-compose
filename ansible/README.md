@@ -68,7 +68,7 @@ The provider-neutral disaster-recovery interface is shared with Terraform:
 cloud_compose_runtime:
   disaster_recovery:
     required: true
-    driver_path: /usr/local/libexec/cloud-compose/offhost-backup-driver
+    driver_path: /etc/cloud-compose/libexec/offhost-backup-driver
 ```
 
 Install that executable and its credentials separately as root. The role

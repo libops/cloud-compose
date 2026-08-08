@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source /usr/local/libexec/cloud-compose/bootstrap-security.sh
+source /etc/cloud-compose/libexec/bootstrap-security.sh
 
 cloud_compose_bootstrap_require_root
 if ! cloud_compose_bootstrap_marker_ready; then

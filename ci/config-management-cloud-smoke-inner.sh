@@ -197,12 +197,12 @@ test -x /home/cloud-compose/down
 test -x /home/cloud-compose/rollout
 test -x /home/cloud-compose/run.sh
 test -x /home/cloud-compose/start-cloud-compose-bootstrap.sh
-test -x /usr/local/libexec/cloud-compose/bootstrap-required.sh
-test -x /usr/local/libexec/cloud-compose/bootstrap-security.sh
-test -x /usr/local/libexec/cloud-compose/run-bootstrap.sh
-test -x /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh
-test -x /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh
-test -x /usr/local/libexec/cloud-compose/run-root-program.sh
+test -x /etc/cloud-compose/libexec/bootstrap-required.sh
+test -x /etc/cloud-compose/libexec/bootstrap-security.sh
+test -x /etc/cloud-compose/libexec/run-bootstrap.sh
+test -x /etc/cloud-compose/libexec/require-bootstrap-ready.sh
+test -x /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+test -x /etc/cloud-compose/libexec/run-root-program.sh
 python3 -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
 python3 -m json.tool /home/cloud-compose/application-env.json >/dev/null
 

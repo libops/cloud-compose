@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source /usr/local/libexec/cloud-compose/bootstrap-security.sh
+source /etc/cloud-compose/libexec/bootstrap-security.sh
 
 program="${1:-}"
 if [[ -z "$program" ]]; then

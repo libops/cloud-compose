@@ -9,4 +9,4 @@ cloud_compose:
   runtime:
     disaster_recovery:
       required: true
-      driver_path: /usr/local/libexec/cloud-compose/../untrusted
+      driver_path: /etc/cloud-compose/libexec/../untrusted

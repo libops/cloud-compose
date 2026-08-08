@@ -19,7 +19,7 @@ func TestDisasterRecoveryInputParity(t *testing.T) {
 		content := readRepositoryFile(t, root, relativePath)
 		requireContains(t, content, "disaster_recovery = optional(object({", relativePath+" disaster-recovery object")
 		requireContains(t, content, "required    = optional(bool, false)", relativePath+" required switch")
-		requireContains(t, content, `driver_path = optional(string, "/usr/local/libexec/cloud-compose/offhost-backup-driver")`, relativePath+" driver default")
+		requireContains(t, content, `driver_path = optional(string, "/etc/cloud-compose/libexec/offhost-backup-driver")`, relativePath+" driver default")
 		requireContains(t, content, "runtime.disaster_recovery.driver_path must be a safe absolute path", relativePath+" path validation")
 	}
 
@@ -53,12 +53,12 @@ func TestDisasterRecoveryReceiptAndRestoreContracts(t *testing.T) {
 	restore := readRepositoryFile(t, root, "rootfs/home/cloud-compose/restore-test.sh")
 	validationContract := strings.Join([]string{
 		library,
-		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-backup-receipt.jq"),
-		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-restore-proof.jq"),
+		readRepositoryFile(t, root, "rootfs/etc/cloud-compose/jq/dr-validate-backup-receipt.jq"),
+		readRepositoryFile(t, root, "rootfs/etc/cloud-compose/jq/dr-validate-restore-proof.jq"),
 	}, "\n")
 	backupContract := strings.Join([]string{
 		backup,
-		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/offhost-build-application-coverage.jq"),
+		readRepositoryFile(t, root, "rootfs/etc/cloud-compose/jq/offhost-build-application-coverage.jq"),
 	}, "\n")
 
 	for marker, label := range map[string]string{

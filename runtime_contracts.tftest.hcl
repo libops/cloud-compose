@@ -161,7 +161,7 @@ run "public_entrypoint_accepts_provider_neutral_disaster_recovery_driver" {
     runtime = {
       disaster_recovery = {
         required    = true
-        driver_path = "/usr/local/libexec/cloud-compose/acme-offhost"
+        driver_path = "/etc/cloud-compose/libexec/acme-offhost"
       }
     }
   }
@@ -169,7 +169,7 @@ run "public_entrypoint_accepts_provider_neutral_disaster_recovery_driver" {
   assert {
     condition = (
       local.runtime.disaster_recovery.required &&
-      local.runtime.disaster_recovery.driver_path == "/usr/local/libexec/cloud-compose/acme-offhost"
+      local.runtime.disaster_recovery.driver_path == "/etc/cloud-compose/libexec/acme-offhost"
     )
     error_message = "The public entrypoint must preserve provider-neutral DR controls."
   }

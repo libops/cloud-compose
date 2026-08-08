@@ -89,20 +89,24 @@ locals {
     { for file in local.base_files : file => "${local.rootfs}/${file}" },
     { for file in local.embedded_additional_files : file => "${local.additional_rootfs}/${file}" }
   )
+  rootfs_file_permissions = {
+    for file in setunion(local.base_files, local.additional_files) :
+    file => endswith(file, ".sh") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
+  }
 
   archive_additional_rootfs_commands = join("\n", [
     for file in local.additional_files : <<-EOT
       destination="$(printf '%s' '${base64encode("/${file}")}' | base64 -d)"
       install -d "$(dirname "$destination")"
       printf '%s' '${filebase64("${local.additional_rootfs}/${file}")}' | base64 -d >"$destination"
-      chmod ${endswith(file, ".sh") ? "0755" : "0644"} "$destination"
+      chmod ${local.rootfs_file_permissions[file]} "$destination"
     EOT
   ])
 
   write_files_content = join("\n", [
     for file, fullpath in local.all_files : <<-EOT
       - path: ${jsonencode(startswith(file, "mnt/disks/") ? "/var/lib/cloud-compose/mounted-rootfs/${file}" : "/${file}")}
-        permissions: ${jsonencode(endswith(file, ".sh") ? "0755" : "0644")}
+        permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(fullpath)))}
 EOT
@@ -309,6 +313,7 @@ rootfs_archive_prepare_command_raw = <<-EOT
       echo "rootfs directory not found in verified archive $archive_url" >&2
       exit 1
     fi
+    chown -hR 0:0 -- "$rootfs_dir"
     filesystem_prep_source="$rootfs_dir/home/cloud-compose/prepare-filesystem.sh"
     filesystem_persist_source="$rootfs_dir/home/cloud-compose/persist-filesystems.sh"
     if [ ! -f "$filesystem_prep_source" ] || [ ! -f "$filesystem_persist_source" ]; then
@@ -333,7 +338,7 @@ rootfs_archive_install_command = local.rootfs_archive_url != "" ? local.rootfs_a
 cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
   CLOUD_COMPOSE_SSH_KEYS         = var.cloud_compose_ssh_keys
   SSH_USERS                      = var.ssh_users
-  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootfs}/usr/local/sbin/cloud-compose-diagnostics.sh")
+  DIAGNOSTICS_SCRIPT_B64         = filebase64("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")
   DATA_DEVICE                    = var.data_device
   VOLUMES_DEVICE                 = var.volumes_device
   WRITE_FILES_CONTENT            = local.write_files_content

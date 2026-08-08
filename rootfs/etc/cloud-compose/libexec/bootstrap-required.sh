@@ -3,7 +3,7 @@
 set -uo pipefail
 
 # shellcheck disable=SC1091
-if ! source /usr/local/libexec/cloud-compose/bootstrap-security.sh; then
+if ! source /etc/cloud-compose/libexec/bootstrap-security.sh; then
     echo "Cloud Compose bootstrap security helper could not be loaded" >&2
     exit 255
 fi

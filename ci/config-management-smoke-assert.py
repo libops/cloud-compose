@@ -12,7 +12,10 @@ from pathlib import Path
 
 
 RUNTIME_HOME = Path("/home/cloud-compose")
-BOOTSTRAP_LIBEXEC = Path("/usr/local/libexec/cloud-compose")
+PRIVILEGED_PROGRAM_ROOT = Path("/etc/cloud-compose")
+DIAGNOSTICS_PROGRAM = PRIVILEGED_PROGRAM_ROOT / "bin/cloud-compose-diagnostics.sh"
+BOOTSTRAP_LIBEXEC = Path("/etc/cloud-compose/libexec")
+JQ_PROGRAM_DIR = PRIVILEGED_PROGRAM_ROOT / "jq"
 
 
 def load_runtime_env(path: Path) -> dict[str, str]:
@@ -52,9 +55,16 @@ def assert_runtime_files() -> None:
         BOOTSTRAP_LIBEXEC / "require-bootstrap-ready.sh",
         BOOTSTRAP_LIBEXEC / "run-root-program.sh",
         BOOTSTRAP_LIBEXEC / "start-cloud-compose-bootstrap.sh",
+        DIAGNOSTICS_PROGRAM,
     ]:
         assert path.exists(), path
         assert os.access(path, os.X_OK), path
+
+    for path in [
+        JQ_PROGRAM_DIR / "diagnostics-validate-compose-projects.jq",
+        JQ_PROGRAM_DIR / "offhost-validate-manifest.jq",
+    ]:
+        assert path.exists(), path
 
     cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
     for path, expected_mode in {
@@ -84,6 +94,36 @@ def assert_runtime_files() -> None:
             oct(stat.S_IMODE(metadata.st_mode)),
         )
 
+    for path in [
+        PRIVILEGED_PROGRAM_ROOT,
+        DIAGNOSTICS_PROGRAM.parent,
+        BOOTSTRAP_LIBEXEC,
+        JQ_PROGRAM_DIR,
+    ]:
+        metadata = path.stat()
+        assert metadata.st_uid == 0, (path, metadata.st_uid)
+        assert metadata.st_gid == 0, (path, metadata.st_gid)
+        assert stat.S_IMODE(metadata.st_mode) == 0o755, (
+            path,
+            oct(stat.S_IMODE(metadata.st_mode)),
+        )
+
+    diagnostics_metadata = DIAGNOSTICS_PROGRAM.stat()
+    assert diagnostics_metadata.st_uid == 0
+    assert diagnostics_metadata.st_gid == 0
+    assert stat.S_IMODE(diagnostics_metadata.st_mode) == 0o755
+
+    jq_programs = list(JQ_PROGRAM_DIR.glob("*.jq"))
+    assert jq_programs
+    for path in jq_programs:
+        metadata = path.stat()
+        assert metadata.st_uid == 0, (path, metadata.st_uid)
+        assert metadata.st_gid == 0, (path, metadata.st_gid)
+        assert stat.S_IMODE(metadata.st_mode) == 0o644, (
+            path,
+            oct(stat.S_IMODE(metadata.st_mode)),
+        )
+
 
 def assert_ansible_runtime() -> None:
     env = load_runtime_env(RUNTIME_HOME / ".env")
@@ -97,7 +137,7 @@ def assert_ansible_runtime() -> None:
     assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
     assert (
         env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"]
-        == "/usr/local/libexec/cloud-compose/ansible-offhost"
+        == "/etc/cloud-compose/libexec/ansible-offhost"
     )
     assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/isle-prod"
     assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
@@ -203,7 +243,7 @@ def assert_salt_runtime(
         assert env["CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED"] == "false"
         assert (
             env["CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER"]
-            == "/usr/local/libexec/cloud-compose/salt-offhost"
+            == "/etc/cloud-compose/libexec/salt-offhost"
         )
         assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
             "sitectl": "v1.8.2",

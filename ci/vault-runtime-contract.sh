@@ -181,9 +181,9 @@ grep -Fq 'ExecStartPre=/bin/bash /home/cloud-compose/assert-vault-ready.sh' \
     "$repo_root/rootfs/etc/systemd/system/cloud-compose.service" || fail "app service lacks a Vault readiness gate"
 vault_unit="$repo_root/rootfs/etc/systemd/system/cloud-compose-vault-agent.service"
 for readiness_command in \
-    'ExecStartPre=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh vault-agent-readiness.sh prepare' \
-    'ExecStartPost=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh vault-agent-readiness.sh wait' \
-    'ExecStopPost=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh vault-agent-readiness.sh clear'; do
+    'ExecStartPre=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh prepare' \
+    'ExecStartPost=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh wait' \
+    'ExecStopPost=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh clear'; do
     grep -Fq "$readiness_command" "$vault_unit" || \
         fail "Vault unit does not route readiness through the trusted root launcher: $readiness_command"
 done

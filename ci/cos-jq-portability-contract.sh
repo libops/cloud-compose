@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime_program_roots=(
     "$repo_root/rootfs/home/cloud-compose"
-    "$repo_root/rootfs/usr/local/share/cloud-compose/jq"
+    "$repo_root/rootfs/etc/cloud-compose/jq"
 )
 regex_call_pattern='(^|[^[:alnum:]_])(test|match|capture|scan|splits|sub|gsub)[[:space:]]*\('
 nul_contains_pattern='contains[[:space:]]*\([[:space:]]*"\\u0000"[[:space:]]*\)'

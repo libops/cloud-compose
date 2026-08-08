@@ -47,7 +47,7 @@ grep -Fq "provider_tag_cleanup gcp-wp \"\$run_id\"" "$script" ||
   fail "upgrade runner does not finish cleanup with the verified provider sweep"
 grep -Fq 'target_env gcp-wp' "$script" ||
   fail "upgrade cleanup does not load the concrete GCP WordPress target environment"
-grep -Fq 'readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"' "$shared_smoke" ||
+grep -Fq 'readonly diagnostics_program="/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"' "$shared_smoke" ||
   fail "shared smoke diagnostics do not use the checked-in privileged program"
 for diagnostics_command in state status dump; do
   grep -Fq "sudo -n \${diagnostics_program} ${diagnostics_command}" "$shared_smoke" ||
@@ -175,7 +175,7 @@ baseline_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$tmp/baseline
   fail "baseline cloud-init does not execute fixture initcmd before run.sh"
 
 current_bootstrap_line="$(
-  grep -nF 'bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh' \
+  grep -nF 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
     "$repo_root/templates/cloud-init.yml" |
     cut -d: -f1 || true
 )"

@@ -144,7 +144,7 @@
 {% set ignored = invalid_runtime_inputs.append('Vault Agent is currently supported only by Terraform providers; set vault.agent_enabled=false for Salt') %}
 {% endif %}
 {% set offhost_backup_required = disaster_recovery.get('required', False) %}
-{% set offhost_backup_driver = disaster_recovery.get('driver_path', '/usr/local/libexec/cloud-compose/offhost-backup-driver') %}
+{% set offhost_backup_driver = disaster_recovery.get('driver_path', '/etc/cloud-compose/libexec/offhost-backup-driver') %}
 {% if offhost_backup_required is not boolean %}
 {% set ignored = invalid_runtime_inputs.append('runtime.disaster_recovery.required must be a boolean') %}
 {% endif %}
@@ -658,6 +658,19 @@ cloud-compose-rootfs:
     - require:
       - user: cloud-compose-user
 
+cloud-compose-privileged-program-directories:
+  file.directory:
+    - names:
+      - /etc/cloud-compose
+      - /etc/cloud-compose/bin
+      - /etc/cloud-compose/jq
+      - /etc/cloud-compose/libexec
+    - user: root
+    - group: root
+    - mode: '0755'
+    - require:
+      - file: cloud-compose-rootfs
+
 cloud-compose-lifecycle-lock:
   cmd.run:
     - name: systemd-tmpfiles --create /etc/tmpfiles.d/cloud-compose.conf
@@ -673,10 +686,19 @@ cloud-compose-lifecycle-lock:
 
 cloud-compose-rootfs-script-modes:
   cmd.run:
-    - name: find /home/cloud-compose /usr/local/libexec/cloud-compose -maxdepth 1 -type f -name '*.sh' -exec chown root:root {} + -exec chmod 0755 {} +
-    - unless: test -z "$(find /home/cloud-compose /usr/local/libexec/cloud-compose -maxdepth 1 -type f -name '*.sh' \( ! -user root -o ! -group root -o ! -perm 0755 \) -print -quit)"
+    - name: find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' -exec chown root:root {} + -exec chmod 0755 {} +
+    - unless: test -z "$(find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' \( ! -user root -o ! -group root -o ! -perm 0755 \) -print -quit)"
     - require:
       - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
+cloud-compose-rootfs-jq-modes:
+  cmd.run:
+    - name: find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' -exec chown root:root {} + -exec chmod 0644 {} +
+    - unless: test -z "$(find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
 
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
 cloud-compose-lifecycle-{{ lifecycle }}:
@@ -764,7 +786,7 @@ cloud-compose-systemd-reload:
 {% if rollout_enabled is sameas true %}
 cloud-compose-rollout-service:
   cmd.run:
-    - name: bash /usr/local/libexec/cloud-compose/run-root-program.sh deploy-rollout.sh
+    - name: bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh
     - require:
       - file: cloud-compose-env
       - file: cloud-compose-application-env
@@ -793,8 +815,8 @@ cloud-compose-clear-bootstrap-marker:
 {% if run_bootstrap is sameas true %}
 cloud-compose-bootstrap:
   cmd.run:
-    - name: bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh
-    - unless: bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh
+    - name: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+    - unless: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
     - require:
 {% if install_packages %}
       - service: cloud-compose-docker
@@ -804,6 +826,7 @@ cloud-compose-bootstrap:
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
+      - cmd: cloud-compose-rootfs-jq-modes
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}
 {% endfor %}

@@ -8,8 +8,8 @@ readonly PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 readonly bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"
-readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"
-readonly jq_program_dir="/usr/local/share/cloud-compose/jq"
+readonly diagnostics_program="/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"
+readonly jq_program_dir="/etc/cloud-compose/jq"
 readonly process_pattern='[/]home/cloud-compose/run[.]sh|[/]home/cloud-compose/[h]ost-conf[.]sh|[/]home/cloud-compose/[h]ost-init[.]sh|[/]home/cloud-compose/[a]pp-init[.]sh|[/]home/cloud-compose/[i]nstall-dependencies|[a]pt-get|[r]pm-ostree|[d]ocker run|[s]itectl|[g]it clone'
 
 usage() {

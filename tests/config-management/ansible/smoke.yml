@@ -14,7 +14,7 @@
     cloud_compose_runtime:
       disaster_recovery:
         required: false
-        driver_path: /usr/local/libexec/cloud-compose/ansible-offhost
+        driver_path: /etc/cloud-compose/libexec/ansible-offhost
       extra_env:
         BASH_ENV: /tmp/cloud-compose-ansible-untrusted-bash-env
         LD_PRELOAD: /tmp/cloud-compose-ansible-untrusted-preload.so
@@ -100,7 +100,7 @@
           - >-
             'CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED="false"' in (cloud_compose_env_file.content | b64decode)
           - >-
-            'CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="/usr/local/libexec/cloud-compose/ansible-offhost"' in (cloud_compose_env_file.content | b64decode)
+            'CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="/etc/cloud-compose/libexec/ansible-offhost"' in (cloud_compose_env_file.content | b64decode)
           - >-
             'DOCKER_COMPOSE_DIR="/mnt/disks/data/libops/isle/isle-prod"' in (cloud_compose_env_file.content | b64decode)
           - >-

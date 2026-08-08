@@ -535,13 +535,14 @@ run "renders_verified_archive_before_downstream_overlay" {
   command = plan
 
   variables {
-    name                  = "gcp-contract"
-    project_id            = "test-project"
-    project_number        = "123456789"
-    docker_compose_repo   = "https://github.com/libops/wp.git"
-    rootfs                = "testdata/rootfs"
-    rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz?literal=$(id)"
-    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    name                       = "gcp-contract"
+    project_id                 = "test-project"
+    project_number             = "123456789"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    rootfs_archive_url         = "https://example.invalid/cloud-compose.tar.gz?literal=$(id)"
+    rootfs_archive_sha256      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
     extra_env = {
       NGINX_CLIENT_MAX_BODY_SIZE = "512m"
       PHP_UPLOAD_MAX_FILESIZE    = "512M"
@@ -561,10 +562,10 @@ run "renders_verified_archive_before_downstream_overlay" {
 
   assert {
     condition = can(regex(
-      "(?s)cp -a \\\"\\$rootfs_dir\\\"/\\. /.*cp -a \\\"\\$overlay_dir\\\"/\\. /",
+      "(?s)sha256sum -c -.*tar --no-same-owner -xzf \\\"\\$tmp/rootfs\\.tar\\.gz\\\".*chown -hR 0:0 -- \\\"\\$rootfs_dir\\\".*cp -a \\\"\\$rootfs_dir\\\"/\\. /.*cp -a \\\"\\$overlay_dir\\\"/\\. /",
       local.cloud_init_yaml,
     ))
-    error_message = "The consumer rootfs overlay must be applied after the verified base archive."
+    error_message = "The verified base archive must be extracted ownership-safely, normalized to root, and installed before the consumer rootfs overlay."
   }
 
   assert {
@@ -580,6 +581,51 @@ run "renders_verified_archive_before_downstream_overlay" {
       )
     )
     error_message = "The downstream overlay and isolated application environment data must be present in cloud-init."
+  }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose-overlay-marker\"\n  permissions: \"0644\"",
+      )
+    )
+    error_message = "Archive-backed GCP overlays must make only the configured off-host backup driver executable."
+  }
+}
+
+run "renders_embedded_offhost_backup_driver_executable" {
+  command = plan
+
+  variables {
+    name                       = "gcp-embedded-driver-contract"
+    project_id                 = "test-project"
+    project_number             = "123456789"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
+  }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  permissions: \"0755\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose-overlay-marker\"\n  permissions: \"0644\"",
+      )
+    )
+    error_message = "Embedded GCP overlays must make only the configured off-host backup driver executable."
   }
 }
 

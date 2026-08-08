@@ -9,13 +9,13 @@ run "renders_provider_neutral_disaster_recovery_controls" {
     volumes_device             = "/dev/test-volumes"
     docker_compose_repo        = "https://github.com/libops/wp.git"
     offhost_backup_required    = true
-    offhost_backup_driver_path = "/usr/local/libexec/cloud-compose/acme-offhost"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/acme-offhost"
   }
 
   assert {
     condition = (
       local.host_env.CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED == "true" &&
-      local.host_env.CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER == "/usr/local/libexec/cloud-compose/acme-offhost"
+      local.host_env.CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER == "/etc/cloud-compose/libexec/acme-offhost"
     )
     error_message = "The Linux VM runtime must render only the required switch and operator-owned driver path."
   }
@@ -41,7 +41,7 @@ run "rejects_unsafe_disaster_recovery_driver_path" {
     volumes_device             = "/dev/test-volumes"
     docker_compose_repo        = "https://github.com/libops/wp.git"
     offhost_backup_required    = true
-    offhost_backup_driver_path = "/usr/local/libexec/cloud-compose/../untrusted"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/../untrusted"
   }
 
   expect_failures = [var.offhost_backup_driver_path]

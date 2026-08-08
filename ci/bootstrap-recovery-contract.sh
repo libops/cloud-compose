@@ -9,11 +9,11 @@ start_bootstrap="$repo_root/rootfs/home/cloud-compose/start-cloud-compose-bootst
 run_script="$repo_root/rootfs/home/cloud-compose/run.sh"
 app_init="$repo_root/rootfs/home/cloud-compose/app-init.sh"
 run_bootstrap="$repo_root/rootfs/home/cloud-compose/run-bootstrap.sh"
-bootstrap_security="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh"
-bootstrap_required="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-required.sh"
-bootstrap_entrypoint="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-bootstrap.sh"
-bootstrap_start_entrypoint="$repo_root/rootfs/usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh"
-bootstrap_readiness_gate="$repo_root/rootfs/usr/local/libexec/cloud-compose/require-bootstrap-ready.sh"
+bootstrap_security="$repo_root/rootfs/etc/cloud-compose/libexec/bootstrap-security.sh"
+bootstrap_required="$repo_root/rootfs/etc/cloud-compose/libexec/bootstrap-required.sh"
+bootstrap_entrypoint="$repo_root/rootfs/etc/cloud-compose/libexec/run-bootstrap.sh"
+bootstrap_start_entrypoint="$repo_root/rootfs/etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh"
+bootstrap_readiness_gate="$repo_root/rootfs/etc/cloud-compose/libexec/require-bootstrap-ready.sh"
 bootstrap_unit="$repo_root/rootfs/etc/systemd/system/cloud-compose-bootstrap.service"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -277,7 +277,7 @@ fi
 for cloud_init_template in \
     "$repo_root/templates/cloud-init.yml" \
     "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
-    assert_contains "$cloud_init_template" 'bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh'
+    assert_contains "$cloud_init_template" 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh'
     if grep -Fq 'bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1' \
         "$cloud_init_template"; then
         fail "cloud-init bypasses the retryable bootstrap unit"

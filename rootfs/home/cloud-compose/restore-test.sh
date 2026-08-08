@@ -5,7 +5,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
 dr_library_path="${CLOUD_COMPOSE_DR_LIBRARY_PATH:-$script_dir/disaster-recovery-lib.sh}"
-jq_program_dir="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/usr/local/share/cloud-compose/jq}"
+jq_program_dir="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/etc/cloud-compose/jq}"
 # shellcheck disable=SC1090
 source "$profile_path"
 CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir"

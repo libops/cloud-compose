@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"
+readonly diagnostics_program="/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"
 readonly smoke_healthcheck_program="/home/cloud-compose/smoke-healthcheck.sh"
 
 usage() {

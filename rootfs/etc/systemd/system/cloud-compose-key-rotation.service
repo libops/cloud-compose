@@ -6,7 +6,7 @@ RequiresMountsFor=/mnt/disks/data
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh rotate-keys-daily.sh
+ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh rotate-keys-daily.sh
 User=root
 Group=root
 TimeoutStartSec=1h

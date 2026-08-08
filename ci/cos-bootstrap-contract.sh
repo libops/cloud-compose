@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="${ROOT_DIR}/rootfs/home/cloud-compose/install-dependencies-cos.sh"
+BUILD_PROGRAM="${ROOT_DIR}/rootfs/etc/cloud-compose/libexec/build-cos-make.sh"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
@@ -21,28 +22,44 @@ if ! grep -Fqx 'ALPINE_BUILD_IMAGE="alpine:3.22@sha256:14358309a308569c32bdc37e2
     echo "COS bootstrap Alpine image is not digest pinned" >&2
     exit 1
 fi
-grep -Fq '"${alpine_mirror}/v3.22/main"' "$INSTALLER" || {
+grep -Fq '"${alpine_mirror}/v3.22/main"' "$BUILD_PROGRAM" || {
     echo "COS bootstrap Alpine main repository does not match the pinned image release" >&2
     exit 1
 }
-grep -Fq '"${alpine_mirror}/v3.22/community"' "$INSTALLER" || {
+grep -Fq '"${alpine_mirror}/v3.22/community"' "$BUILD_PROGRAM" || {
     echo "COS bootstrap Alpine community repository does not match the pinned image release" >&2
     exit 1
 }
-# Assert the literal command in the bootstrap script.
+# Assert the literal command in the checked-in build program.
 # shellcheck disable=SC2016
-if ! grep -Fq 'echo "${MAKE_SHA256}  /tmp/make.tar.gz" | sha256sum -c -' "$INSTALLER"; then
+if ! grep -Fq 'echo "${MAKE_SHA256}  /tmp/make.tar.gz" | sha256sum -c -' "$BUILD_PROGRAM"; then
     echo "COS bootstrap does not verify the GNU Make source archive" >&2
     exit 1
 fi
-checksum_line="$(grep -nF 'sha256sum -c -' "$INSTALLER" | head -n1)"
-archive_line="$(grep -nF 'tar -xzf /tmp/make.tar.gz' "$INSTALLER" | head -n1)"
+checksum_line="$(grep -nF 'sha256sum -c -' "$BUILD_PROGRAM" | head -n1)"
+archive_line="$(grep -nF 'tar -xzf /tmp/make.tar.gz' "$BUILD_PROGRAM" | head -n1)"
 if (( ${checksum_line%%:*} >= ${archive_line%%:*} )); then
     echo "COS bootstrap extracts GNU Make before checksum verification" >&2
     exit 1
 fi
 if grep -Eq '^[[:space:]]*--network[[:space:]]+host([[:space:]\\]|$)' "$INSTALLER"; then
     echo "COS bootstrap exposes third-party build code to the host network" >&2
+    exit 1
+fi
+[[ -x "$BUILD_PROGRAM" ]] || {
+    echo "COS checked-in Make build program is not executable" >&2
+    exit 1
+}
+grep -Fq -- '-v "${make_build_program}:/tmp/cloud-compose-build-cos-make.sh:ro"' "$INSTALLER" || {
+    echo "COS bootstrap does not mount its checked-in Make build program read-only" >&2
+    exit 1
+}
+grep -Fq '/bin/sh /tmp/cloud-compose-build-cos-make.sh; then' "$INSTALLER" || {
+    echo "COS bootstrap does not invoke its checked-in Make build program by path" >&2
+    exit 1
+}
+if grep -Eq '/bin/sh[[:space:]]+-[^[:space:]]*c[[:space:]]' "$INSTALLER"; then
+    echo "COS bootstrap still embeds a shell program in a command argument" >&2
     exit 1
 fi
 grep -Fq 'iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP' "$INSTALLER" || {
@@ -68,24 +85,24 @@ for mirror in \
     https://dl-cdn.alpinelinux.org/alpine \
     https://mirror.math.princeton.edu/pub/alpinelinux \
     https://mirror.fel.cvut.cz/alpine; do
-    grep -Fq "$mirror" "$INSTALLER" || {
+    grep -Fq "$mirror" "$BUILD_PROGRAM" || {
         echo "COS bootstrap is missing Alpine package mirror: $mirror" >&2
         exit 1
     }
 done
-grep -Fq 'for alpine_mirror in ${alpine_mirrors}; do' "$INSTALLER" || {
+grep -Fq 'for alpine_mirror in ${alpine_mirrors}; do' "$BUILD_PROGRAM" || {
     echo "COS bootstrap does not fail over between Alpine package mirrors" >&2
     exit 1
 }
-grep -Fq 'if apk update && apk add build-base curl make tar; then' "$INSTALLER" || {
+grep -Fq 'if apk update && apk add build-base curl make tar; then' "$BUILD_PROGRAM" || {
     echo "COS bootstrap does not validate an index before installing packages" >&2
     exit 1
 }
-grep -Fq 'All configured Alpine package mirrors failed' "$INSTALLER" || {
+grep -Fq 'All configured Alpine package mirrors failed' "$BUILD_PROGRAM" || {
     echo "COS bootstrap accepts exhaustion of all Alpine package mirrors" >&2
     exit 1
 }
-if grep -Fq -- '--allow-untrusted' "$INSTALLER"; then
+if grep -Fq -- '--allow-untrusted' "$BUILD_PROGRAM"; then
     echo "COS bootstrap disables Alpine package signature verification" >&2
     exit 1
 fi
@@ -97,7 +114,7 @@ retry_until_success() {
     "$@"
 }
 export DOCKER_CONFIG="$MOCK_DOCKER_CONFIG"
-install_cos_dependencies "$TEST_CLOUD_HOME" "" "$TEST_DOCKER_BIN"
+install_cos_dependencies "$TEST_CLOUD_HOME" "" "$TEST_DOCKER_BIN" "$TEST_BUILD_PROGRAM"
 EOF
 
 cat >"${BIN_DIR}/bash" <<'EOF'
@@ -156,6 +173,7 @@ PATH="${BIN_DIR}:$PATH" \
     TEST_CLOUD_HOME="$CLOUD_HOME" \
     TEST_DATA_DIR="$DATA_DIR" \
     TEST_DOCKER_BIN="${BIN_DIR}/docker" \
+    TEST_BUILD_PROGRAM="$BUILD_PROGRAM" \
     MOCK_DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
     MOCK_CALL_LOG="$CALL_LOG" \
     /bin/bash "$HARNESS"
@@ -163,6 +181,7 @@ PATH="${BIN_DIR}:$PATH" \
 grep -Fq "plugin:${DOCKER_CONFIG_DIR}/cli-plugins:${CLOUD_HOME}/install-docker-plugins.sh" "$CALL_LOG"
 grep -Fq "plugin:${CLOUD_HOME}/.docker/cli-plugins:${CLOUD_HOME}/install-docker-plugins.sh" "$CALL_LOG"
 grep -Fq 'alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce' "$CALL_LOG"
+grep -Fq "${BUILD_PROGRAM}:/tmp/cloud-compose-build-cos-make.sh:ro" "$CALL_LOG"
 [[ -x "${DATA_DIR}/make" ]]
 "${DATA_DIR}/make" --version | grep -Fq 'GNU Make 4.4.1'
 [[ -f "${DATA_DIR}/make.state" ]]
@@ -181,6 +200,7 @@ if PATH="${BIN_DIR}:$PATH" \
     TEST_CLOUD_HOME="$CLOUD_HOME" \
     TEST_DATA_DIR="$DATA_DIR" \
     TEST_DOCKER_BIN="${BIN_DIR}/docker" \
+    TEST_BUILD_PROGRAM="$BUILD_PROGRAM" \
     MOCK_DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
     MOCK_CALL_LOG="$CALL_LOG" \
     /bin/bash "$HARNESS" >/dev/null 2>&1; then
@@ -201,6 +221,7 @@ if PATH="${BIN_DIR}:$PATH" \
     TEST_CLOUD_HOME="$CLOUD_HOME" \
     TEST_DATA_DIR="$DATA_DIR" \
     TEST_DOCKER_BIN="${BIN_DIR}/docker" \
+    TEST_BUILD_PROGRAM="$BUILD_PROGRAM" \
     MOCK_DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
     MOCK_CALL_LOG="$CALL_LOG" \
     /bin/bash "$HARNESS" >/dev/null 2>&1; then

@@ -18,7 +18,7 @@ valid_make_binary() {
 }
 
 # This function is sourced by the COS bootstrap contract, which supplies all
-# three arguments even though the executable entrypoint below uses defaults.
+# four arguments even though the executable entrypoint below uses defaults.
 # shellcheck disable=SC2120
 install_cos_dependencies() {
     local cloud_compose_home="${1:-/home/cloud-compose}"
@@ -27,6 +27,7 @@ install_cos_dependencies() {
     # PATH consumes the published symlink.
     local tool_state_dir="${2:-${COS_TOOL_STATE_DIR:-/mnt/disks/data/cloud-compose-tools}}"
     local docker_bin="${3:-/usr/bin/docker}"
+    local make_build_program="${4:-/etc/cloud-compose/libexec/build-cos-make.sh}"
     local make_path pending_make_path make_state_path make_state_tmp make_sha
     local tool_mount_options installer_uid installer_gid
 
@@ -81,6 +82,10 @@ install_cos_dependencies() {
                 return 1
             fi
         fi
+        if [[ -L "$make_build_program" || ! -f "$make_build_program" || ! -x "$make_build_program" ]]; then
+            echo "COS Make build program is missing or unsafe: $make_build_program" >&2
+            return 1
+        fi
         rm -f -- "$pending_make_path"
         # The GCP metadata deny policy is installed before this container runs.
         # Keep the build on Docker's isolated bridge: `--network host` would
@@ -89,50 +94,9 @@ install_cos_dependencies() {
         # shellcheck disable=SC2016
         if ! retry_until_success "$docker_bin" run --rm \
             -v "${tool_state_dir}:/out" \
+            -v "${make_build_program}:/tmp/cloud-compose-build-cos-make.sh:ro" \
             "$ALPINE_BUILD_IMAGE" \
-            /bin/sh -euxc '
-                MAKE_VERSION="4.4.1"
-                MAKE_SHA256="dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3"
-
-                # A single Alpine CDN outage must not make a healthy VM
-                # replacement fail. These are HTTPS endpoints from the Alpine
-                # official mirror list; apk still verifies the signed indexes
-                # and packages with the keys baked into the pinned image.
-                alpine_mirrors="
-                    https://dl-cdn.alpinelinux.org/alpine
-                    https://mirror.math.princeton.edu/pub/alpinelinux
-                    https://mirror.fel.cvut.cz/alpine
-                "
-                packages_installed=false
-                for alpine_mirror in ${alpine_mirrors}; do
-                    printf "%s\n%s\n" \
-                        "${alpine_mirror}/v3.22/main" \
-                        "${alpine_mirror}/v3.22/community" \
-                        >/etc/apk/repositories
-                    rm -f /var/cache/apk/*
-                    if apk update && apk add build-base curl make tar; then
-                        packages_installed=true
-                        break
-                    fi
-                    echo "Alpine package mirror failed: ${alpine_mirror}" >&2
-                done
-                if [ "${packages_installed}" != true ]; then
-                    echo "All configured Alpine package mirrors failed" >&2
-                    exit 1
-                fi
-                curl -fsSL --proto "=https" --proto-redir "=https" --tlsv1.2 \
-                    --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 900 \
-                    --connect-timeout 10 --max-time 300 \
-                    "https://ftp.gnu.org/gnu/make/make-${MAKE_VERSION}.tar.gz" -o /tmp/make.tar.gz
-                echo "${MAKE_SHA256}  /tmp/make.tar.gz" | sha256sum -c -
-                tar -xzf /tmp/make.tar.gz -C /tmp
-                cd "/tmp/make-${MAKE_VERSION}"
-                LDFLAGS="-static" ./configure --disable-nls
-                make -j2
-                install -m 0755 make /out/.cloud-compose-make.pending
-                /out/.cloud-compose-make.pending --version | grep -Fqm 1 "GNU Make ${MAKE_VERSION}"
-                mv -f /out/.cloud-compose-make.pending /out/make
-            '; then
+            /bin/sh /tmp/cloud-compose-build-cos-make.sh; then
             rm -f -- "$pending_make_path"
             return 1
         fi
