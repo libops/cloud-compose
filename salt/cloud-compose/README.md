@@ -92,7 +92,9 @@ The formula installs lifecycle dispatchers as `root:cloud-compose` mode `0750`
 and the root-consumed `.env`, project/application JSON, and managed-artifact
 manifest as `root:cloud-compose` mode `0640`. Reapplying the state restores that
 ownership boundary while leaving application checkout directories writable by
-the `cloud-compose` account.
+the `cloud-compose` account. Before a requested runtime bootstrap, the formula
+invokes the same checked-in bootstrap path hardener used by the Terraform
+modules.
 
 The normal on-prem shape is one app per machine. Use pillar targeting to give
 each minion its own `cloud_compose` values, then apply the same

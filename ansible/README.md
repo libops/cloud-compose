@@ -88,7 +88,8 @@ The role installs lifecycle dispatchers as `root:cloud-compose` mode `0750` and
 the root-consumed `.env`, project/application JSON, and managed-artifact
 manifest as `root:cloud-compose` mode `0640`. Reapplying the role restores that
 ownership boundary while leaving app checkout directories writable by the
-`cloud-compose` account.
+`cloud-compose` account. Before a requested runtime bootstrap, the role invokes
+the same checked-in bootstrap path hardener used by the Terraform modules.
 
 The normal on-prem shape is one app per machine. Put each machine in the
 `cloud_compose` inventory group and set that host's template/runtime variables.

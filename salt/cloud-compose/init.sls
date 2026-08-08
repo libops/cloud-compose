@@ -775,6 +775,22 @@ cloud-compose-managed-runtime-artifacts:
     - require:
       - file: cloud-compose-rootfs
 
+{% if run_bootstrap is sameas true %}
+cloud-compose-bootstrap-paths-hardened:
+  cmd.run:
+    - name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
+    - require:
+      - file: cloud-compose-env
+      - file: cloud-compose-application-env
+      - file: cloud-compose-project-manifest
+      - file: cloud-compose-managed-runtime-artifacts
+      - cmd: cloud-compose-rootfs-script-modes
+      - cmd: cloud-compose-rootfs-jq-modes
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+      - file: cloud-compose-lifecycle-{{ lifecycle }}
+{% endfor %}
+{% endif %}
+
 {% if reload_systemd %}
 cloud-compose-systemd-reload:
   module.run:
@@ -827,6 +843,7 @@ cloud-compose-bootstrap:
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
       - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-bootstrap-paths-hardened
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}
 {% endfor %}

@@ -644,6 +644,11 @@
     mode: "0640"
   no_log: true
 
+- name: Harden trusted cloud-compose bootstrap paths
+  ansible.builtin.command:
+    cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
+  when: cloud_compose_run_bootstrap | bool
+
 - name: Reload systemd units
   ansible.builtin.systemd:
     daemon_reload: true

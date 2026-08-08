@@ -27,6 +27,10 @@ if grep -Fq 'cmd: bash "{{ cloud_compose_home }}/' "$ansible_tasks" || \
   grep -Fq 'cmd: bash /home/cloud-compose/' "$ansible_tasks"; then
   contract_fail "Ansible rollout executes a root program directly from the runtime home"
 fi
+grep -Fq 'cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$ansible_tasks" || \
+  contract_fail "Ansible does not apply the shared bootstrap path hardener"
+grep -Fq -- '- name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$salt_state" || \
+  contract_fail "Salt does not apply the shared bootstrap path hardener"
 
 grep -Fq 'configure-metadata-firewall.sh | deploy-rollout.sh | docker-prune.sh' "$root_program_runner" || \
   contract_fail "the trusted root-program runner does not allow deploy-rollout.sh"
