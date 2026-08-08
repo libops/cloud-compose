@@ -51,6 +51,11 @@ func TestDisasterRecoveryReceiptAndRestoreContracts(t *testing.T) {
 	library := readRepositoryFile(t, root, "rootfs/home/cloud-compose/disaster-recovery-lib.sh")
 	backup := readRepositoryFile(t, root, "rootfs/home/cloud-compose/offhost-backup.sh")
 	restore := readRepositoryFile(t, root, "rootfs/home/cloud-compose/restore-test.sh")
+	validationContract := strings.Join([]string{
+		library,
+		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-backup-receipt.jq"),
+		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-restore-proof.jq"),
+	}, "\n")
 
 	for marker, label := range map[string]string{
 		`env -i HOME=/root`:                         "clean driver environment",
@@ -66,7 +71,7 @@ func TestDisasterRecoveryReceiptAndRestoreContracts(t *testing.T) {
 		`.recovery_destroyed == true`:               "recovery cleanup proof",
 		`.source_receipt_sha256 == $receipt_sha256`: "source receipt binding",
 	} {
-		requireContains(t, library, marker, label)
+		requireContains(t, validationContract, marker, label)
 	}
 
 	for marker, label := range map[string]string{
