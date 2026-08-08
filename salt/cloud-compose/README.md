@@ -137,7 +137,7 @@ cloud_compose:
     sitectl:
       environment: production
       package_versions:
-        sitectl-isle: v1.0.0
+        sitectl-isle: v1.5.0
 ```
 
 Apply:

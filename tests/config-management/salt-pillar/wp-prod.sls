@@ -46,8 +46,8 @@ cloud_compose:
     sitectl:
       environment: production
       package_versions:
-        sitectl: v1.0.0
-        sitectl-wp: v1.0.0
+        sitectl: v1.8.2
+        sitectl-wp: v2.0.0
     managed_runtime:
       enabled: false
       internal_services_enabled: false

@@ -115,7 +115,7 @@ all:
             sitectl:
               environment: production
               package_versions:
-                sitectl-isle: v1.0.0
+                sitectl-isle: v1.5.0
         wp-prod.example.edu:
           ansible_user: debian
           cloud_compose_name: wp-prod
