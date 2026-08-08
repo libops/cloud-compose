@@ -8,5 +8,5 @@ After=docker.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=/bin/bash /home/cloud-compose/docker-prune.sh
+ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh docker-prune.sh
 TimeoutStartSec=30min

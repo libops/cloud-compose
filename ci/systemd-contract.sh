@@ -6,6 +6,8 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 unit_dir="$repo_root/rootfs/etc/systemd/system"
 diagnostics_program="$repo_root/rootfs/usr/local/sbin/cloud-compose-diagnostics.sh"
 smoke_healthcheck_program="$repo_root/rootfs/home/cloud-compose/smoke-healthcheck.sh"
+bootstrap_security="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh"
+root_program_runner="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-root-program.sh"
 
 fail() {
   echo "systemd contract: $*" >&2
@@ -28,6 +30,8 @@ assert_contains() {
 [[ -f "$unit_dir/cloud-compose-overlay.service" ]] || fail "Docker overlay mount unit is missing"
 [[ -f "$unit_dir/cloud-compose-bootstrap.service" ]] || fail "retryable bootstrap unit is missing"
 [[ -x "$diagnostics_program" ]] || fail "checked-in Cloud Compose diagnostics program is missing or not executable"
+[[ -f "$bootstrap_security" ]] || fail "root-owned bootstrap security helper is missing"
+[[ -f "$root_program_runner" ]] || fail "root-owned service launcher is missing"
 [[ -x "$smoke_healthcheck_program" ]] || fail "checked-in smoke healthcheck wrapper is missing or not executable"
 [[ -f "$unit_dir/cloud-compose-internal-services.service" && -f "$unit_dir/cloud-compose-internal-services.timer" ]] || \
   fail "namespaced internal-services units are missing"
@@ -41,8 +45,11 @@ assert_contains "$unit_dir/cloud-compose.service" 'After=network-online.target d
 assert_contains "$unit_dir/cloud-compose.service" 'ExecStartPre=/bin/bash /home/cloud-compose/assert-app-initialized.sh'
 assert_contains "$unit_dir/cloud-compose.service" 'Restart=on-failure'
 assert_contains "$unit_dir/cloud-compose.service" 'RestartSec=30s'
-assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ConditionPathExists=!/home/cloud-compose/.cloud-compose-bootstrap-complete'
-assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecStart=/bin/bash /home/cloud-compose/run-bootstrap.sh'
+if grep -Fq 'ConditionPathExists=' "$unit_dir/cloud-compose-bootstrap.service"; then
+  fail "bootstrap still trusts an unvalidated marker path condition"
+fi
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecCondition=/bin/bash /usr/local/libexec/cloud-compose/bootstrap-required.sh'
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-bootstrap.sh'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'Restart=on-failure'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'RestartSec=30s'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'TimeoutStartSec=2h'
@@ -58,6 +65,16 @@ assert_contains "$unit_dir/cloud-compose-internal-services.service" 'Requires=cl
 assert_contains "$unit_dir/cloud-compose.service" 'TimeoutStartSec=90min'
 assert_contains "$diagnostics_program" 'usage: ${diagnostics_program} state|status|dump'
 assert_contains "$diagnostics_program" 'readonly PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+assert_contains "$diagnostics_program" 'readonly bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"'
+assert_contains "$bootstrap_security" 'cloud_compose_bootstrap_marker_ready()'
+assert_contains "$bootstrap_security" '0:0:644:1:regular file'
+assert_contains "$bootstrap_security" '"$marker_size" == "6"'
+assert_contains "$bootstrap_security" '"$payload" == "ready"'
+assert_contains "$bootstrap_security" 'cloud_compose_secure_runtime_home()'
+assert_contains "$root_program_runner" 'cloud_compose_secure_runtime_home'
+assert_contains "$root_program_runner" 'Unsupported Cloud Compose root program:'
+[[ -f "$repo_root/rootfs/usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" ]] || \
+  fail "validated bootstrap readiness gate is missing"
 assert_contains "$diagnostics_program" '--- Cloud Compose provisioning heartbeat ---'
 assert_contains "$diagnostics_program" 'ps -p "$main_pid" -o pid=,ppid=,stat=,etime=,comm='
 assert_contains "$smoke_healthcheck_program" 'source /home/cloud-compose/profile.sh'
@@ -99,9 +116,24 @@ assert_contains "$docker_metadata_dropin" 'Requires=cloud-compose-metadata-firew
 assert_contains "$docker_metadata_dropin" 'After=cloud-compose-metadata-firewall-pre.service'
 assert_contains "$metadata_pre_unit" 'Before=docker.service'
 assert_contains "$metadata_pre_unit" 'WantedBy=multi-user.target'
-assert_contains "$metadata_pre_unit" 'ExecStart=/bin/bash /home/cloud-compose/configure-metadata-firewall.sh pre-docker'
+assert_contains "$metadata_pre_unit" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh configure-metadata-firewall.sh pre-docker'
 assert_contains "$unit_dir/cloud-compose-overlay.service" 'Before=docker.service cloud-compose.service'
-assert_contains "$unit_dir/cloud-compose-overlay.service" 'ExecStart=/bin/bash /home/cloud-compose/mount-overlays.sh'
+assert_contains "$unit_dir/cloud-compose-overlay.service" 'ExecStart=/bin/bash /usr/local/libexec/cloud-compose/run-root-program.sh mount-overlays.sh'
+for root_home_unit in \
+  cloud-compose-docker-prune.service \
+  cloud-compose-key-rotation.service \
+  cloud-compose-metadata-firewall-pre.service \
+  cloud-compose-metadata-firewall.service \
+  cloud-compose-offhost-backup.service \
+  cloud-compose-overlay.service \
+  cloud-compose-restore-test.service \
+  cloud-compose-vault-agent.service \
+  libops-managed-runtime.service; do
+  if grep -Eq '^Exec(Start|StartPre|StartPost|Stop|StopPost)=/bin/bash /home/cloud-compose/' "$unit_dir/$root_home_unit"; then
+    fail "$root_home_unit executes historically writable home code without the root-owned launcher"
+  fi
+  assert_contains "$unit_dir/$root_home_unit" '/usr/local/libexec/cloud-compose/run-root-program.sh'
+done
 if grep -Eq '^(After|Before|BindsTo|PartOf|Requires|Requisite|Wants)=.*cloud-compose-bootstrap\\.service' \
   "$unit_dir/cloud-compose.service"; then
   fail "application service has an ordering dependency on the bootstrap service"

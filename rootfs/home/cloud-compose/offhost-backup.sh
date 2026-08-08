@@ -6,10 +6,12 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
 compose_apps_path="${CLOUD_COMPOSE_COMPOSE_APPS_PATH:-$script_dir/compose-apps.sh}"
 dr_library_path="${CLOUD_COMPOSE_DR_LIBRARY_PATH:-$script_dir/disaster-recovery-lib.sh}"
+jq_program_dir="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/usr/local/share/cloud-compose/jq}"
 # shellcheck disable=SC1090
 source "$profile_path"
 # shellcheck disable=SC1090
 source "$compose_apps_path"
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir"
 # shellcheck disable=SC1090
 source "$dr_library_path"
 
@@ -111,32 +113,17 @@ for app in "${apps[@]}"; do
         umask 077
         docker compose config --format json >"$compose_config"
     )
-    if ! jq -e '
-        type == "object" and
-        (.services | type == "object" and length > 0) and
-        all(.services | to_entries[];
-          ((.value.volumes // []) | type == "array") and
-          all((.value.volumes // [])[];
-            type == "object" and
-            (.type | type == "string") and
-            (.type == "volume" or .type == "bind" or .type == "tmpfs") and
-            ((.source // "") | type == "string") and
-            ((.target // "") | type == "string" and length > 0))) and
-        ((.volumes // {}) | type == "object")
-    ' "$compose_config" >/dev/null; then
+    if ! jq -e \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-validate-compose-config.jq" \
+        "$compose_config" >/dev/null; then
         echo "Docker Compose returned unsafe or unsupported volume topology for ${app}" >&2
         exit 1
     fi
-    if ! jq -e --arg data_root "$data_root" --arg volumes_root "$volumes_root" '
-        all(.services[].volumes[]?;
-          .type != "bind" or
-          (.source | type == "string" and
-            (. == $data_root or startswith($data_root + "/") or
-             . == $volumes_root or startswith($volumes_root + "/")) and
-            (explode | all(.[]; . >= 32 and . != 127)) and
-            (contains("//") | not) and
-            length > 0))
-    ' "$compose_config" >/dev/null; then
+    if ! jq -e \
+        --arg data_root "$data_root" \
+        --arg volumes_root "$volumes_root" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-validate-bind-roots.jq" \
+        "$compose_config" >/dev/null; then
         echo "Persistent bind topology escapes managed data roots for ${app}" >&2
         exit 1
     fi
@@ -145,42 +132,16 @@ for app in "${apps[@]}"; do
             echo "Persistent bind topology contains a dot segment for ${app}" >&2
             exit 1
         fi
-    done < <(jq -r '.services[].volumes[]? | select(.type == "bind") | .source' "$compose_config")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-bind-sources.jq" "$compose_config")
 
     jq -cS \
         --arg app "$app" \
         --arg project_dir "$project_dir" \
         --arg dump_path "$staged_dump" \
         --arg dump_sha256 "$dump_sha256" \
-        --argjson dump_bytes "$dump_bytes" '
-        {
-          name: $app,
-          databases: [{
-            engine: "mariadb",
-            format: "sql.gz",
-            local_recovery_artifact: $dump_path,
-            sha256: $dump_sha256,
-            bytes: $dump_bytes
-          }],
-          application_files: {
-            roots: [$project_dir],
-            bind_mounts: [
-              .services | to_entries[] as $service |
-              ($service.value.volumes // [])[] |
-              select(.type == "bind") |
-              {service: $service.key, source: .source, target: .target, read_only: (.read_only // false)}
-            ] | sort_by(.service, .source, .target)
-          },
-          volume_topology: {
-            declared_named_volumes: ((.volumes // {}) | keys | sort),
-            service_mounts: [
-              .services | to_entries[] as $service |
-              ($service.value.volumes // [])[] |
-              {service: $service.key, type: .type, source: (.source // ""), target: .target, read_only: (.read_only // false)}
-            ] | sort_by(.service, .type, .source, .target)
-          }
-        }
-    ' "$compose_config" >"$application_row"
+        --argjson dump_bytes "$dump_bytes" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-build-application-coverage.jq" \
+        "$compose_config" >"$application_row"
     cat "$application_row" >>"$application_rows"
     rm -f -- "$compose_config"
 done
@@ -190,36 +151,15 @@ jq -cS -s \
     --arg operation_id "$operation_id" \
     --arg backup_date "$backup_date" \
     --arg provider "${CLOUD_COMPOSE_PROVIDER:-unknown}" \
-    --arg instance "${CLOUD_COMPOSE_INSTANCE_NAME:-cloud-compose}" '
-    {
-      schema_version: 1,
-      kind: "cloud-compose.offhost-backup-manifest",
-      operation_id: $operation_id,
-      backup_date: $backup_date,
-      provider: $provider,
-      instance: $instance,
-      required_coverage: ["database", "application_files", "volume_topology"],
-      applications: (sort_by(.name))
-    }
-' "$application_rows" >"$staged_manifest"
+    --arg instance "${CLOUD_COMPOSE_INSTANCE_NAME:-cloud-compose}" \
+    -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-build-manifest.jq" \
+    "$application_rows" >"$staged_manifest"
 chmod 0400 "$staged_manifest"
 
-if ! jq -e --argjson app_count "${#apps[@]}" '
-    .schema_version == 1 and
-    .kind == "cloud-compose.offhost-backup-manifest" and
-    (.applications | type == "array" and length == $app_count) and
-    all(.applications[];
-      (.name | type == "string" and length >= 1 and length <= 63 and
-        (explode | all(.[]; . >= 32 and . != 127))) and
-      (.databases | length == 1) and
-      (.databases[0].sha256 | type == "string" and length == 64 and
-        (explode | all(.[]; . >= 32 and . != 127))) and
-      (.databases[0].bytes | type == "number" and . > 0) and
-      (.application_files.roots | type == "array" and length > 0) and
-      (.application_files.bind_mounts | type == "array") and
-      (.volume_topology.declared_named_volumes | type == "array") and
-      (.volume_topology.service_mounts | type == "array"))
-' "$staged_manifest" >/dev/null; then
+if ! jq -e \
+    --argjson app_count "${#apps[@]}" \
+    -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-validate-manifest.jq" \
+    "$staged_manifest" >/dev/null; then
     echo "Generated off-host coverage manifest is incomplete" >&2
     exit 1
 fi
@@ -228,7 +168,7 @@ while IFS=$'\t' read -r manifest_app manifest_sha; do
         echo "Generated off-host coverage manifest contains an unsafe application name or digest" >&2
         exit 1
     fi
-done < <(jq -r '.applications[] | [.name, .databases[0].sha256] | @tsv' "$staged_manifest")
+done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-manifest-app-digests.jq" "$staged_manifest")
 
 manifest_sha256="$(sha256sum "$staged_manifest" | awk '{print $1}')"
 staged_receipt="$staging_dir/receipt.json"

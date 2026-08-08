@@ -42,7 +42,6 @@ chown root:root /home/cloud-compose
 chmod 0755 /home/cloud-compose
 for mutable_dir in \
   /home/cloud-compose/apps \
-  /home/cloud-compose/bin \
   /home/cloud-compose/state \
   /home/cloud-compose/.sitectl \
   /home/cloud-compose/.cache \
@@ -50,15 +49,32 @@ for mutable_dir in \
   /home/cloud-compose/.local; do
   install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"
 done
+if [[ -L /home/cloud-compose/bin || ! -d /home/cloud-compose/bin ||
+  "$(stat -c '%u:%g:%a:%F' -- /home/cloud-compose/bin)" != "0:0:755:directory" ]]; then
+  echo "Managed command directory was not secured by the runtime installer" >&2
+  exit 1
+fi
 
 find /home/cloud-compose -maxdepth 1 -type f -name '*.sh' \
   -exec chown root:root {} + \
   -exec chmod 0755 {} +
 for dispatcher in init up down rollout; do
-  if [ -f "/home/cloud-compose/$dispatcher" ]; then
-    chown root:root "/home/cloud-compose/$dispatcher"
-    chmod 0755 "/home/cloud-compose/$dispatcher"
+  dispatcher_path="/home/cloud-compose/$dispatcher"
+  dispatcher_metadata="$(stat -c '%u:%g:%a:%h:%F' -- "$dispatcher_path")" || {
+    echo "Unable to inspect Cloud Compose lifecycle dispatcher: $dispatcher_path" >&2
+    exit 1
+  }
+  IFS=: read -r dispatcher_uid _ dispatcher_mode dispatcher_links dispatcher_kind \
+    <<<"$dispatcher_metadata"
+  if [[ -L "$dispatcher_path" || ! -f "$dispatcher_path" ||
+    "$dispatcher_uid" != "0" || "$dispatcher_links" != "1" ||
+    "$dispatcher_kind" != "regular file" || ! "$dispatcher_mode" =~ ^[0-7]{3,4}$ ||
+    $((8#$dispatcher_mode & 0022)) -ne 0 ]]; then
+    echo "Unsafe Cloud Compose lifecycle dispatcher: $dispatcher_path" >&2
+    exit 1
   fi
+  chown root:root "$dispatcher_path"
+  chmod 0755 "$dispatcher_path"
 done
 for runtime_input in .env compose-projects.json application-env.json; do
   if [ -f "/home/cloud-compose/$runtime_input" ]; then

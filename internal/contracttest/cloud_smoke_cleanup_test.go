@@ -413,6 +413,7 @@ func TestNonGCPSmokeRunExitCleanupLifecycle(t *testing.T) {
 			command.Env = overriddenEnvironment(map[string]string{
 				"CLOUD_COMPOSE_CI_BIN":                filepath.Join(binDirectory, "cloud-compose-ci"),
 				"CLOUD_COMPOSE_SMOKE_AUTO_APPROVE":    "true",
+				"CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT":    "5",
 				"CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT": "10",
 				"CLOUD_COMPOSE_SMOKE_KEEP":            "false",
 				"CLOUD_COMPOSE_SMOKE_RUN_ID":          "123456789",
@@ -466,6 +467,13 @@ func TestNonGCPSmokeRunExitCleanupLifecycle(t *testing.T) {
 
 func writeCloudSmokeLifecycleFakes(t testing.TB, directory string) {
 	t.Helper()
+	sshFixture, err := os.ReadFile(filepath.Join(
+		repositoryRoot(t),
+		"internal/contracttest/testdata/cloud-smoke-lifecycle/ssh.sh",
+	))
+	if err != nil {
+		t.Fatalf("read lifecycle SSH fixture: %v", err)
+	}
 	executables := map[string]string{
 		"cloud-compose-ci": `#!/usr/bin/env bash
 set -euo pipefail
@@ -534,13 +542,7 @@ printf 'ssh-ed25519 fake-public-key cloud-compose-smoke\n' >"${path}.pub"
 set -euo pipefail
 printf '127.0.0.1 ssh-ed25519 fake-host-key\n'
 `,
-		"ssh": `#!/usr/bin/env bash
-set -euo pipefail
-case "$*" in
-  *cloud-compose-bootstrap-complete*) printf 'complete\n' ;;
-  *cloud-init\ status*) printf 'cloud-init not installed\n' ;;
-esac
-`,
+		"ssh": string(sshFixture),
 		"sitectl": `#!/usr/bin/env bash
 set -euo pipefail
 exit 0

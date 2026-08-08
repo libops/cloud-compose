@@ -106,15 +106,12 @@ ${ROOTFS_ARCHIVE_COMMAND}
   chown cloud-compose:cloud-compose /mnt/disks/volumes
   chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
-  rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
-  bash /home/cloud-compose/start-cloud-compose-bootstrap.sh
+  rm -f /var/lib/cloud-compose/bootstrap-complete
+  bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh
 %{ if length(ADDITIONAL_RUNCMD) > 0 ~}
 - |
   set -eu
-  test -f /home/cloud-compose/.cloud-compose-bootstrap-complete || {
-    echo "Cloud Compose application initialization did not complete; refusing post-initialization commands" >&2
-    exit 1
-  }
+  bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh
 %{ for CMD in ADDITIONAL_RUNCMD ~}
   ${indent(2, CMD)}
 %{ endfor ~}

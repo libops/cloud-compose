@@ -666,7 +666,7 @@ variable "runcmd" {
 variable "initcmd" {
   type        = list(string)
   default     = []
-  description = "Commands to run before /home/cloud-compose/run.sh"
+  description = "Commands to run before the root-owned Cloud Compose bootstrap entrypoint"
 }
 
 variable "artifact_registry_repository" {

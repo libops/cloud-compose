@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 
 cloud_compose_marker_exists() {
-    local marker="$1"
+    local marker="$1" marker_size payload
 
-    [[ -f "$marker" && ! -L "$marker" ]]
+    [[ -f "$marker" && ! -L "$marker" ]] || return 1
+    if [[ "$marker" == "/var/lib/cloud-compose/bootstrap-complete" ]]; then
+        [[ "$(stat -c '%u:%g:%a:%F' -- "$(dirname -- "$marker")")" == "0:0:755:directory" &&
+            "$(stat -c '%u:%g:%a:%h:%F' -- "$marker")" == "0:0:644:1:regular file" ]] || return 1
+        marker_size="$(stat -c '%s' -- "$marker")" || return 1
+        [[ "$marker_size" == "6" ]] || return 1
+        IFS= read -r payload <"$marker" || return 1
+        [[ "$payload" == "ready" ]]
+    fi
 }
 
 cloud_compose_should_run_app_init() {
@@ -23,12 +31,25 @@ cloud_compose_publish_marker() (
         echo "Unsafe Cloud Compose marker directory: $marker_dir" >&2
         return 1
     fi
+    if [[ "$marker" == "/var/lib/cloud-compose/bootstrap-complete" &&
+        ( EUID -ne 0 ||
+          "$(stat -c '%u:%g:%a:%F' -- "$marker_dir")" != "0:0:755:directory" ) ]]; then
+        echo "Durable Cloud Compose readiness requires a root-owned state directory" >&2
+        return 1
+    fi
 
     umask 022
     tmp_marker="$(mktemp "${marker}.tmp.XXXXXXXXXX")" || return 1
     if ! printf 'ready\n' >"$tmp_marker" ||
-        ! chmod 0644 "$tmp_marker" ||
-        ! mv -fT -- "$tmp_marker" "$marker"; then
+        ! chmod 0644 "$tmp_marker"; then
+        rm -f -- "$tmp_marker"
+        return 1
+    fi
+    if ((EUID == 0)) && ! chown 0:0 "$tmp_marker"; then
+        rm -f -- "$tmp_marker"
+        return 1
+    fi
+    if ! mv -fT -- "$tmp_marker" "$marker"; then
         rm -f -- "$tmp_marker"
         return 1
     fi

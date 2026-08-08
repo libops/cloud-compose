@@ -5,7 +5,7 @@ set -euo pipefail
 # shellcheck disable=SC1090
 source "${CLOUD_COMPOSE_BOOTSTRAP_HELPERS_PATH:-/home/cloud-compose/bootstrap-helpers.sh}"
 
-durable_marker="${CLOUD_COMPOSE_BOOTSTRAP_COMPLETE_MARKER:-/home/cloud-compose/.cloud-compose-bootstrap-complete}"
+durable_marker="${CLOUD_COMPOSE_BOOTSTRAP_COMPLETE_MARKER:-/var/lib/cloud-compose/bootstrap-complete}"
 wait_seconds="${CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS:-10800}"
 bootstrap_unit="cloud-compose-bootstrap.service"
 

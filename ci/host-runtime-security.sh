@@ -165,6 +165,8 @@ assert_contains "$profile_script" 'export PATH="/usr/local/sbin:/usr/local/bin:/
 tmpfiles_conf="$repo_root/rootfs/etc/tmpfiles.d/cloud-compose.conf"
 assert_contains "$tmpfiles_conf" 'd /run/lock/cloud-compose 0750 root cloud-compose -'
 assert_contains "$tmpfiles_conf" 'f /run/lock/cloud-compose/lifecycle.lock 0660 root cloud-compose -'
+assert_contains "$tmpfiles_conf" 'd /var/lib/cloud-compose 0755 root root -'
+assert_contains "$tmpfiles_conf" 'd /home/cloud-compose 0755 root root -'
 host_init="$repo_root/rootfs/home/cloud-compose/host-init.sh"
 if grep -Eq 'chown[[:space:]]+-R[[:space:]]+cloud-compose[^[:space:]]*[[:space:]]+/home/cloud-compose' "$host_init"; then
   fail "host initialization gives the app account recursive ownership of root-executed code"
@@ -174,11 +176,25 @@ if grep -Eq 'chown[[:space:]]+-R[[:space:]]+cloud-compose[^[:space:]]*[[:space:]
 fi
 assert_contains "$host_init" 'chown root:root /home/cloud-compose'
 assert_contains "$host_init" "-exec chown root:root {} +"
+assert_contains "$host_init" 'Unsafe Cloud Compose lifecycle dispatcher:'
+assert_contains "$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh" \
+  'Cloud Compose control input is not root-controlled'
 assert_contains "$host_init" '/home/cloud-compose/.sitectl \'
 assert_contains "$host_init" 'install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"'
+assert_contains "$host_init" 'Managed command directory was not secured by the runtime installer'
+if sed -n '/for mutable_dir in/,/done/p' "$host_init" | grep -Fq '/home/cloud-compose/bin'; then
+  fail "host initialization leaves the privileged published command directory app-writable"
+fi
 assert_contains "$host_init" 'install -d -m 1775 -o root -g cloud-compose /mnt/disks/data'
 assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/volumes'
 assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops'
+managed_runtime="$repo_root/rootfs/home/cloud-compose/libops-managed-runtime.sh"
+assert_contains "$managed_runtime" 'prepare_managed_runtime_directory'
+assert_contains "$managed_runtime" 'validate_published_bin_directory'
+assert_contains "$managed_runtime" '$STATE_DIR:0755:false'
+assert_contains "$managed_runtime" '$PUBLISHED_BIN_DIR:0755:true'
+assert_contains "$managed_runtime" 'managed runtime updates must run as root'
+assert_contains "$managed_runtime" 'production managed runtime directories require a root updater'
 if grep -A12 -F 'source_compose_app_env()' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" | \
     grep -Eq 'source[[:space:]]+.*COMPOSE_APPS_ENV_DIR'; then
   fail "privileged Compose manifest loading still sources an app-writable shell file"

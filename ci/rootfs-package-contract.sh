@@ -20,5 +20,11 @@ tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | awk '
     END { exit bad }
 '
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/home/cloud-compose/run.sh' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/usr/local/libexec/cloud-compose/run-bootstrap.sh' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/usr/local/libexec/cloud-compose/run-root-program.sh' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/usr/local/share/cloud-compose/jq/offhost-validate-manifest.jq' >/dev/null
 
 echo "Rootfs package contract passed"

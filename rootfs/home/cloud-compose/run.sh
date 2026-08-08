@@ -32,7 +32,7 @@ runtime_enabled() {
   esac
 }
 
-durable_bootstrap_marker="/home/cloud-compose/.cloud-compose-bootstrap-complete"
+durable_bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"
 current_boot_app_init_marker="/run/cloud-compose-app-init-complete"
 fresh_filesystem_marker="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
 fresh_filesystem_identity="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-fresh}"

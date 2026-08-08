@@ -156,6 +156,10 @@ with `systemctl status cloud-compose-bootstrap cloud-compose`. Bootstrap output
 uses a fixed `info` priority and has no unit-specific Fluent Bit input, so raw
 bootstrap output is not forwarded to Cloud Logging; systemd's own service
 failures remain available to the existing warning-level collector.
+Root systemd jobs enter through `/usr/local/libexec/cloud-compose`, validate
+the root-owned home scripts and control inputs, and only then execute their
+allowlisted `/home/cloud-compose` program. Application services retain their
+unprivileged execution model.
 
 ## Sitectl
 
@@ -176,6 +180,10 @@ package list before validation. Terraform, Ansible, and Salt serialize their
 resolved map as `SITECTL_PACKAGE_VERSIONS` JSON and the privileged installer
 validates it again before downloading anything. Per-project package versions
 are not supported because projects on one host share the same binaries.
+`/home/cloud-compose/bin` is reserved for generated `sitectl` symlinks. During
+an upgrade from the former application-owned directory, the installer closes
+the directory to root and rejects any other inherited command or target rather
+than carrying an untrusted PATH entry forward.
 
 `sitectl_verify_args` remains a real argument list. The host stores it as JSON
 and appends each value through an argv-aware wrapper when a lifecycle command
@@ -851,10 +859,10 @@ deploy the same
 `5058610fddc7267ace92d65a5c49713dce570ac3`; an early exact checkout bridges
 the legacy runtime's branch-only clone behavior without following a moving
 branch. Its `gcp.cloud_init.initcmd` disables both generations of the
-internal-service timer after cloud-init writes the units but before
-`/home/cloud-compose/run.sh` starts the potentially long bootstrap, so the
-disposable VM cannot suspend itself. The runner checks the units again after
-each boot.
+internal-service timer after cloud-init writes the units but before the
+root-owned `/usr/local/libexec/cloud-compose/run-bootstrap.sh` entrypoint
+starts the potentially long bootstrap, so the disposable VM cannot suspend
+itself. The runner checks the units again after each boot.
 Only the ephemeral runner key is authorized, and SSH is limited to that
 runner's public IPv4 `/32`.
 

@@ -115,5 +115,5 @@ runcmd:
 %{ if ROLLOUT_RUNCMD != "" ~}
   ${ROLLOUT_RUNCMD}
 %{ endif ~}
-  rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete
-  bash /home/cloud-compose/start-cloud-compose-bootstrap.sh
+  rm -f /var/lib/cloud-compose/bootstrap-complete
+  bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh

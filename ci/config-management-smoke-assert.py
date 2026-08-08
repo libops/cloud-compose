@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 RUNTIME_HOME = Path("/home/cloud-compose")
+BOOTSTRAP_LIBEXEC = Path("/usr/local/libexec/cloud-compose")
 
 
 def load_runtime_env(path: Path) -> dict[str, str]:
@@ -45,6 +46,12 @@ def assert_runtime_files() -> None:
         RUNTIME_HOME / "rollout",
         RUNTIME_HOME / "run.sh",
         RUNTIME_HOME / "start-cloud-compose-bootstrap.sh",
+        BOOTSTRAP_LIBEXEC / "bootstrap-required.sh",
+        BOOTSTRAP_LIBEXEC / "bootstrap-security.sh",
+        BOOTSTRAP_LIBEXEC / "run-bootstrap.sh",
+        BOOTSTRAP_LIBEXEC / "require-bootstrap-ready.sh",
+        BOOTSTRAP_LIBEXEC / "run-root-program.sh",
+        BOOTSTRAP_LIBEXEC / "start-cloud-compose-bootstrap.sh",
     ]:
         assert path.exists(), path
         assert os.access(path, os.X_OK), path
@@ -64,6 +71,15 @@ def assert_runtime_files() -> None:
         assert metadata.st_uid == 0, (path, metadata.st_uid)
         assert metadata.st_gid == cloud_compose_gid, (path, metadata.st_gid)
         assert stat.S_IMODE(metadata.st_mode) == expected_mode, (
+            path,
+            oct(stat.S_IMODE(metadata.st_mode)),
+        )
+
+    for path in BOOTSTRAP_LIBEXEC.glob("*.sh"):
+        metadata = path.stat()
+        assert metadata.st_uid == 0, (path, metadata.st_uid)
+        assert metadata.st_gid == 0, (path, metadata.st_gid)
+        assert stat.S_IMODE(metadata.st_mode) == 0o755, (
             path,
             oct(stat.S_IMODE(metadata.st_mode)),
         )

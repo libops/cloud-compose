@@ -5,6 +5,7 @@
 
 CLOUD_COMPOSE_DR_STATE_ROOT="${CLOUD_COMPOSE_DR_STATE_ROOT:-/mnt/disks/data/.cloud-compose-disaster-recovery}"
 CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="${CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER:-/usr/local/libexec/cloud-compose/offhost-backup-driver}"
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/usr/local/share/cloud-compose/jq}"
 
 cloud_compose_dr_is_required() {
     case "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}" in
@@ -132,29 +133,14 @@ cloud_compose_dr_validate_backup_receipt() {
     cloud_compose_dr_validate_json_file "$path" "Off-host backup receipt" || return 1
     jq -e \
         --arg operation_id "$operation_id" \
-        --arg manifest_sha256 "$manifest_sha256" '
-        type == "object" and length == 10 and
-        .schema_version == 1 and
-        .kind == "cloud-compose.offhost-backup-receipt" and
-        .operation_id == $operation_id and
-        .manifest_sha256 == $manifest_sha256 and
-        .status == "succeeded" and
-        .encrypted == true and
-        .off_host == true and
-        (.completed_at | type == "string" and length == 20 and
-          (explode | all(.[]; . >= 32 and . != 127))) and
-        (.remote_id | type == "string" and length >= 1 and length <= 512 and
-          (explode | all(.[]; . >= 32 and . != 127))) and
-        (.coverage | type == "object" and length == 3 and
-          .database == true and
-          .application_files == true and
-          .volume_topology == true)
-    ' "$path" >/dev/null || {
+        --arg manifest_sha256 "$manifest_sha256" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-validate-backup-receipt.jq" \
+        "$path" >/dev/null || {
         echo "Off-host backup driver returned an invalid or incomplete coverage receipt" >&2
         return 1
     }
-    completed_at="$(jq -er '.completed_at' "$path")" || return 1
-    remote_id="$(jq -er '.remote_id' "$path")" || return 1
+    completed_at="$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-backup-completed-at.jq" "$path")" || return 1
+    remote_id="$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-backup-remote-id.jq" "$path")" || return 1
     cloud_compose_dr_validate_utc_timestamp "$completed_at" "Off-host backup completion time" || return 1
     cloud_compose_dr_validate_remote_id "$remote_id" "Off-host backup remote id" || return 1
 }
@@ -166,32 +152,14 @@ cloud_compose_dr_validate_restore_proof() {
     jq -e \
         --arg test_id "$test_id" \
         --arg manifest_sha256 "$manifest_sha256" \
-        --arg receipt_sha256 "$receipt_sha256" '
-        type == "object" and length == 13 and
-        .schema_version == 1 and
-        .kind == "cloud-compose.restore-test-proof" and
-        .test_id == $test_id and
-        .source_manifest_sha256 == $manifest_sha256 and
-        .source_receipt_sha256 == $receipt_sha256 and
-        .status == "succeeded" and
-        .disposable_recovery == true and
-        .recovery_destroyed == true and
-        .integrity_verified == true and
-        (.completed_at | type == "string" and length == 20 and
-          (explode | all(.[]; . >= 32 and . != 127))) and
-        (.recovery_id | type == "string" and length >= 1 and length <= 512 and
-          (explode | all(.[]; . >= 32 and . != 127))) and
-        (.coverage | type == "object" and length == 3 and
-          .database == true and
-          .application_files == true and
-          .volume_topology == true) and
-        (.source_encrypted == true)
-    ' "$path" >/dev/null || {
+        --arg receipt_sha256 "$receipt_sha256" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-validate-restore-proof.jq" \
+        "$path" >/dev/null || {
         echo "Off-host backup driver returned an invalid restore-test proof" >&2
         return 1
     }
-    completed_at="$(jq -er '.completed_at' "$path")" || return 1
-    recovery_id="$(jq -er '.recovery_id' "$path")" || return 1
+    completed_at="$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-restore-completed-at.jq" "$path")" || return 1
+    recovery_id="$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/dr-restore-recovery-id.jq" "$path")" || return 1
     cloud_compose_dr_validate_utc_timestamp "$completed_at" "Restore-test completion time" || return 1
     cloud_compose_dr_validate_remote_id "$recovery_id" "Restore-test recovery id" || return 1
 }

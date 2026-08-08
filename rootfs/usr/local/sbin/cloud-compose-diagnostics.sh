@@ -7,8 +7,9 @@ set -euo pipefail
 readonly PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
-readonly bootstrap_marker="/home/cloud-compose/.cloud-compose-bootstrap-complete"
+readonly bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"
 readonly diagnostics_program="/usr/local/sbin/cloud-compose-diagnostics.sh"
+readonly jq_program_dir="/usr/local/share/cloud-compose/jq"
 readonly process_pattern='[/]home/cloud-compose/run[.]sh|[/]home/cloud-compose/[h]ost-conf[.]sh|[/]home/cloud-compose/[h]ost-init[.]sh|[/]home/cloud-compose/[a]pp-init[.]sh|[/]home/cloud-compose/[i]nstall-dependencies|[a]pt-get|[r]pm-ostree|[d]ocker run|[s]itectl|[g]it clone'
 
 usage() {
@@ -31,10 +32,20 @@ unit_value() {
 
 bootstrap_state() {
     local bootstrap_load_state bootstrap_active_state bootstrap_sub_state
+    local marker_dir_metadata marker_metadata marker_size marker_payload
 
     if [[ -f "$bootstrap_marker" && ! -L "$bootstrap_marker" ]]; then
-        echo complete
-        return 0
+        marker_dir_metadata="$(stat -c '%u:%g:%a:%F' -- "$(dirname -- "$bootstrap_marker")" 2>/dev/null || true)"
+        marker_metadata="$(stat -c '%u:%g:%a:%h:%F' -- "$bootstrap_marker" 2>/dev/null || true)"
+        marker_size="$(stat -c '%s' -- "$bootstrap_marker" 2>/dev/null || true)"
+        marker_payload=""
+        IFS= read -r marker_payload <"$bootstrap_marker" || true
+        if [[ "$marker_dir_metadata" == "0:0:755:directory" &&
+            "$marker_metadata" == "0:0:644:1:regular file" &&
+            "$marker_size" == "6" && "$marker_payload" == "ready" ]]; then
+            echo complete
+            return 0
+        fi
     fi
 
     bootstrap_load_state="$(unit_value cloud-compose-bootstrap.service LoadState)"
@@ -136,7 +147,8 @@ dump_compose_state() {
 
     echo "--- docker compose project state ---"
     if [[ ! -f "$manifest" || -L "$manifest" ]] ||
-        ! jq -e 'type == "object"' "$manifest" >/dev/null 2>&1; then
+        ! jq -e -f "$jq_program_dir/diagnostics-validate-compose-projects.jq" \
+            "$manifest" >/dev/null 2>&1; then
         echo "Compose project manifest is unavailable or invalid"
         return 0
     fi
@@ -144,8 +156,8 @@ dump_compose_state() {
     while IFS= read -r encoded; do
         [[ -n "$encoded" ]] || continue
         row="$(printf '%s' "$encoded" | base64 -d)" || continue
-        app="$(jq -er '.key | select(type == "string" and length > 0)' <<<"$row" 2>/dev/null || true)"
-        project_dir="$(jq -er '.value.project_dir | select(type == "string" and startswith("/mnt/disks/data/"))' <<<"$row" 2>/dev/null || true)"
+        app="$(jq -er -f "$jq_program_dir/diagnostics-entry-app.jq" <<<"$row" 2>/dev/null || true)"
+        project_dir="$(jq -er -f "$jq_program_dir/diagnostics-entry-project-dir.jq" <<<"$row" 2>/dev/null || true)"
         if [[ -z "$app" || -z "$project_dir" || ! -d "$project_dir" || -L "$project_dir" ]]; then
             echo "Skipping unavailable or unsafe Compose project: ${app:-unknown}"
             continue
@@ -153,7 +165,7 @@ dump_compose_state() {
         echo "--- docker compose ps: ${app} ---"
         runuser -u cloud-compose -- env HOME=/home/cloud-compose \
             "$docker_path" compose --project-directory "$project_dir" ps 2>&1 || true
-    done < <(jq -r 'to_entries[] | @base64' "$manifest")
+    done < <(jq -r -f "$jq_program_dir/diagnostics-project-entries.jq" "$manifest")
 }
 
 diagnostic_dump() {

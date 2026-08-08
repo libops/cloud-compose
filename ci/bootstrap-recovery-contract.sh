@@ -9,6 +9,11 @@ start_bootstrap="$repo_root/rootfs/home/cloud-compose/start-cloud-compose-bootst
 run_script="$repo_root/rootfs/home/cloud-compose/run.sh"
 app_init="$repo_root/rootfs/home/cloud-compose/app-init.sh"
 run_bootstrap="$repo_root/rootfs/home/cloud-compose/run-bootstrap.sh"
+bootstrap_security="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-security.sh"
+bootstrap_required="$repo_root/rootfs/usr/local/libexec/cloud-compose/bootstrap-required.sh"
+bootstrap_entrypoint="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-bootstrap.sh"
+bootstrap_start_entrypoint="$repo_root/rootfs/usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh"
+bootstrap_readiness_gate="$repo_root/rootfs/usr/local/libexec/cloud-compose/require-bootstrap-ready.sh"
 bootstrap_unit="$repo_root/rootfs/etc/systemd/system/cloud-compose-bootstrap.service"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -182,10 +187,14 @@ fi
 assert_contains "$app_init" 'acquire_cloud_compose_lifecycle_lock "init"'
 assert_contains "$app_init" 'trap release_cloud_compose_lifecycle_lock EXIT'
 assert_contains "$run_script" 'if cloud_compose_should_run_app_init'
+assert_contains "$run_script" 'durable_bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"'
 assert_contains "$run_script" 'cloud_compose_publish_marker "$current_boot_app_init_marker"'
 assert_contains "$run_script" 'cloud_compose_start_and_wait_for_oneshot cloud-compose.service "$app_wait_seconds"'
 assert_contains "$run_script" '"$fresh_filesystem_marker" "$fresh_filesystem_identity"'
 assert_contains "$run_script" 'cloud_compose_publish_marker "$durable_bootstrap_marker"'
+assert_contains "$helpers" 'if ((EUID == 0)) && ! chown 0:0 "$tmp_marker"; then'
+assert_contains "$helpers" '0:0:644:1:regular file'
+assert_contains "$helpers" '0:0:755:directory'
 [[ "$(grep -Fc 'cloud_compose_consume_fresh_filesystem_marker \' "$run_script")" == "1" ]] ||
     fail "bootstrap must have one fresh-filesystem authority consumption boundary"
 rotation_line="$(grep -nF 'bash /home/cloud-compose/rotate-keys-daily.sh' "$run_script" | cut -d: -f1)"
@@ -209,6 +218,16 @@ durable_marker_line="$(grep -nF 'cloud_compose_publish_marker "$durable_bootstra
 
 assert_contains "$run_bootstrap" 'if ((EUID != 0)); then'
 assert_contains "$run_bootstrap" 'exec bash /home/cloud-compose/run.sh'
+assert_contains "$bootstrap_entrypoint" 'cloud_compose_secure_runtime_home'
+assert_contains "$bootstrap_entrypoint" 'exec /bin/bash /home/cloud-compose/run.sh'
+assert_contains "$bootstrap_start_entrypoint" 'cloud_compose_secure_runtime_home'
+assert_contains "$bootstrap_required" 'cloud_compose_bootstrap_marker_ready'
+assert_contains "$bootstrap_readiness_gate" 'cloud_compose_bootstrap_marker_ready'
+assert_contains "$bootstrap_security" '0:0:644:1:regular file'
+assert_contains "$bootstrap_security" '"$marker_size" == "6"'
+assert_contains "$bootstrap_security" '"$payload" == "ready"'
+assert_contains "$bootstrap_security" 'Cloud Compose control input is not root-controlled'
+assert_contains "$bootstrap_security" 'Cloud Compose lifecycle dispatcher is not root-controlled'
 if rg -n 'bootstrap\\.log|exec (>>|>)[^[:space:]]' "$run_bootstrap" >/dev/null; then
     fail "bootstrap wrapper writes an independently unbounded log file"
 fi
@@ -245,6 +264,7 @@ done
     fail "published sitectl is not executable after first-boot installation"
 
 assert_contains "$start_bootstrap" 'CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS:-10800'
+assert_contains "$start_bootstrap" 'CLOUD_COMPOSE_BOOTSTRAP_COMPLETE_MARKER:-/var/lib/cloud-compose/bootstrap-complete'
 assert_contains "$start_bootstrap" 'if cloud_compose_marker_exists "$durable_marker"; then'
 assert_contains "$start_bootstrap" 'systemctl daemon-reload'
 assert_contains "$start_bootstrap" 'systemctl stop -- "$bootstrap_unit"'
@@ -257,7 +277,7 @@ fi
 for cloud_init_template in \
     "$repo_root/templates/cloud-init.yml" \
     "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
-    assert_contains "$cloud_init_template" 'bash /home/cloud-compose/start-cloud-compose-bootstrap.sh'
+    assert_contains "$cloud_init_template" 'bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh'
     if grep -Fq 'bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1' \
         "$cloud_init_template"; then
         fail "cloud-init bypasses the retryable bootstrap unit"
@@ -304,6 +324,8 @@ rm -f -- "$durable_marker"
 integration_root="$tmp/integration"
 integration_home="$integration_root/home/cloud-compose"
 integration_run="$integration_root/run"
+integration_state="$integration_root/var/lib/cloud-compose"
+integration_durable_marker="$integration_state/bootstrap-complete"
 integration_bin="$integration_root/bin"
 integration_log="$integration_root/systemctl.log"
 app_init_count="$integration_root/app-init-count"
@@ -311,7 +333,7 @@ fresh_data_root="$integration_root/data"
 fresh_marker="$fresh_data_root/.cloud-compose/fresh-filesystem"
 first_output="$integration_root/first-attempt.log"
 retry_output="$integration_root/retry-attempt.log"
-mkdir -p "$integration_home" "$integration_run" "$integration_bin" "$(dirname -- "$fresh_marker")"
+mkdir -p "$integration_home" "$integration_run" "$integration_state" "$integration_bin" "$(dirname -- "$fresh_marker")"
 : >"$integration_log"
 printf '0\n' >"$app_init_count"
 printf 'fresh\n' >"$fresh_marker"
@@ -319,6 +341,7 @@ printf 'fresh\n' >"$fresh_marker"
 sed \
     -e "s#/home/cloud-compose#$integration_home#g" \
     -e "s#/run/cloud-compose-app-init-complete#$integration_run/app-init-complete#g" \
+    -e "s#/var/lib/cloud-compose#$integration_state#g" \
     "$run_script" >"$integration_home/run.sh"
 cp "$helpers" "$integration_home/bootstrap-helpers.sh"
 cat >"$integration_home/profile.sh" <<'EOF'
@@ -453,7 +476,7 @@ fi
     fail "first full bootstrap attempt did not complete app-init exactly once"
 [[ -f "$integration_run/app-init-complete" ]] ||
     fail "failed first attempt did not retain current-boot app-init readiness"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "failed first attempt published durable bootstrap readiness"
 [[ ! -e "$fresh_marker" ]] ||
     fail "failed first attempt retained fresh-filesystem authority past key convergence"
@@ -462,7 +485,7 @@ env "${integration_env[@]}" RUN_ATTEMPT=recover \
     bash "$integration_home/run.sh" >"$retry_output" 2>&1
 [[ "$(<"$app_init_count")" == "1" ]] ||
     fail "bootstrap retry repeated successful app-init"
-[[ -f "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ -f "$integration_durable_marker" ]] ||
     fail "bootstrap retry did not publish durable readiness"
 [[ ! -e "$fresh_marker" ]] ||
     fail "successful bootstrap retry retained fresh-filesystem reconciliation authority"
@@ -474,7 +497,7 @@ grep -Fq 'recover enable -- cloud-compose.service' "$integration_log" ||
     fail "bootstrap retry did not converge the application service"
 
 # Marker removal must be flushed before durable readiness can be republished.
-rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+rm -f -- "$integration_durable_marker"
 printf 'fresh\n' >"$fresh_marker"
 if env "${integration_env[@]}" RUN_ATTEMPT=sync-fail \
     bash "$integration_home/run.sh" >/dev/null 2>&1; then
@@ -482,16 +505,16 @@ if env "${integration_env[@]}" RUN_ATTEMPT=sync-fail \
 fi
 [[ ! -e "$fresh_marker" ]] ||
     fail "post-consume durability coverage did not remove the fresh marker"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "failed post-consume durability barrier published readiness"
 env "${integration_env[@]}" RUN_ATTEMPT=recover \
     bash "$integration_home/run.sh" >/dev/null 2>&1
-[[ -f "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ -f "$integration_durable_marker" ]] ||
     fail "bootstrap retry did not flush an already-absent marker before readiness"
 
 # GCP never falls back to the generic non-GCP marker identity. This check runs
 # before key rotation, so missing disk identity cannot reach IAM.
-rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+rm -f -- "$integration_durable_marker"
 printf 'fresh\n' >"$fresh_marker"
 if env "${integration_env[@]}" CLOUD_COMPOSE_PROVIDER=gcp RUN_ATTEMPT=recover \
     bash "$integration_home/run.sh" >/dev/null 2>&1; then
@@ -499,12 +522,12 @@ if env "${integration_env[@]}" CLOUD_COMPOSE_PROVIDER=gcp RUN_ATTEMPT=recover \
 fi
 [[ -f "$fresh_marker" ]] ||
     fail "GCP bootstrap consumed generic fresh-filesystem authority"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "GCP bootstrap with generic authority published durable readiness"
 
 # A marker payload for another incarnation must fail before application
 # initialization or durable readiness.
-rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+rm -f -- "$integration_durable_marker"
 printf 'v1:gcp-disk-id:111111111111111111\n' >"$fresh_marker"
 if env "${integration_env[@]}" RUN_ATTEMPT=recover \
     bash "$integration_home/run.sh" >/dev/null 2>&1; then
@@ -512,13 +535,13 @@ if env "${integration_env[@]}" RUN_ATTEMPT=recover \
 fi
 [[ -f "$fresh_marker" ]] ||
     fail "mismatched fresh-filesystem marker payload was consumed"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "mismatched fresh-filesystem marker payload published durable readiness"
 
 # Unsafe authority must fail closed before durable readiness. The current-boot
 # app-init marker remains valid, so these attempts exercise only the early
 # marker boundary rather than repeating application initialization.
-rm -f -- "$integration_home/.cloud-compose-bootstrap-complete"
+rm -f -- "$integration_durable_marker"
 printf 'fresh\n' >"$fresh_marker"
 if env "${integration_env[@]}" RUN_ATTEMPT=recover \
     FRESH_MARKER_IDENTITY=1000:1000:600:1 \
@@ -527,7 +550,7 @@ if env "${integration_env[@]}" RUN_ATTEMPT=recover \
 fi
 [[ -f "$fresh_marker" ]] ||
     fail "unsafe fresh-filesystem marker was consumed"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "unsafe fresh-filesystem marker published durable readiness"
 
 rm -f -- "$fresh_marker"
@@ -538,7 +561,7 @@ if env "${integration_env[@]}" RUN_ATTEMPT=recover \
 fi
 [[ -L "$fresh_marker" ]] ||
     fail "symlink fresh-filesystem marker was consumed"
-[[ ! -e "$integration_home/.cloud-compose-bootstrap-complete" ]] ||
+[[ ! -e "$integration_durable_marker" ]] ||
     fail "symlink fresh-filesystem marker published durable readiness"
 
 echo "Bootstrap recovery contract passed"

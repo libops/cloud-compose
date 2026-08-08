@@ -643,11 +643,11 @@ for cloud_init_template in \
         "$cloud_init_template" || fail "cloud-init does not verify every required mount before initialization"
     grep -Fq 'Required cloud-compose mount is unavailable:' "$cloud_init_template" ||
         fail "cloud-init mount gate does not report the unavailable path"
-    grep -Fq '  bash /home/cloud-compose/start-cloud-compose-bootstrap.sh' \
+    grep -Fq '  bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh' \
         "$cloud_init_template" || fail "cloud-init retryable bootstrap startup is outside the fail-closed mount block"
-    marker_reset_line="$(grep -nF '  rm -f /home/cloud-compose/.cloud-compose-bootstrap-complete' \
+    marker_reset_line="$(grep -nF '  rm -f /var/lib/cloud-compose/bootstrap-complete' \
         "$cloud_init_template" | cut -d: -f1)"
-    run_line="$(grep -nF '  bash /home/cloud-compose/start-cloud-compose-bootstrap.sh' \
+    run_line="$(grep -nF '  bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh' \
         "$cloud_init_template" | cut -d: -f1)"
     [[ -n "$marker_reset_line" && -n "$run_line" && "$marker_reset_line" -lt "$run_line" ]] ||
         fail "cloud-init does not clear stale bootstrap readiness before retryable startup"

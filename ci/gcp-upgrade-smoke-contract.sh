@@ -175,7 +175,7 @@ baseline_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$tmp/baseline
   fail "baseline cloud-init does not execute fixture initcmd before run.sh"
 
 current_bootstrap_line="$(
-  grep -nF 'bash /home/cloud-compose/start-cloud-compose-bootstrap.sh' \
+  grep -nF 'bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh' \
     "$repo_root/templates/cloud-init.yml" |
     cut -d: -f1 || true
 )"

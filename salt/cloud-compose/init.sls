@@ -673,8 +673,8 @@ cloud-compose-lifecycle-lock:
 
 cloud-compose-rootfs-script-modes:
   cmd.run:
-    - name: find /home/cloud-compose -type f -name '*.sh' -exec chmod 0755 {} +
-    - unless: test -z "$(find /home/cloud-compose -type f -name '*.sh' ! -perm -u=x -print -quit)"
+    - name: find /home/cloud-compose /usr/local/libexec/cloud-compose -maxdepth 1 -type f -name '*.sh' -exec chown root:root {} + -exec chmod 0755 {} +
+    - unless: test -z "$(find /home/cloud-compose /usr/local/libexec/cloud-compose -maxdepth 1 -type f -name '*.sh' \( ! -user root -o ! -group root -o ! -perm 0755 \) -print -quit)"
     - require:
       - file: cloud-compose-rootfs
 
@@ -764,10 +764,18 @@ cloud-compose-systemd-reload:
 {% if rollout_enabled is sameas true %}
 cloud-compose-rollout-service:
   cmd.run:
-    - name: bash /home/cloud-compose/deploy-rollout.sh
+    - name: bash /usr/local/libexec/cloud-compose/run-root-program.sh deploy-rollout.sh
     - require:
       - file: cloud-compose-env
+      - file: cloud-compose-application-env
+      - file: cloud-compose-project-manifest
+      - file: cloud-compose-managed-runtime-artifacts
       - file: cloud-compose-rootfs
+      - cmd: cloud-compose-lifecycle-lock
+      - cmd: cloud-compose-rootfs-script-modes
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+      - file: cloud-compose-lifecycle-{{ lifecycle }}
+{% endfor %}
 {% if reload_systemd %}
       - module: cloud-compose-systemd-reload
 {% endif %}
@@ -776,7 +784,7 @@ cloud-compose-rollout-service:
 {% if force_bootstrap is sameas true %}
 cloud-compose-clear-bootstrap-marker:
   file.absent:
-    - name: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
+    - name: /var/lib/cloud-compose/bootstrap-complete
     - require:
       - cmd: cloud-compose-host-inputs-valid
 {% endif %}
@@ -784,8 +792,8 @@ cloud-compose-clear-bootstrap-marker:
 {% if run_bootstrap is sameas true %}
 cloud-compose-bootstrap:
   cmd.run:
-    - name: bash {{ (home ~ '/start-cloud-compose-bootstrap.sh') | json }}
-    - creates: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
+    - name: bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh
+    - unless: bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh
     - require:
 {% if install_packages %}
       - service: cloud-compose-docker
@@ -794,6 +802,13 @@ cloud-compose-bootstrap:
       - file: cloud-compose-application-env
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
+      - cmd: cloud-compose-rootfs-script-modes
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+      - file: cloud-compose-lifecycle-{{ lifecycle }}
+{% endfor %}
+{% if force_bootstrap is sameas true %}
+      - file: cloud-compose-clear-bootstrap-marker
+{% endif %}
 {% if compose_projects %}
       - file: cloud-compose-project-dirs
 {% endif %}

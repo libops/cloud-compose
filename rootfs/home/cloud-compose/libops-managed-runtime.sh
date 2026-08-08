@@ -27,20 +27,133 @@ enabled() {
 }
 
 mkdirs() {
+    local expected_uid expected_gid path mode allow_owner_migration spec
+    local -a directory_specs
+
+    expected_uid="$EUID"
+    expected_gid="$(id -g)"
+    if [[ "$STATE_DIR" == "/mnt/disks/data/libops-managed" ||
+        "$PUBLISHED_BIN_DIR" == "/home/cloud-compose/bin" ]]; then
+        if ((EUID != 0)); then
+            log "production managed runtime directories require a root updater"
+            return 1
+        fi
+        expected_uid=0
+        expected_gid=0
+    fi
+
     # The managed binary is published through /home/cloud-compose/bin and must
     # remain traversable after a root-owned bootstrap drops to cloud-compose.
-    # Converge existing directories as well as new ones so a previously
-    # restrictive service umask cannot leave the published symlink unusable.
-    install -d -m 0755 "$STATE_DIR" "$BIN_DIR"
-    install -d -m 0700 "$TMP_DIR" "$PACKAGE_STATE_DIR" "$ARTIFACT_STATE_DIR"
-    mkdir -p "$PUBLISHED_BIN_DIR"
+    # Refuse redirected, non-directory, non-owner-controlled, or writable
+    # state before creating package staging files beneath the shared data mount.
+    directory_specs=(
+        "$STATE_DIR:0755:false"
+        "$BIN_DIR:0755:false"
+        "$TMP_DIR:0700:false"
+        "$PACKAGE_STATE_DIR:0700:false"
+        "$ARTIFACT_STATE_DIR:0700:false"
+        "$PUBLISHED_BIN_DIR:0755:true"
+    )
+    for spec in "${directory_specs[@]}"; do
+        IFS=: read -r path mode allow_owner_migration <<<"$spec"
+        prepare_managed_runtime_directory \
+            "$path" "$mode" "$expected_uid" "$expected_gid" "$allow_owner_migration" || return 1
+    done
+}
+
+prepare_managed_runtime_directory() {
+    local path="$1" mode="$2" expected_uid="$3" expected_gid="$4"
+    local allow_owner_migration="$5" metadata owner_uid group_gid actual_mode kind resolved desired_mode
+    local created=false
+
+    if [[ -L "$path" || ( -e "$path" && ! -d "$path" ) ]]; then
+        log "managed runtime path is not a real directory: ${path}"
+        return 1
+    fi
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        # mkdir is the creation boundary: if an unprivileged process wins the
+        # name between inspection and creation, fail rather than adopting its
+        # pre-populated directory with install -d.
+        if ! mkdir -m "$mode" -- "$path"; then
+            log "managed runtime directory appeared during creation: ${path}"
+            return 1
+        fi
+        created=true
+    fi
+    if [[ "$created" != "true" ]]; then
+        if [[ -L "$path" || ! -d "$path" ]]; then
+            log "managed runtime path changed during validation: ${path}"
+            return 1
+        fi
+        metadata="$(stat -c '%u:%g:%a:%F' -- "$path")" || return 1
+        IFS=: read -r owner_uid group_gid actual_mode kind <<<"$metadata"
+        if [[ "$kind" != "directory" || ! "$actual_mode" =~ ^[0-7]{3,4}$ ||
+            $((8#$actual_mode & 0022)) -ne 0 ]]; then
+            log "managed runtime directory is writable by another account: ${path}"
+            return 1
+        fi
+        if [[ ( "$allow_owner_migration" != "true" || EUID -ne 0 ) &&
+            ( "$owner_uid" != "$expected_uid" || "$group_gid" != "$expected_gid" ) ]]; then
+            log "managed runtime directory is not owned by the updater: ${path}"
+            return 1
+        fi
+        if [[ "$allow_owner_migration" == "true" ]]; then
+            # Close the legacy application-owned PATH directory before walking
+            # its entries. The bootstrap libexec boundary has already made its
+            # parent root-owned, so an old owner cannot race validation.
+            if ((EUID == 0)); then
+                install -d -m "$mode" -o "$expected_uid" -g "$expected_gid" -- "$path" || return 1
+            else
+                chmod "$mode" -- "$path" || return 1
+            fi
+            validate_published_bin_directory "$path" || return 1
+        fi
+    fi
+
+    if ((EUID == 0)); then
+        install -d -m "$mode" -o "$expected_uid" -g "$expected_gid" -- "$path" || return 1
+    else
+        chmod "$mode" -- "$path" || return 1
+    fi
+    resolved="$(readlink -f -- "$path")" || return 1
+    desired_mode="$(printf '%o' "$((8#$mode))")"
+    metadata="$(stat -c '%u:%g:%a:%F' -- "$path")" || return 1
+    if [[ "$resolved" != "$path" || "$metadata" != "${expected_uid}:${expected_gid}:${desired_mode}:directory" ||
+        -L "$path" ]]; then
+        log "managed runtime directory did not converge safely: ${path}"
+        return 1
+    fi
+}
+
+validate_published_bin_directory() {
+    local path="$1" entry name target
+    local -a entries
+
+    # /home/cloud-compose/bin was application-owned on older hosts. Preserve
+    # only the generated sitectl links whose targets remain under the validated
+    # root-owned package directory; reject every other inherited PATH entry.
+    shopt -s nullglob dotglob
+    entries=("$path"/*)
+    shopt -u nullglob dotglob
+    for entry in "${entries[@]}"; do
+        name="${entry##*/}"
+        if [[ ! "$name" =~ ^sitectl(-[a-z0-9]+)*$ || ! -L "$entry" ]]; then
+            log "published command directory contains an unmanaged entry: ${entry}"
+            return 1
+        fi
+        target="$(readlink -- "$entry")" || return 1
+        if [[ "$target" != "${BIN_DIR}/${name}" ]]; then
+            log "published command has an unsafe target: ${entry}"
+            return 1
+        fi
+    done
 }
 
 with_lock() {
     local action="$1"
     shift
 
-    mkdirs
+    mkdirs || return 1
     if command -v flock >/dev/null 2>&1; then
         exec 9>"${STATE_DIR}/runtime.lock"
         if ! flock -n 9; then
@@ -406,7 +519,7 @@ install_sitectl_packages() {
     local -A desired_packages=() stale_seen=()
 
     validate_sitectl_configuration
-    mkdirs
+    mkdirs || return 1
 
     mapfile -t packages < <(sitectl_package_list)
     for package in "${packages[@]}"; do
@@ -870,6 +983,11 @@ run_update() {
 
 main() {
     local command="${1:-update}"
+
+    if ((EUID != 0)); then
+        log "managed runtime updates must run as root"
+        return 1
+    fi
 
     case "$command" in
         install-tools)

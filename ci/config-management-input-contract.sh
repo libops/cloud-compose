@@ -11,6 +11,48 @@ cmp -s "$validator" "$salt_validator" || {
   exit 1
 }
 
+ansible_tasks="$repo_root/ansible/roles/cloud_compose/tasks/main.yml"
+salt_state="$repo_root/salt/cloud-compose/init.sls"
+root_program_runner="$repo_root/rootfs/usr/local/libexec/cloud-compose/run-root-program.sh"
+rollout_runner="bash /usr/local/libexec/cloud-compose/run-root-program.sh deploy-rollout.sh"
+
+contract_fail() {
+  echo "config-management input contract: $1" >&2
+  exit 1
+}
+
+grep -Fq "cmd: $rollout_runner" "$ansible_tasks" || \
+  contract_fail "Ansible rollout does not use the trusted root-program runner"
+if grep -Fq 'cmd: bash "{{ cloud_compose_home }}/' "$ansible_tasks" || \
+  grep -Fq 'cmd: bash /home/cloud-compose/' "$ansible_tasks"; then
+  contract_fail "Ansible rollout executes a root program directly from the runtime home"
+fi
+
+grep -Fq 'configure-metadata-firewall.sh | deploy-rollout.sh | docker-prune.sh' "$root_program_runner" || \
+  contract_fail "the trusted root-program runner does not allow deploy-rollout.sh"
+
+salt_rollout_block="$(sed -n '/^cloud-compose-rollout-service:/,/^{% endif %}$/p' "$salt_state")"
+[[ -n "$salt_rollout_block" ]] || contract_fail "Salt rollout state is missing"
+if grep -Fq -- '- name: bash /home/cloud-compose/' "$salt_state"; then
+  contract_fail "Salt rollout executes a root program directly from the runtime home"
+fi
+for marker in \
+  "- name: $rollout_runner" \
+  '- file: cloud-compose-env' \
+  '- file: cloud-compose-application-env' \
+  '- file: cloud-compose-project-manifest' \
+  '- file: cloud-compose-managed-runtime-artifacts' \
+  '- file: cloud-compose-rootfs' \
+  '- cmd: cloud-compose-lifecycle-lock' \
+  '- cmd: cloud-compose-rootfs-script-modes' \
+  '- file: cloud-compose-lifecycle-init' \
+  '- file: cloud-compose-lifecycle-up' \
+  '- file: cloud-compose-lifecycle-down' \
+  '- file: cloud-compose-lifecycle-rollout'; do
+  grep -Fq -- "$marker" <<<"$salt_rollout_block" || \
+    contract_fail "Salt rollout state is missing $marker"
+done
+
 python3 - "$repo_root" "$validator" <<'PY'
 import base64
 import copy
@@ -175,8 +217,10 @@ if "files/validate-runtime-inputs.py" not in ansible_tasks:
     fail("Ansible does not execute the shared host-input validator")
 if "--data-root" in ansible_tasks:
     fail("Ansible makes the production project ownership boundary configurable")
-if 'cmd: bash "{{ cloud_compose_home }}/start-cloud-compose-bootstrap.sh"' not in ansible_tasks:
+if "cmd: bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh" not in ansible_tasks:
     fail("Ansible bypasses the retryable bootstrap service")
+if "cmd: bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" not in ansible_tasks:
+    fail("Ansible does not validate bootstrap readiness evidence")
 if 'cmd: bash "{{ cloud_compose_home }}/run.sh"' in ansible_tasks:
     fail("Ansible still invokes the one-shot bootstrap script directly")
 if "cloud_compose_bootstrap_timeout: 14400" not in ansible_defaults:
@@ -189,8 +233,10 @@ salt_gate = salt_state.find("cloud-compose-host-inputs-valid:")
 salt_first_mutation = salt_state.find("cloud-compose-packages:")
 if salt_gate < 0 or salt_first_mutation < 0 or salt_gate > salt_first_mutation:
     fail("Salt host-input validation does not precede its first host mutation")
-if "home ~ '/start-cloud-compose-bootstrap.sh'" not in salt_state:
+if "bash /usr/local/libexec/cloud-compose/start-cloud-compose-bootstrap.sh" not in salt_state:
     fail("Salt bypasses the retryable bootstrap service")
+if "bash /usr/local/libexec/cloud-compose/require-bootstrap-ready.sh" not in salt_state:
+    fail("Salt does not validate bootstrap readiness evidence")
 if "home ~ '/run.sh'" in salt_state:
     fail("Salt still invokes the one-shot bootstrap script directly")
 gate_block = salt_state[salt_gate:salt_first_mutation]
