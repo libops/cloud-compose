@@ -19,6 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: DigitalOcean ISLE
+            kind: app
+            provider: digitalocean
+            template: isle
+            environment: cloud-smoke-cleanup-digitalocean
+            concurrency_group: cloud-compose-smoke-digitalocean-isle
           - name: DigitalOcean WordPress
             kind: app
             provider: digitalocean

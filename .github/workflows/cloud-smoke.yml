@@ -126,6 +126,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: DigitalOcean ISLE
+            provider: digitalocean
+            template: isle
           - name: DigitalOcean WordPress
             provider: digitalocean
             template: wp
