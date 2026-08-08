@@ -129,17 +129,21 @@ jobs:
           - name: DigitalOcean ISLE
             provider: digitalocean
             template: isle
+            boot_timeout: "3600"
           - name: DigitalOcean WordPress
             provider: digitalocean
             template: wp
+            boot_timeout: "1200"
           - name: Linode WordPress
             provider: linode
             template: wp
+            boot_timeout: "1200"
     concurrency:
       group: cloud-compose-smoke-${{ matrix.provider }}-${{ matrix.template }}
       cancel-in-progress: false
     env:
       CLOUD_COMPOSE_SMOKE_AUTO_APPROVE: "true"
+      CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT: ${{ matrix.boot_timeout }}
       CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT: "1800"
       CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS: "true"
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.run_id }}
