@@ -56,6 +56,10 @@ func TestDisasterRecoveryReceiptAndRestoreContracts(t *testing.T) {
 		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-backup-receipt.jq"),
 		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/dr-validate-restore-proof.jq"),
 	}, "\n")
+	backupContract := strings.Join([]string{
+		backup,
+		readRepositoryFile(t, root, "rootfs/usr/local/share/cloud-compose/jq/offhost-build-application-coverage.jq"),
+	}, "\n")
 
 	for marker, label := range map[string]string{
 		`env -i HOME=/root`:                         "clean driver environment",
@@ -81,7 +85,7 @@ func TestDisasterRecoveryReceiptAndRestoreContracts(t *testing.T) {
 		`volume_topology`:                     "volume topology",
 		`cloud_compose_dr_run_driver`:         "provider-neutral backup handoff",
 	} {
-		requireContains(t, backup, marker, label)
+		requireContains(t, backupContract, marker, label)
 	}
 
 	for marker, label := range map[string]string{
