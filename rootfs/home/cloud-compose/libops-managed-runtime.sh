@@ -92,7 +92,7 @@ prepare_managed_runtime_directory() {
             log "managed runtime directory is writable by another account: ${path}"
             return 1
         fi
-        if [[ ( "$allow_owner_migration" != "true" || EUID -ne 0 ) &&
+        if [[ ( "$allow_owner_migration" != "true" || "$EUID" != "0" ) &&
             ( "$owner_uid" != "$expected_uid" || "$group_gid" != "$expected_gid" ) ]]; then
             log "managed runtime directory is not owned by the updater: ${path}"
             return 1

@@ -32,7 +32,7 @@ cloud_compose_publish_marker() (
         return 1
     fi
     if [[ "$marker" == "/var/lib/cloud-compose/bootstrap-complete" &&
-        ( EUID -ne 0 ||
+        ( "$EUID" != "0" ||
           "$(stat -c '%u:%g:%a:%F' -- "$marker_dir")" != "0:0:755:directory" ) ]]; then
         echo "Durable Cloud Compose readiness requires a root-owned state directory" >&2
         return 1
