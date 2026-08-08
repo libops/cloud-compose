@@ -604,7 +604,7 @@ run "renders_embedded_offhost_backup_driver_executable" {
   command = plan
 
   variables {
-    name                       = "gcp-embedded-driver-contract"
+    name                       = "gcp-embedded-driver"
     project_id                 = "test-project"
     project_number             = "123456789"
     docker_compose_repo        = "https://github.com/libops/wp.git"
