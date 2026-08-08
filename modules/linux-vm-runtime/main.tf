@@ -106,6 +106,7 @@ locals {
   write_files_content = join("\n", [
     for file, fullpath in local.all_files : <<-EOT
       - path: ${jsonencode(startswith(file, "mnt/disks/") ? "/var/lib/cloud-compose/mounted-rootfs/${file}" : "/${file}")}
+        owner: "root:root"
         permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(fullpath)))}
@@ -115,6 +116,7 @@ EOT
   docker_compose_scripts = join("\n", [
     for name in ["init", "up", "down", "rollout"] : <<-EOT
       - path: "/home/cloud-compose/${name}"
+        owner: "root:root"
         permissions: "0755"
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(<<-EOS
@@ -132,6 +134,7 @@ EOT
 compose_projects_content = jsonencode(local.validated_compose_projects)
 compose_projects_file    = <<-EOT
     - path: "/home/cloud-compose/compose-projects.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.compose_projects_content))}
@@ -152,6 +155,7 @@ managed_runtime_artifact_lines = [
 managed_runtime_artifacts_content = join("\n", local.managed_runtime_artifact_lines)
 managed_runtime_artifacts_file    = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.managed_runtime_artifacts_content))}
@@ -258,6 +262,7 @@ host_env = {
 
 env_file_content = <<-EOT
     - path: "/home/cloud-compose/.env"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(module.runtime_env.content))}
@@ -265,6 +270,7 @@ env_file_content = <<-EOT
 
 application_env_file_content = <<-EOT
     - path: "/home/cloud-compose/application-env.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}

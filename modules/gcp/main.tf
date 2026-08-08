@@ -240,6 +240,7 @@ locals {
   write_files_content = join("\n", [
     for file, config in local.all_files : <<-EOT
       - path: ${jsonencode(config.destination)}
+        owner: "root:root"
         permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(config.source)))}
@@ -248,6 +249,7 @@ EOT
   docker_compose_scripts = join("\n", [
     for name in ["init", "up", "down", "rollout"] : <<-EOT
       - path: "/home/cloud-compose/${name}"
+        owner: "root:root"
         permissions: "0755"
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(<<-EOS
@@ -263,6 +265,7 @@ EOT
 ])
 compose_projects_file = <<-EOT
     - path: "/home/cloud-compose/compose-projects.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(local.validated_compose_projects)))}
@@ -281,6 +284,7 @@ managed_runtime_artifact_lines = [
 ]
 managed_runtime_artifacts_file = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(join("\n", local.managed_runtime_artifact_lines)))}
@@ -412,12 +416,14 @@ host_env = merge({
 }, local.fresh_filesystem_env, local.rollout_env)
 env_file_content             = <<-EOT
     - path: "/home/cloud-compose/.env"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(module.runtime_env.content))}
 EOT
 application_env_file_content = <<-EOT
     - path: "/home/cloud-compose/application-env.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}

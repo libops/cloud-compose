@@ -261,6 +261,7 @@ if [[ -n "$(git -C "$repo_root" ls-files 'rootfs/usr/**')" ]]; then
 fi
 for trusted_program in \
   rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh \
+  rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh \
   rootfs/etc/cloud-compose/libexec/build-cos-make.sh \
   rootfs/etc/cloud-compose/libexec/bootstrap-security.sh \
   rootfs/etc/cloud-compose/libexec/run-bootstrap.sh \
@@ -268,6 +269,15 @@ for trusted_program in \
   rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq; do
   [[ -f "$repo_root/$trusted_program" ]] || fail "COS-safe trusted program is missing: $trusted_program"
 done
+
+assert_contains "$repo_root/templates/cloud-init.yml" \
+  '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
+assert_contains "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" \
+  '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
+  'chown root:root "$cloud_compose_home"'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
+  "0:1:regular file"
 for cloud_init_template in \
   "$repo_root/templates/cloud-init.yml" \
   "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do

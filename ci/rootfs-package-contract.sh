@@ -27,6 +27,8 @@ tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
     grep -Fx 'rootfs/etc/cloud-compose/libexec/build-cos-make.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
+    grep -Fx 'rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
     grep -Fx 'rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | \
     grep -Fx 'rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh' >/dev/null

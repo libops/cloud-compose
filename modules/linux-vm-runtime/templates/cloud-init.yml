@@ -116,4 +116,5 @@ runcmd:
   ${ROLLOUT_RUNCMD}
 %{ endif ~}
   rm -f /var/lib/cloud-compose/bootstrap-complete
+  /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
   bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh

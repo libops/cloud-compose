@@ -107,6 +107,7 @@ ${ROOTFS_ARCHIVE_COMMAND}
   chmod 0775 /mnt/disks/volumes
   install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
   rm -f /var/lib/cloud-compose/bootstrap-complete
+  /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
   bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
 %{ if length(ADDITIONAL_RUNCMD) > 0 ~}
 - |
