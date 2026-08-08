@@ -445,7 +445,7 @@ rootfs_archive_command_raw   = <<-EOT
         exit 1
       fi
       printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
-      tar -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
+      tar --no-same-owner -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
       rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
       if [ -z "$rootfs_dir" ]; then
         echo "rootfs directory not found in $archive_url" >&2

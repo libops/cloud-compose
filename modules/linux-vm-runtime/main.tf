@@ -303,7 +303,7 @@ rootfs_archive_prepare_command_raw = <<-EOT
       --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 900 \
       --connect-timeout 10 --max-time 300 -o "$tmp/rootfs.tar.gz" -- "$archive_url"
     printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
-    tar -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
+    tar --no-same-owner -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
     rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
     if [ -z "$rootfs_dir" ] || [ ! -d "$rootfs_dir" ]; then
       echo "rootfs directory not found in verified archive $archive_url" >&2

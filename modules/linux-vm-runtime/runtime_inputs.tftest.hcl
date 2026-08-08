@@ -224,13 +224,13 @@ run "renders_verified_rootfs_archive" {
 
   assert {
     condition = (
-      strcontains(output.cloud_init, "tar -xzf \"$tmp/rootfs.tar.gz\"") &&
+      strcontains(output.cloud_init, "tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"") &&
       strcontains(output.cloud_init, "install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"") &&
       strcontains(output.cloud_init, "bash \"$filesystem_prep\"") &&
       strcontains(output.cloud_init, "bash \"$filesystem_persist\"") &&
       strcontains(output.cloud_init, "cp -a \"$rootfs_dir\"/. /") &&
-      length(split("sha256sum -c -", output.cloud_init)[0]) < length(split("tar -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) &&
-      length(split("tar -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) < length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) &&
+      length(split("sha256sum -c -", output.cloud_init)[0]) < length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) &&
+      length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) < length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) &&
       length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) < length(split("bash \"$filesystem_prep\"", output.cloud_init)[0]) &&
       length(split("bash \"$filesystem_persist\"", output.cloud_init)[0]) < length(split("cp -a \"$rootfs_dir\"/. /", output.cloud_init)[0])
     )

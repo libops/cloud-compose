@@ -245,9 +245,10 @@ fi
 
 archive_source="$repo_root/modules/linux-vm-runtime/main.tf"
 verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
-extract_line="$(grep -n 'tar -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+extract_line="$(grep -n 'tar --no-same-owner -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
 [[ -n "$verify_line" && -n "$extract_line" && "$verify_line" -lt "$extract_line" ]] || \
-  fail "rootfs archive is not verified before extraction"
+  fail "rootfs archive is not verified before ownership-safe extraction"
+assert_contains "$repo_root/modules/gcp/main.tf" 'tar --no-same-owner -xzf "$tmp/rootfs.tar.gz"'
 
 for variables_file in \
   "$repo_root/variables.tf" \
