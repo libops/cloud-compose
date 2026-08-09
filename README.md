@@ -24,7 +24,7 @@ Renovate tracks both the Compose tags and sitectl release tags in the registry.
 Its pull requests are promotion candidates: keep the complete compatible set
 together and require the hosted application smoke before merging them.
 
-All presets pin sitectl v1.8.2 plus the latest reviewed application plugin.
+All presets pin sitectl v1.9.0 plus the latest reviewed application plugin.
 ISLE selects the `libops/isle` v1.3.1 template, ArchivesSpace selects v1.0.1,
 WordPress selects v1.1.1, and Drupal, OJS, Omeka Classic, and Omeka S select
 v1.2.1. Keep each preset's complete template and package set together when
