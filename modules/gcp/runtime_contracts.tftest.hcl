@@ -747,7 +747,16 @@ run "rejects_archive_without_checksum" {
     project_id          = "test-project"
     project_number      = "123456789"
     docker_compose_repo = "https://github.com/libops/wp.git"
+    rootfs              = "testdata/rootfs"
     rootfs_archive_url  = "https://example.invalid/cloud-compose.tar.gz"
+  }
+
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "c71bcb8a431176c641eaded5a8a9d8f36d76ea3ad3d709f8b6d2b3eaa12c7cb0\n"
+      status_code   = 200
+    }
   }
 
   expect_failures = [google_compute_instance.cloud-compose]
