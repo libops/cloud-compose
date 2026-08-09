@@ -53,6 +53,17 @@ CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh" \
         fi
         rm -f "$PUBLISHED_BIN_DIR/docker"
 
+        touch "$BIN_DIR/make"
+        ln -s "$BIN_DIR/make" "$PUBLISHED_BIN_DIR/make"
+        mkdirs
+        rm -f "$PUBLISHED_BIN_DIR/make"
+        ln -s "$2/unsafe-make" "$PUBLISHED_BIN_DIR/make"
+        if mkdirs; then
+            echo "managed runtime accepted an unsafe published Make target" >&2
+            exit 1
+        fi
+        rm -f "$PUBLISHED_BIN_DIR/make"
+
         unsafe_target="$2/unsafe-target"
         unsafe_state="$2/unsafe-state"
         mkdir -p "$unsafe_target"

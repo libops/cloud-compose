@@ -66,7 +66,7 @@ grep -Fq 'iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP' "$INSTALLER" ||
     echo "COS bootstrap does not require the GCP metadata deny policy" >&2
     exit 1
 }
-grep -Fq 'COS_TOOL_STATE_DIR:-/mnt/disks/data/cloud-compose-tools' "$INSTALLER" || {
+grep -Fq 'COS_TOOL_STATE_DIR:-/mnt/disks/data/libops-managed/bin' "$INSTALLER" || {
     echo "COS bootstrap stores an executable tool on a potentially noexec filesystem" >&2
     exit 1
 }
@@ -187,6 +187,10 @@ grep -Fq "${BUILD_PROGRAM}:/tmp/cloud-compose-build-cos-make.sh:ro" "$CALL_LOG"
 [[ -f "${DATA_DIR}/make.state" ]]
 [[ -L "${CLOUD_HOME}/bin/make" ]]
 [[ "$(readlink "${CLOUD_HOME}/bin/make")" == "${DATA_DIR}/make" ]]
+if grep -A3 -F 'chown -R cloud-compose:cloud-compose' "$INSTALLER" | grep -Fq '"${cloud_compose_home}/bin"'; then
+    echo "COS bootstrap gives the application account ownership of the privileged command directory" >&2
+    exit 1
+fi
 
 # A failed replacement must not promote a partial binary or leave a pending
 # artifact that a later boot could mistake for a completed build.

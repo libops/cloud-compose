@@ -25,7 +25,7 @@ install_cos_dependencies() {
     # COS mounts both /home and /var with noexec. Keep the verified Make binary
     # on the executable persistent data disk; only the unprivileged application
     # PATH consumes the published symlink.
-    local tool_state_dir="${2:-${COS_TOOL_STATE_DIR:-/mnt/disks/data/cloud-compose-tools}}"
+    local tool_state_dir="${2:-${COS_TOOL_STATE_DIR:-/mnt/disks/data/libops-managed/bin}}"
     local docker_bin="${3:-/usr/bin/docker}"
     local make_build_program="${4:-/etc/cloud-compose/libexec/build-cos-make.sh}"
     local make_path pending_make_path make_state_path make_state_tmp make_sha
@@ -62,14 +62,19 @@ install_cos_dependencies() {
     installer_gid="$(id -g)"
     chown "${installer_uid}:${installer_gid}" "$tool_state_dir"
     chmod 0755 "$tool_state_dir"
+    # This directory is on the privileged host PATH. Close legacy
+    # application ownership before publishing any verified tool link. The
+    # installer is root in production; the numeric identity keeps the
+    # standalone contract harness unprivileged.
+    chown "${installer_uid}:${installer_gid}" "${cloud_compose_home}/bin"
+    chmod 0755 "${cloud_compose_home}/bin"
     DOCKER_CLI_PLUGIN_DIR="${DOCKER_CONFIG}/cli-plugins" \
         bash "${cloud_compose_home}/install-docker-plugins.sh"
     DOCKER_CLI_PLUGIN_DIR="${cloud_compose_home}/.docker/cli-plugins" \
         bash "${cloud_compose_home}/install-docker-plugins.sh"
     chown -R cloud-compose:cloud-compose \
         "$DOCKER_CONFIG" \
-        "${cloud_compose_home}/.docker" \
-        "${cloud_compose_home}/bin"
+        "${cloud_compose_home}/.docker"
 
     make_path="${tool_state_dir}/make"
     make_state_path="${tool_state_dir}/make.state"

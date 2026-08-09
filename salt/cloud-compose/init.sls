@@ -209,7 +209,7 @@
   'upload_timeout': ''
 } %}
 {% set default_init = [
-  'sitectl config set-context "${SITECTL_CONTEXT_NAME}" --type local --project-dir "${DOCKER_COMPOSE_DIR}" --site "${CLOUD_COMPOSE_INSTANCE_NAME}" --plugin "${SITECTL_PLUGIN}" --environment "${SITECTL_ENVIRONMENT}" --project-name "${CLOUD_COMPOSE_INSTANCE_NAME}" --compose-project-name "${COMPOSE_PROJECT_NAME}" --docker-socket /var/run/docker.sock --env-file .env --default'
+  'sitectl config set-context "${SITECTL_CONTEXT_NAME}" --type local --project-dir "${DOCKER_COMPOSE_DIR}" --site "${CLOUD_COMPOSE_INSTANCE_NAME}" --plugin "${SITECTL_PLUGIN}" --environment "${SITECTL_ENVIRONMENT}" --compose-project-name "${COMPOSE_PROJECT_NAME}" --docker-socket /var/run/docker.sock --env-file .env --yolo --default'
 ] %}
 {% set default_up = [
   'sitectl compose --context "${SITECTL_CONTEXT_NAME}" up -d --remove-orphans',

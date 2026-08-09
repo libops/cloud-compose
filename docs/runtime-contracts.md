@@ -183,10 +183,12 @@ package list before validation. Terraform, Ansible, and Salt serialize their
 resolved map as `SITECTL_PACKAGE_VERSIONS` JSON and the privileged installer
 validates it again before downloading anything. Per-project package versions
 are not supported because projects on one host share the same binaries.
-`/home/cloud-compose/bin` is reserved for generated `sitectl` symlinks. During
-an upgrade from the former application-owned directory, the installer closes
-the directory to root and rejects any other inherited command or target rather
-than carrying an untrusted PATH entry forward.
+`/home/cloud-compose/bin` is reserved for generated managed-tool symlinks. They
+target the root-owned managed binary directory and normally comprise `sitectl`,
+its plugins, and the verified static GNU Make build required by Container-
+Optimized OS. During an upgrade from the former application-owned directory,
+the installer closes the directory to root and rejects any other inherited
+command or target rather than carrying an untrusted PATH entry forward.
 
 `sitectl_verify_args` remains a real argument list. The host stores it as JSON
 and appends each value through an argv-aware wrapper when a lifecycle command

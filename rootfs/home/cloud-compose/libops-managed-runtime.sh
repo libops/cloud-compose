@@ -130,14 +130,16 @@ validate_published_bin_directory() {
     local -a entries
 
     # /home/cloud-compose/bin was application-owned on older hosts. Preserve
-    # only the generated sitectl links whose targets remain under the validated
-    # root-owned package directory; reject every other inherited PATH entry.
+    # only generated managed-tool links whose targets remain under the
+    # validated root-owned package directory; reject every other inherited PATH
+    # entry. COS publishes its verified static Make build here because /home
+    # and /var are mounted noexec.
     shopt -s nullglob dotglob
     entries=("$path"/*)
     shopt -u nullglob dotglob
     for entry in "${entries[@]}"; do
         name="${entry##*/}"
-        if [[ ! "$name" =~ ^sitectl(-[a-z0-9]+)*$ || ! -L "$entry" ]]; then
+        if [[ ! "$name" =~ ^(make|sitectl(-[a-z0-9]+)*)$ || ! -L "$entry" ]]; then
             log "published command directory contains an unmanaged entry: ${entry}"
             return 1
         fi
