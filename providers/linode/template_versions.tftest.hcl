@@ -20,8 +20,6 @@ run "custom_package_set_merges_only_applicable_template_versions" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
@@ -63,8 +61,6 @@ run "explicit_core_only_package_set_disables_template_plugins" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = []
       }
