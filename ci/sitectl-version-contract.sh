@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 runtime_script="$repo_root/rootfs/home/cloud-compose/libops-managed-runtime.sh"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cloud-compose-sitectl-versions.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 

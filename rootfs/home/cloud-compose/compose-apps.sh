@@ -6,8 +6,47 @@ COMPOSE_PROJECTS_FILE="${COMPOSE_PROJECTS_FILE:-/home/cloud-compose/compose-proj
 COMPOSE_APPS_ENV_DIR="${COMPOSE_APPS_ENV_DIR:-/home/cloud-compose/apps}"
 COMPOSE_APPS_STATE_DIR="${COMPOSE_APPS_STATE_DIR:-/home/cloud-compose/state}"
 CLOUD_COMPOSE_DATA_ROOT="${CLOUD_COMPOSE_DATA_ROOT:-/mnt/disks/data}"
-compose_apps_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_SECRET_FILES_PROGRAM="${CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM:-$compose_apps_dir/compose-secret-files.awk}"
+_cc_compose_apps_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_compose_apps_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_compose_apps_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_compose_apps_source _cc_compose_apps_dir _cc_compose_apps_installed_home
+if [[ -n "$_cc_compose_apps_installed_home" &&
+    ( "$_cc_compose_apps_installed_home" == "/" ||
+        "$_cc_compose_apps_source" == "${_cc_compose_apps_installed_home%/}/"* ) ]]; then
+    _cc_compose_apps_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_compose_apps_checked_programs="$_cc_compose_apps_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_compose_apps_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_compose_apps_checked_programs"
+cloud_compose_bind_program_dir \
+    "$_cc_compose_apps_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_compose_apps_dir/../../etc/cloud-compose/jq" \
+    compose-validate-projects.jq \
+    compose-app-field.jq \
+    compose-app-array.jq \
+    compose-app-verify-args.jq \
+    compose-app-verify-args-json.jq \
+    compose-app-ingress-field.jq \
+    compose-app-ingress-array.jq \
+    compose-reject-host-network.jq \
+    compose-project-dirs-base64.jq \
+    compose-services-object-validate.jq \
+    array-values-base64.jq \
+    object-has-key.jq \
+    object-keys-base64.jq \
+    object-keys.jq \
+    string-array-validate.jq
+cloud_compose_bind_program \
+    "$_cc_compose_apps_source" \
+    CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM \
+    /etc/cloud-compose/awk/compose-secret-files.awk \
+    "$_cc_compose_apps_dir/../../etc/cloud-compose/awk/compose-secret-files.awk"
+COMPOSE_SECRET_FILES_PROGRAM="$CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM"
+readonly COMPOSE_SECRET_FILES_PROGRAM
 readonly COMPOSE_LIFECYCLE_EXECUTOR="/etc/cloud-compose/libexec/run-lifecycle-program.sh"
 
 run_compose_lifecycle_executor() {
@@ -66,32 +105,8 @@ validate_compose_projects_manifest() {
         return 1
     fi
 
-    if ! jq -e '
-        type == "object" and length > 0 and
-        all(to_entries[]; . as $entry |
-            ($entry.key | explode | index(0) == null) and
-            ($entry.value | type == "object") and
-            (all($entry.value | .. | select(type == "string");
-                explode | index(0) == null)) and
-            ($entry.value.docker_compose_repo | type == "string" and length > 0) and
-            ($entry.value.docker_compose_branch | type == "string" and length > 0) and
-            ($entry.value.project_dir | type == "string" and length > 0) and
-            ($entry.value.compose_project_name | type == "string" and length > 0) and
-            (all(["init_commands", "up_commands", "down_commands", "rollout_commands"][];
-                . as $field |
-                    ($entry.value[$field] == null) or
-                    (($entry.value[$field] | type) == "array" and all($entry.value[$field][]; type == "string"))
-            )) and
-            (($entry.value.sitectl_verify_args == null) or
-                (($entry.value.sitectl_verify_args | type) == "array" and all($entry.value.sitectl_verify_args[];
-                    type == "string" and
-                    (explode | index(0) == null) and
-                    (contains("\n") | not) and
-                    (contains("\r") | not)
-                ))) and
-            (($entry.value.ingress == null) or ($entry.value.ingress | type == "object"))
-        )
-    ' "$COMPOSE_PROJECTS_FILE" >/dev/null; then
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-validate-projects.jq" \
+        "$COMPOSE_PROJECTS_FILE" >/dev/null; then
         echo "Invalid cloud-compose project manifest: $COMPOSE_PROJECTS_FILE" >&2
         return 1
     fi
@@ -106,7 +121,8 @@ validate_compose_projects_manifest() {
         )" || return 1
         app="${app%$'\x1f'}"
         validate_compose_app_name "$app" || return 1
-    done < <(jq -r 'keys[] | @base64' "$COMPOSE_PROJECTS_FILE")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-keys-base64.jq" \
+        "$COMPOSE_PROJECTS_FILE")
 
     while IFS= read -r encoded_project_dir; do
         project_dir="$(
@@ -117,7 +133,8 @@ validate_compose_projects_manifest() {
         )" || return 1
         project_dir="${project_dir%$'\x1f'}"
         validate_compose_project_dir "$project_dir" || return 1
-    done < <(jq -r '.[] | .project_dir | @base64' "$COMPOSE_PROJECTS_FILE")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-project-dirs-base64.jq" \
+        "$COMPOSE_PROJECTS_FILE")
 }
 
 # Converge one already-existing manifest project without traversing or changing
@@ -248,7 +265,8 @@ compose_app_exists() {
 
     validate_compose_app_name "$app" || return 1
     validate_compose_projects_manifest || return 1
-    jq -e --arg app "$app" 'has($app)' "$COMPOSE_PROJECTS_FILE" >/dev/null || {
+    jq -e --arg key "$app" -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-has-key.jq" \
+        "$COMPOSE_PROJECTS_FILE" >/dev/null || {
         echo "Cloud-compose app is not present in the manifest: $app" >&2
         return 1
     }
@@ -260,7 +278,8 @@ compose_app_names_array() {
     local -n "result=$result_name"
 
     validate_compose_projects_manifest || return 1
-    names="$(jq -er 'keys[]' "$COMPOSE_PROJECTS_FILE")" || return 1
+    names="$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-keys.jq" \
+        "$COMPOSE_PROJECTS_FILE")" || return 1
     result=()
     while IFS= read -r app; do
         validate_compose_app_name "$app" || return 1
@@ -280,14 +299,9 @@ compose_app_field() {
     local field="$2"
 
     compose_app_exists "$app" || return 1
-    jq -er --arg app "$app" --arg field "$field" '
-        (.[$app][$field] // "" | tostring) as $value |
-        if $value | (explode | index(0) != null) or contains("\n") or contains("\r") then
-            error("invalid scalar field")
-        else
-            $value
-        end
-    ' "$COMPOSE_PROJECTS_FILE"
+    jq -er --arg app "$app" --arg field "$field" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-field.jq" \
+        "$COMPOSE_PROJECTS_FILE"
 }
 
 compose_app_array_values() {
@@ -298,20 +312,16 @@ compose_app_array_values() {
     local -n "result=$result_name"
 
     compose_app_exists "$app" || return 1
-    payload="$(jq -ce --arg app "$app" --arg field "$field" '
-        (.[$app][$field] // []) as $values |
-        if ($values | type) != "array" or any($values[]; type != "string") then
-            error("invalid string array")
-        else
-            $values
-        end
-    ' "$COMPOSE_PROJECTS_FILE")" || {
+    payload="$(jq -ce --arg app "$app" --arg field "$field" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-array.jq" \
+        "$COMPOSE_PROJECTS_FILE")" || {
         echo "Invalid $field array for cloud-compose app $app" >&2
         return 1
     }
 
     result=()
-    encoded_lines="$(jq -r '.[] | @base64' <<<"$payload")" || return 1
+    encoded_lines="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/array-values-base64.jq" \
+        <<<"$payload")" || return 1
     if [[ -z "$encoded_lines" ]]; then
         return 0
     fi
@@ -343,30 +353,18 @@ compose_app_verify_args() {
     local app="$1"
 
     compose_app_exists "$app" || return 1
-    jq -er --arg app "$app" '
-        (.[$app].sitectl_verify_args // []) as $values |
-        if ($values | type) != "array" or any($values[]; type != "string") then
-            error("invalid verify args")
-        else
-            $values | join(" ")
-        end
-    ' "$COMPOSE_PROJECTS_FILE"
+    jq -er --arg app "$app" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-verify-args.jq" \
+        "$COMPOSE_PROJECTS_FILE"
 }
 
 compose_app_verify_args_json() {
     local app="$1"
 
     compose_app_exists "$app" || return 1
-    jq -cer --arg app "$app" '
-        (.[$app].sitectl_verify_args // []) as $values |
-        if ($values | type) != "array" or any($values[];
-            type != "string" or (explode | index(0) != null) or contains("\n") or contains("\r")
-        ) then
-            error("invalid verify args")
-        else
-            $values
-        end
-    ' "$COMPOSE_PROJECTS_FILE"
+    jq -cer --arg app "$app" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-verify-args-json.jq" \
+        "$COMPOSE_PROJECTS_FILE"
 }
 
 compose_app_ingress_field() {
@@ -374,14 +372,9 @@ compose_app_ingress_field() {
     local field="$2"
 
     compose_app_exists "$app" || return 1
-    jq -er --arg app "$app" --arg field "$field" '
-        (.[$app].ingress[$field] // "" | tostring) as $value |
-        if $value | (explode | index(0) != null) or contains("\n") or contains("\r") then
-            error("invalid ingress scalar field")
-        else
-            $value
-        end
-    ' "$COMPOSE_PROJECTS_FILE"
+    jq -er --arg app "$app" --arg field "$field" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-ingress-field.jq" \
+        "$COMPOSE_PROJECTS_FILE"
 }
 
 compose_app_ingress_array_values() {
@@ -392,20 +385,16 @@ compose_app_ingress_array_values() {
     local -n "result=$result_name"
 
     compose_app_exists "$app" || return 1
-    payload="$(jq -ce --arg app "$app" --arg field "$field" '
-        (.[$app].ingress[$field] // []) as $values |
-        if ($values | type) != "array" or any($values[]; type != "string") then
-            error("invalid ingress string array")
-        else
-            $values
-        end
-    ' "$COMPOSE_PROJECTS_FILE")" || {
+    payload="$(jq -ce --arg app "$app" --arg field "$field" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-app-ingress-array.jq" \
+        "$COMPOSE_PROJECTS_FILE")" || {
         echo "Invalid ingress $field array for cloud-compose app $app" >&2
         return 1
     }
 
     result=()
-    encoded_lines="$(jq -r '.[] | @base64' <<<"$payload")" || return 1
+    encoded_lines="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/array-values-base64.jq" \
+        <<<"$payload")" || return 1
     if [[ -z "$encoded_lines" ]]; then
         return 0
     fi
@@ -692,7 +681,7 @@ configure_sitectl_verify_argv() {
     # not invoke sitectl (for example a source-policy contract). The exported
     # wrapper fails at the actual call site if the executable is missing.
     SITECTL_EXECUTABLE="$(type -P sitectl || true)"
-    if ! jq -e 'type == "array" and all(.[]; type == "string")' \
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/string-array-validate.jq" \
         <<<"${SITECTL_VERIFY_ARGS_JSON:-[]}" >/dev/null; then
         echo "Invalid sitectl verify argument JSON for ${APP_NAME:-unknown app}" >&2
         return 1
@@ -715,7 +704,8 @@ configure_sitectl_verify_argv() {
                 [[ -n "$encoded" ]] || continue
                 decoded="$(printf '%s' "$encoded" | base64 -d)" || return 1
                 configured_verify_args+=("$decoded")
-            done < <(jq -r '.[] | @base64' <<<"${SITECTL_VERIFY_ARGS_JSON:-[]}")
+            done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/array-values-base64.jq" \
+                <<<"${SITECTL_VERIFY_ARGS_JSON:-[]}")
         fi
         "$executable" "$@" "${configured_verify_args[@]}"
     }
@@ -921,7 +911,7 @@ verify_clean_compose_checkout() {
 }
 
 reject_host_network_compose_services() {
-    local config_json
+    local config_json filter_status
 
     if [[ "${CLOUD_COMPOSE_PROVIDER:-}" != "gcp" ]]; then
         return 0
@@ -934,25 +924,20 @@ reject_host_network_compose_services() {
         echo "Could not render Compose configuration for metadata-isolation validation" >&2
         return 1
     }
-    if ! jq -e '.services | type == "object"' <<<"$config_json" >/dev/null; then
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-services-object-validate.jq" \
+        <<<"$config_json" >/dev/null; then
         echo "Docker Compose returned an invalid service configuration" >&2
         return 1
     fi
-    if jq -e '
-        any(.services[];
-            (.network_mode // "") == "host" or
-            (
-                (.build | type) == "object" and
-                (
-                    (.build.network // "") == "host" or
-                    any((.build.entitlements // [])[];
-                        . == "network.host" or . == "security.insecure"
-                    )
-                )
-            )
-        )
-    ' <<<"$config_json" >/dev/null; then
+    if jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-reject-host-network.jq" \
+        <<<"$config_json" >/dev/null; then
         echo "Host runtime/build networking and insecure BuildKit entitlements are not allowed on GCP because they bypass container metadata isolation" >&2
+        return 1
+    else
+        filter_status=$?
+    fi
+    if [[ "$filter_status" -ne 1 ]]; then
+        echo "Could not evaluate Compose network isolation with the checked jq program" >&2
         return 1
     fi
 }

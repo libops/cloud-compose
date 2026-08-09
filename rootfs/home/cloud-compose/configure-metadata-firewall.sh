@@ -2,6 +2,28 @@
 
 set -euo pipefail
 
+_cc_configure_metadata_firewall_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_configure_metadata_firewall_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_configure_metadata_firewall_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_configure_metadata_firewall_source _cc_configure_metadata_firewall_dir _cc_configure_metadata_firewall_installed_home
+if [[ -n "$_cc_configure_metadata_firewall_installed_home" &&
+  ( "$_cc_configure_metadata_firewall_installed_home" == "/" ||
+    "$_cc_configure_metadata_firewall_source" == "${_cc_configure_metadata_firewall_installed_home%/}/"* ) ]]; then
+  _cc_configure_metadata_firewall_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_configure_metadata_firewall_checked_programs="$_cc_configure_metadata_firewall_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_configure_metadata_firewall_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_configure_metadata_firewall_checked_programs"
+cloud_compose_bind_source_program \
+  "$_cc_configure_metadata_firewall_source" \
+  CLOUD_COMPOSE_PROFILE_PATH \
+  /home/cloud-compose/profile.sh \
+  "$_cc_configure_metadata_firewall_dir/profile.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+readonly profile_path
+
 mode="${1:-full}"
 case "$mode" in
   full | pre-docker)
@@ -11,9 +33,6 @@ case "$mode" in
     exit 2
     ;;
 esac
-
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
 
 # shellcheck disable=SC1090
 source "$profile_path"

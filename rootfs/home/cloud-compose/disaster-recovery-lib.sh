@@ -3,9 +3,45 @@
 # Shared validation for the provider-neutral disaster-recovery driver contract.
 # The caller must enable `set -euo pipefail` before sourcing this file.
 
+_cc_dr_library_source="$(readlink -f -- "${BASH_SOURCE[0]}")" || {
+    echo "Could not resolve the Cloud Compose disaster-recovery library path" >&2
+    return 1 2>/dev/null || exit 1
+}
+_cc_dr_library_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || {
+    echo "Could not resolve the Cloud Compose disaster-recovery library directory" >&2
+    return 1 2>/dev/null || exit 1
+}
+_cc_dr_library_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_dr_library_source _cc_dr_library_dir _cc_dr_library_installed_home
+if [[ -n "$_cc_dr_library_installed_home" &&
+    ( "$_cc_dr_library_installed_home" == "/" ||
+        "$_cc_dr_library_source" == "${_cc_dr_library_installed_home%/}/"* ) ]]; then
+    _cc_dr_library_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_dr_library_checked_programs="$_cc_dr_library_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_dr_library_checked_programs
+# shellcheck disable=SC1090
+if ! source "$_cc_dr_library_checked_programs"; then
+    echo "Could not load the checked Cloud Compose program resolver" >&2
+    return 1 2>/dev/null || exit 1
+fi
+if ! cloud_compose_bind_program_dir \
+    "$_cc_dr_library_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_dr_library_dir/../../etc/cloud-compose/jq" \
+    dr-validate-backup-receipt.jq \
+    dr-backup-completed-at.jq \
+    dr-backup-remote-id.jq \
+    dr-validate-restore-proof.jq \
+    dr-restore-completed-at.jq \
+    dr-restore-recovery-id.jq; then
+    return 1 2>/dev/null || exit 1
+fi
+
 CLOUD_COMPOSE_DR_STATE_ROOT="${CLOUD_COMPOSE_DR_STATE_ROOT:-/mnt/disks/data/.cloud-compose-disaster-recovery}"
 CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="${CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER:-/etc/cloud-compose/libexec/offhost-backup-driver}"
-CLOUD_COMPOSE_JQ_PROGRAM_DIR="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/etc/cloud-compose/jq}"
 
 cloud_compose_dr_is_required() {
     case "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}" in
@@ -44,6 +80,18 @@ cloud_compose_dr_validate_remote_id() {
         echo "$label contains unsupported characters or exceeds 512 bytes" >&2
         return 1
     fi
+}
+
+cloud_compose_dr_sha256_file() {
+    local path="$1" output digest
+
+    output="$(sha256sum -- "$path")" || return 1
+    digest="${output%% *}"
+    if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "sha256sum returned an invalid digest for: $path" >&2
+        return 1
+    fi
+    printf '%s\n' "$digest"
 }
 
 cloud_compose_dr_validate_driver() {

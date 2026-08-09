@@ -84,8 +84,12 @@ CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh" bash --noprofile --norc -c '
   managed_artifact_metadata_matches "$2" 0755 "$3" "$4"
   ! managed_artifact_metadata_matches "$2" 0755 wrong-owner "$4"
   ! managed_artifact_metadata_matches "$2" 0755 "$3" wrong-group
-' managed-artifact-metadata "$runtime_script" "$target" "$artifact_owner" "$artifact_group" || \
-  fail "owner/group metadata does not participate in the installed-spec gate"
+  test "$(tab_separated_field_count "$5")" = 8
+  test "$(tab_separated_field_count "$6")" = 9
+' managed-artifact-metadata "$runtime_script" "$target" "$artifact_owner" "$artifact_group" \
+  $'one\ttwo\tthree\tfour\tfive\tsix\tseven\t' \
+  $'one\ttwo\tthree\tfour\tfive\tsix\tseven\teight\t' || \
+  fail "managed-artifact metadata or tab-field parsing contract failed"
 chmod 0644 "$target"
 : >"$curl_log"
 run_install
@@ -141,6 +145,7 @@ assert_rejected $'tool\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0
 assert_rejected $'tool\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0755\troot\troot\t-unit.service'
 assert_rejected $'tool\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0755\troot\troot\tunit;id.service'
 assert_rejected $'tool\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0755\troot\troot'
+assert_rejected $'tool\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0755\troot\troot\tunit.service\textra'
 long_name="$(printf 'a%.0s' {1..129})"
 assert_rejected "$long_name"$'\thttps://example.invalid/tool\t'"$sha"$'\t'"$target"$'\t0755\troot\troot\t'
 

@@ -2,9 +2,29 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
-rotate_keys_script="${CLOUD_COMPOSE_ROTATE_KEYS_PATH:-$script_dir/rotate-keys.sh}"
+_cc_rotate_keys_internal_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_rotate_keys_internal_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_rotate_keys_internal_source script_dir _cc_rotate_keys_internal_installed_home
+if [[ -n "$_cc_rotate_keys_internal_installed_home" &&
+  ( "$_cc_rotate_keys_internal_installed_home" == "/" ||
+    "$_cc_rotate_keys_internal_source" == "${_cc_rotate_keys_internal_installed_home%/}/"* ) ]]; then
+  _cc_rotate_keys_internal_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_rotate_keys_internal_checked_programs="$script_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_rotate_keys_internal_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_rotate_keys_internal_checked_programs"
+cloud_compose_bind_source_program \
+  "$_cc_rotate_keys_internal_source" CLOUD_COMPOSE_PROFILE_PATH \
+  /home/cloud-compose/profile.sh "$script_dir/profile.sh"
+cloud_compose_bind_source_program \
+  "$_cc_rotate_keys_internal_source" CLOUD_COMPOSE_ROTATE_KEYS_PATH \
+  /home/cloud-compose/rotate-keys.sh "$script_dir/rotate-keys.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+rotate_keys_script="$CLOUD_COMPOSE_ROTATE_KEYS_PATH"
+readonly profile_path rotate_keys_script
 
 # shellcheck disable=SC1090
 source "$profile_path"

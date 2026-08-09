@@ -661,7 +661,9 @@ cloud-compose-rootfs:
 cloud-compose-privileged-program-directories:
   file.directory:
     - names:
+      - {{ home | json }}
       - /etc/cloud-compose
+      - /etc/cloud-compose/awk
       - /etc/cloud-compose/bin
       - /etc/cloud-compose/jq
       - /etc/cloud-compose/libexec
@@ -692,10 +694,29 @@ cloud-compose-rootfs-script-modes:
       - file: cloud-compose-rootfs
       - file: cloud-compose-privileged-program-directories
 
+cloud-compose-checked-program-resolver:
+  file.managed:
+    - name: /etc/cloud-compose/libexec/checked-programs.bash
+    - source: salt://rootfs/etc/cloud-compose/libexec/checked-programs.bash
+    - user: root
+    - group: root
+    - mode: '0644'
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
 cloud-compose-rootfs-jq-modes:
   cmd.run:
     - name: find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' -exec chown root:root {} + -exec chmod 0644 {} +
     - unless: test -z "$(find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
+cloud-compose-rootfs-awk-modes:
+  cmd.run:
+    - name: find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' -exec chown root:root {} + -exec chmod 0644 {} +
+    - unless: test -z "$(find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
     - require:
       - file: cloud-compose-rootfs
       - file: cloud-compose-privileged-program-directories
@@ -779,7 +800,9 @@ cloud-compose-bootstrap-paths-hardened:
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
       - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}
 {% endfor %}
@@ -805,6 +828,9 @@ cloud-compose-rollout-service:
       - file: cloud-compose-rootfs
       - cmd: cloud-compose-lifecycle-lock
       - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
+      - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
       - file: cloud-compose-lifecycle-init
       - file: cloud-compose-lifecycle-up
       - file: cloud-compose-lifecycle-down
@@ -838,7 +864,9 @@ cloud-compose-bootstrap:
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
       - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
       - cmd: cloud-compose-bootstrap-paths-hardened
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}

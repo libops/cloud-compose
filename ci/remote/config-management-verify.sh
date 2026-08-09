@@ -39,6 +39,34 @@ for program in \
   test -x "$program"
 done
 
+shopt -s nullglob dotglob
+awk_programs=(/etc/cloud-compose/awk/*.awk)
+jq_programs=(/etc/cloud-compose/jq/*.jq)
+shopt -u nullglob dotglob
+(( ${#awk_programs[@]} > 0 ))
+(( ${#jq_programs[@]} > 0 ))
+data_programs=(
+  /etc/cloud-compose/libexec/checked-programs.bash
+  "${awk_programs[@]}"
+  "${jq_programs[@]}"
+)
+for data_program in "${data_programs[@]}"; do
+  test ! -L "$data_program"
+  test -f "$data_program"
+  test "$(stat -c '%u:%g:%a:%h' -- "$data_program")" = "0:0:644:1"
+done
+
+for program_parent in \
+  /home/cloud-compose \
+  /etc/cloud-compose \
+  /etc/cloud-compose/awk \
+  /etc/cloud-compose/jq \
+  /etc/cloud-compose/libexec; do
+  test ! -L "$program_parent"
+  test -d "$program_parent"
+  test "$(stat -c '%u:%g:%a' -- "$program_parent")" = "0:0:755"
+done
+
 python3 -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
 python3 -m json.tool /home/cloud-compose/application-env.json >/dev/null
 python3 "$runtime_state_contract"

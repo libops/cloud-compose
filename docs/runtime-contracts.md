@@ -172,13 +172,32 @@ failures remain available to the existing warning-level collector.
 Root systemd jobs enter through `/etc/cloud-compose/libexec`, validate the
 root-owned home scripts and control inputs, and only then execute their
 allowlisted `/home/cloud-compose` program. The privileged entrypoints,
-diagnostics command, and checked-in `jq` programs live below
-`/etc/cloud-compose/{libexec,bin,jq}` because COS permits cloud-init to rebuild
+diagnostics command, and checked-in `jq` and AWK programs live below
+`/etc/cloud-compose/{libexec,bin,jq,awk}` because COS permits cloud-init to rebuild
 that stateless tree while its `/usr` filesystem is immutable. Application
 services retain their unprivileged execution model. Compose diagnostics run as
 the application account and select the verified plugin copy below the
 executable data disk explicitly; they do not fall back to the compatibility
 copy below COS's `noexec` `/home` mount.
+
+An installed script resolved below `/home/cloud-compose` always uses the fixed
+`/etc/cloud-compose/jq` and `/etc/cloud-compose/awk` programs. Environment
+overrides for those programs, the shared profile, key-rotation entrypoint, or
+any other sourced runtime helper are rejected in installed mode. Repository
+and CI fixtures may select checked programs only while the owning script resolves
+outside the installed home. Before an installed program is consumed, its
+canonical root-owned parent chain must contain no symlink or group/world-writable
+directory. The only accepted logical alias is the operating-system-owned
+`/home -> /var/home` link used by Fedora CoreOS. The program itself must be a
+root-owned, single-link, non-writable regular file. Configuration-management
+adapters make `/home/cloud-compose` root-owned immediately after copying rootfs,
+before any root execution; mutable application state remains in its explicitly
+account-owned child/data paths. A checked directory binding validates every
+direct `jq` or AWK program in that installed directory, so adding a new filter
+cannot bypass per-file ownership, link, and mode checks. Production rootfs shell
+scripts invoke `jq` and AWK only with checked `-f` program files; the static CI
+contract rejects embedded filters so review and integrity checks cannot be
+bypassed by a later one-line program.
 
 Terraform and cloud-init are transport and orchestration boundaries, not the
 home of bootstrap implementations. The GCP and provider-neutral templates
@@ -197,7 +216,10 @@ root-controlled program files before they are sourced at their documented
 points in the bootstrap sequence. Keep substantive shell, Python, `jq`, and
 similar programs in reviewed files; do not interpolate them into Terraform
 heredocs, cloud-init command strings, Compose commands, or configuration-
-management task bodies.
+management task bodies. The early filesystem path stages its checked-in fstab
+AWK program from the same Terraform source or already verified rootfs archive,
+requires an unlinked root-owned mode-0600 file, and invokes it as data with
+`awk -f` before the full stateless rootfs is available.
 
 ## Sitectl
 

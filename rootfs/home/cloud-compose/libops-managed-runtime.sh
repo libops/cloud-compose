@@ -2,8 +2,47 @@
 
 set -euo pipefail
 
+_cc_managed_runtime_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_managed_runtime_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_managed_runtime_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_managed_runtime_source _cc_managed_runtime_dir _cc_managed_runtime_installed_home
+if [[ -n "$_cc_managed_runtime_installed_home" &&
+    ( "$_cc_managed_runtime_installed_home" == "/" ||
+        "$_cc_managed_runtime_source" == "${_cc_managed_runtime_installed_home%/}/"* ) ]]; then
+    _cc_managed_runtime_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_managed_runtime_checked_programs="$_cc_managed_runtime_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_managed_runtime_checked_programs
 # shellcheck disable=SC1090
-source "${CLOUD_COMPOSE_PROFILE_PATH:-/home/cloud-compose/profile.sh}"
+source "$_cc_managed_runtime_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh \
+    "$_cc_managed_runtime_dir/profile.sh"
+
+# shellcheck disable=SC1090
+source "$CLOUD_COMPOSE_PROFILE_PATH"
+
+# Reload the fixed resolver after the profile before binding data programs.
+# shellcheck disable=SC1090
+source "$_cc_managed_runtime_checked_programs"
+cloud_compose_bind_program_dir \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_managed_runtime_dir/../../etc/cloud-compose/jq" \
+    github-latest-release-tag.jq \
+    sitectl-package-version.jq \
+    sitectl-package-versions-validate.jq \
+    object-field-delimited.jq \
+    object-keys-base64.jq
+cloud_compose_bind_program \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_RELEASE_CHECKSUM_ENTRY_PROGRAM \
+    /etc/cloud-compose/awk/release-checksum-entry.awk \
+    "$_cc_managed_runtime_dir/../../etc/cloud-compose/awk/release-checksum-entry.awk"
 
 LOG_PREFIX="[libops-managed-runtime]"
 STATE_DIR="/mnt/disks/data/libops-managed"
@@ -201,10 +240,8 @@ latest_release_tag() {
         return 1
     fi
 
-    if ! tag="$(jq -jr '
-        (.tag_name | select(type == "string" and length > 0 and (explode | index(0) == null))),
-        "\u001f"
-    ' "$metadata")"; then
+    if ! tag="$(jq -jr -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/github-latest-release-tag.jq" \
+        "$metadata")"; then
         log "latest release metadata for ${package} did not contain a tag"
         rm -f "$metadata"
         return 1
@@ -325,7 +362,8 @@ install_release_package() {
         --connect-timeout 10 --max-time 300 -o "${tmp}/checksums.txt" -- "${base_url}/checksums.txt"
 
     checksum_file="${tmp}/checksums.selected.txt"
-    awk -v archive="$archive" '$2 == archive { print }' "${tmp}/checksums.txt" >"$checksum_file"
+    awk -v archive="$archive" -f "$CLOUD_COMPOSE_RELEASE_CHECKSUM_ENTRY_PROGRAM" \
+        "${tmp}/checksums.txt" >"$checksum_file"
     if [[ "$(wc -l <"$checksum_file")" -ne 1 ]]; then
         log "release checksums must contain exactly one entry for ${archive}"
         rm -rf -- "$tmp"
@@ -408,7 +446,7 @@ sitectl_package_version() {
     local fallback="${SITECTL_VERSION:-latest}"
 
     jq -er --arg package "$package" --arg fallback "$fallback" \
-        '.[$package] // $fallback' \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/sitectl-package-version.jq" \
         <<<"$(sitectl_package_versions_json)"
 }
 
@@ -423,14 +461,8 @@ validate_sitectl_configuration() {
     fi
 
     versions_json="$(sitectl_package_versions_json)"
-    if ! jq -e '
-        type == "object" and
-        all(to_entries[];
-            (.key | explode | index(0) == null) and
-            (.value | type == "string") and
-            (.value | explode | index(0) == null)
-        )
-    ' <<<"$versions_json" >/dev/null; then
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/sitectl-package-versions-validate.jq" \
+        <<<"$versions_json" >/dev/null; then
         log "SITECTL_PACKAGE_VERSIONS must be a JSON object of sitectl package names to latest or exact semantic-version release tags"
         return 1
     fi
@@ -455,7 +487,9 @@ validate_sitectl_configuration() {
             log "SITECTL_PACKAGE_VERSIONS contains an invalid package name: ${override}"
             return 1
         fi
-        override_version="$(jq -jr --arg package "$override" '(.[$package]), "\u001f"' <<<"$versions_json")" || return 1
+        override_version="$(jq -jr --arg field "$override" \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" \
+            <<<"$versions_json")" || return 1
         override_version="${override_version%$'\x1f'}"
         if ! valid_sitectl_version "$override_version"; then
             log "SITECTL_PACKAGE_VERSIONS contains an invalid release tag for ${override}: ${override_version}"
@@ -465,7 +499,8 @@ validate_sitectl_configuration() {
             log "SITECTL_PACKAGE_VERSIONS contains an uninstalled package: ${override}"
             return 1
         fi
-    done < <(jq -r 'keys[] | @base64' <<<"$versions_json")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-keys-base64.jq" \
+        <<<"$versions_json")
 }
 
 validate_stale_managed_sitectl_package() {
@@ -802,6 +837,17 @@ write_artifact_state() {
     mv -f -- "$state_tmp" "$state_file"
 }
 
+tab_separated_field_count() {
+    local value="$1"
+    local count=1
+
+    while [[ "$value" == *$'\t'* ]]; do
+        value="${value#*$'\t'}"
+        ((count += 1))
+    done
+    printf '%s\n' "$count"
+}
+
 install_managed_artifacts() {
     local line name url sha path mode owner group restart index
     local state_file failed_state download_tmp install_tmp target_dir target_name backup
@@ -820,7 +866,7 @@ install_managed_artifacts() {
         if [ -z "$line" ] || [[ "$line" == \#* ]]; then
             continue
         fi
-        field_count="$(awk -F '\t' '{ print NF }' <<<"$line")"
+        field_count="$(tab_separated_field_count "$line")"
         if [[ "$field_count" != "8" ]]; then
             log "managed artifact manifest row must contain exactly eight tab-separated fields"
             return 1

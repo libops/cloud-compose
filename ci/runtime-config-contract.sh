@@ -74,7 +74,9 @@ assert_runtime_values() {
 
   # The child shell receives values as positional parameters.
   # shellcheck disable=SC2016
-  env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" bash --noprofile --norc -c '
+  env -i PATH=/usr/bin:/bin \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+    CLOUD_COMPOSE_ENV_FILE="$env_file" bash --noprofile --norc -c '
     source "$1"
     shift
     test "$BACKTICKS" = "$1"
@@ -249,7 +251,9 @@ update_dir="$tmp/update"
 mkdir -p "$update_dir"
 cp "$env_file" "$update_dir/.env"
 UPDATE_VALUE=$'updated $(touch update-injection) "quote" \\ path\nnext line'
-env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$update_dir/.env" \
+env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$update_dir/.env" \
   bash --noprofile --norc -c '
     source "$1"
     cd "$2"
@@ -272,7 +276,9 @@ DOMAIN=example.org
 EXPANDED=${DOMAIN}/path
 SINGLE_QUOTED='literal $DOMAIN'
 EOF
-env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" \
+env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$env_file" \
   bash --noprofile --norc -c '
     source "$1"
     cd "$2"
@@ -306,7 +312,9 @@ jq -n \
   '$ARGS.named' >"$tmp/application-env.json"
 # The child shell receives file paths as positional parameters.
 # shellcheck disable=SC2016
-env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" \
+env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$env_file" \
   CLOUD_COMPOSE_APPLICATION_ENV_FILE="$tmp/application-env.json" \
   bash --noprofile --norc -c '
     source "$1"
@@ -323,7 +331,9 @@ test ! -e "$tmp/command-injection"
 unsafe_update_dir="$tmp/unsafe-update"
 mkdir -p "$unsafe_update_dir"
 ln -s /etc/passwd "$unsafe_update_dir/.env"
-if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" \
+if env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$env_file" \
   bash --noprofile --norc -c '
     source "$1"
     cd "$2"
@@ -335,7 +345,9 @@ if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" \
   exit 1
 fi
 
-if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" \
+if env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$env_file" \
   bash --noprofile --norc -c '
     source "$1"
     cd "$2"
@@ -350,7 +362,9 @@ fi
 printf '%s\n' 'BAD-NAME="value"' >"$tmp/invalid.env"
 # Source runs in the intentionally isolated child shell.
 # shellcheck disable=SC2016
-if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$tmp/invalid.env" \
+if env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$tmp/invalid.env" \
   bash --noprofile --norc -c 'source "$1"' cloud-compose-env \
   "$repo_root/rootfs/home/cloud-compose/profile.sh" >/dev/null 2>&1; then
   echo "Runtime environment loader accepted an unsafe variable name" >&2
@@ -365,7 +379,9 @@ for invalid_value in \
   printf '%s\n' "$invalid_value" >"$tmp/invalid.env"
   # Source runs in the intentionally isolated child shell.
   # shellcheck disable=SC2016
-  if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$tmp/invalid.env" \
+  if env -i PATH=/usr/bin:/bin \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+    CLOUD_COMPOSE_ENV_FILE="$tmp/invalid.env" \
     bash --noprofile --norc -c 'source "$1"' cloud-compose-env \
     "$repo_root/rootfs/home/cloud-compose/profile.sh" >/dev/null 2>&1; then
     echo "Runtime environment loader accepted data outside the encoding contract: $invalid_value" >&2
@@ -374,7 +390,9 @@ for invalid_value in \
 done
 
 retry_log="$tmp/retry.log"
-if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" MAX_RETRIES=1 \
+if env -i PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+  CLOUD_COMPOSE_ENV_FILE="$env_file" MAX_RETRIES=1 \
   bash --noprofile --norc -c '
     source "$1"
     retry_until_success /bin/false "https://example.invalid/?token=must-not-appear"
@@ -398,7 +416,9 @@ for assignment in \
   'SLEEP_INCREMENT=1+1' \
   'SLEEP_INCREMENT=a[$(touch /tmp/cloud-compose-retry-injection)]'; do
   rm -f /tmp/cloud-compose-retry-injection
-  if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$env_file" "$assignment" \
+  if env -i PATH=/usr/bin:/bin \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq" \
+    CLOUD_COMPOSE_ENV_FILE="$env_file" "$assignment" \
     bash --noprofile --norc -c '
       source "$1"
       retry_until_success /bin/true

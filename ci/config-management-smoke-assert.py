@@ -15,6 +15,7 @@ RUNTIME_HOME = Path("/home/cloud-compose")
 PRIVILEGED_PROGRAM_ROOT = Path("/etc/cloud-compose")
 DIAGNOSTICS_PROGRAM = PRIVILEGED_PROGRAM_ROOT / "bin/cloud-compose-diagnostics.sh"
 BOOTSTRAP_LIBEXEC = Path("/etc/cloud-compose/libexec")
+AWK_PROGRAM_DIR = PRIVILEGED_PROGRAM_ROOT / "awk"
 JQ_PROGRAM_DIR = PRIVILEGED_PROGRAM_ROOT / "jq"
 
 
@@ -63,8 +64,14 @@ def assert_runtime_files() -> None:
         assert os.access(path, os.X_OK), path
 
     for path in [
+        BOOTSTRAP_LIBEXEC / "checked-programs.bash",
+        AWK_PROGRAM_DIR / "compose-secret-files.awk",
+        AWK_PROGRAM_DIR / "reconcile-fstab.awk",
+        AWK_PROGRAM_DIR / "release-checksum.awk",
         JQ_PROGRAM_DIR / "diagnostics-validate-compose-projects.jq",
+        JQ_PROGRAM_DIR / "compose-validate-projects.jq",
         JQ_PROGRAM_DIR / "offhost-validate-manifest.jq",
+        JQ_PROGRAM_DIR / "rotation-validate-state.jq",
         JQ_PROGRAM_DIR / "sitectl-verify-args.jq",
     ]:
         assert path.exists(), path
@@ -97,13 +104,25 @@ def assert_runtime_files() -> None:
             oct(stat.S_IMODE(metadata.st_mode)),
         )
 
+    checked_programs = BOOTSTRAP_LIBEXEC / "checked-programs.bash"
+    checked_programs_metadata = checked_programs.lstat()
+    assert not checked_programs.is_symlink()
+    assert checked_programs_metadata.st_uid == 0
+    assert checked_programs_metadata.st_gid == 0
+    assert checked_programs_metadata.st_nlink == 1
+    assert stat.S_IMODE(checked_programs_metadata.st_mode) == 0o644
+
     for path in [
+        RUNTIME_HOME,
         PRIVILEGED_PROGRAM_ROOT,
+        AWK_PROGRAM_DIR,
         DIAGNOSTICS_PROGRAM.parent,
         BOOTSTRAP_LIBEXEC,
         JQ_PROGRAM_DIR,
     ]:
-        metadata = path.stat()
+        assert not path.is_symlink(), path
+        metadata = path.lstat()
+        assert stat.S_ISDIR(metadata.st_mode), path
         assert metadata.st_uid == 0, (path, metadata.st_uid)
         assert metadata.st_gid == 0, (path, metadata.st_gid)
         assert stat.S_IMODE(metadata.st_mode) == 0o755, (
@@ -124,7 +143,24 @@ def assert_runtime_files() -> None:
     jq_programs = list(JQ_PROGRAM_DIR.glob("*.jq"))
     assert jq_programs
     for path in jq_programs:
-        metadata = path.stat()
+        assert not path.is_symlink(), path
+        metadata = path.lstat()
+        assert stat.S_ISREG(metadata.st_mode), path
+        assert metadata.st_nlink == 1, (path, metadata.st_nlink)
+        assert metadata.st_uid == 0, (path, metadata.st_uid)
+        assert metadata.st_gid == 0, (path, metadata.st_gid)
+        assert stat.S_IMODE(metadata.st_mode) == 0o644, (
+            path,
+            oct(stat.S_IMODE(metadata.st_mode)),
+        )
+
+    awk_programs = list(AWK_PROGRAM_DIR.glob("*.awk"))
+    assert awk_programs
+    for path in awk_programs:
+        assert not path.is_symlink(), path
+        metadata = path.lstat()
+        assert stat.S_ISREG(metadata.st_mode), path
+        assert metadata.st_nlink == 1, (path, metadata.st_nlink)
         assert metadata.st_uid == 0, (path, metadata.st_uid)
         assert metadata.st_gid == 0, (path, metadata.st_gid)
         assert stat.S_IMODE(metadata.st_mode) == 0o644, (

@@ -528,7 +528,9 @@
     group: root
     mode: "0755"
   loop:
+    - "{{ cloud_compose_home }}"
     - /etc/cloud-compose
+    - /etc/cloud-compose/awk
     - /etc/cloud-compose/bin
     - /etc/cloud-compose/jq
     - /etc/cloud-compose/libexec
@@ -581,6 +583,14 @@
     mode: "0755"
   loop: "{{ cloud_compose_shell_scripts.files }}"
 
+- name: Make checked Cloud Compose program resolver root-controlled
+  ansible.builtin.file:
+    path: /etc/cloud-compose/libexec/checked-programs.bash
+    state: file
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Find checked-in Cloud Compose jq programs
   ansible.builtin.find:
     paths: /etc/cloud-compose/jq
@@ -596,6 +606,22 @@
     group: root
     mode: "0644"
   loop: "{{ cloud_compose_jq_programs.files }}"
+
+- name: Find checked-in Cloud Compose awk programs
+  ansible.builtin.find:
+    paths: /etc/cloud-compose/awk
+    patterns: "*.awk"
+    recurse: false
+    file_type: file
+  register: cloud_compose_awk_programs
+
+- name: Make checked-in Cloud Compose awk programs root-controlled
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ cloud_compose_awk_programs.files }}"
 
 - name: Write cloud-compose lifecycle dispatchers
   ansible.builtin.copy:

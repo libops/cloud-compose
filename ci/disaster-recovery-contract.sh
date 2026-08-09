@@ -63,12 +63,15 @@ bash "$backup_script"
 [[ "$(grep -c '^backup$' "$tmp/drivers/good-driver.calls")" == "2" ]] || \
   fail "nightly flow skipped off-host transfer when the daily dump already existed"
 
-published_receipt_sha="$(sha256sum "$receipt" | awk '{print $1}')"
+published_receipt_sha="$(sha256sum -- "$receipt")"
+published_receipt_sha="${published_receipt_sha%% *}"
 export CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="$tmp/drivers/incomplete-driver"
 if bash "$backup_script" >/dev/null 2>&1; then
   fail "driver receipt without complete volume coverage was accepted"
 fi
-[[ "$(sha256sum "$receipt" | awk '{print $1}')" == "$published_receipt_sha" ]] || \
+current_receipt_sha="$(sha256sum -- "$receipt")"
+current_receipt_sha="${current_receipt_sha%% *}"
+[[ "$current_receipt_sha" == "$published_receipt_sha" ]] || \
   fail "invalid driver output replaced the last validated receipt"
 
 export CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER="$tmp/drivers/good-driver"

@@ -1,5 +1,29 @@
 #!/usr/bin/env bash
 
+_cc_profile_source="$(readlink -f -- "${BASH_SOURCE[0]}")" || {
+    echo "Could not resolve the Cloud Compose profile path" >&2
+    return 1 2>/dev/null || exit 1
+}
+_cc_profile_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || {
+    echo "Could not resolve the Cloud Compose profile directory" >&2
+    return 1 2>/dev/null || exit 1
+}
+_cc_profile_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_profile_source _cc_profile_dir _cc_profile_installed_home
+if [[ -n "$_cc_profile_installed_home" &&
+    ( "$_cc_profile_installed_home" == "/" ||
+        "$_cc_profile_source" == "${_cc_profile_installed_home%/}/"* ) ]]; then
+    _cc_profile_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_profile_checked_programs="$_cc_profile_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_profile_checked_programs
+# shellcheck disable=SC1090
+if ! source "$_cc_profile_checked_programs"; then
+    echo "Could not load the checked Cloud Compose program resolver" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
 decode_runtime_env_value() {
     local encoded="$1"
     local output="" character next index
@@ -104,6 +128,17 @@ if ! load_runtime_env "${CLOUD_COMPOSE_ENV_FILE:-/home/cloud-compose/.env}"; the
         return 1
     fi
     exit 1
+fi
+
+if ! cloud_compose_bind_program_dir \
+    "$_cc_profile_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_profile_dir/../../etc/cloud-compose/jq" \
+    application-env-validate.jq \
+    object-entries-sorted-base64.jq \
+    object-field-delimited.jq; then
+    return 1 2>/dev/null || exit 1
 fi
 
 if ((EUID == 0)); then
@@ -329,14 +364,8 @@ sync_compose_application_env() (
         echo "Refusing unsafe Compose environment path: $env_file" >&2
         return 1
     fi
-    if ! jq -e '
-        type == "object" and
-        all(to_entries[];
-            (.key | explode | index(0) == null) and
-            (.value | type == "string") and
-            (.value | explode | index(0) == null)
-        )
-    ' "$application_env_file" >/dev/null; then
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/application-env-validate.jq" \
+        "$application_env_file" >/dev/null; then
         echo "Invalid Compose application environment data: $application_env_file" >&2
         return 1
     fi
@@ -349,7 +378,8 @@ sync_compose_application_env() (
     }
     trap 'rm -f -- "$entries_file" "$tmp_file"' EXIT
 
-    jq -r 'to_entries | sort_by(.key)[] | @base64' "$application_env_file" >"$entries_file" || return 1
+    jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-entries-sorted-base64.jq" \
+        "$application_env_file" >"$entries_file" || return 1
 
     if [[ -f "$env_file" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -372,13 +402,17 @@ sync_compose_application_env() (
     while IFS= read -r encoded || [[ -n "$encoded" ]]; do
         [[ -n "$encoded" ]] || continue
         entry_json="$(printf '%s' "$encoded" | base64 -d)" || return 1
-        name="$(jq -jr '.key, "\u001f"' <<<"$entry_json")" || return 1
+        name="$(jq -jr --arg field key \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" \
+            <<<"$entry_json")" || return 1
         name="${name%$'\x1f'}"
         if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
             echo "Invalid Compose application environment data: $application_env_file" >&2
             return 1
         fi
-        value="$(jq -jr '.value, "\u001f"' <<<"$entry_json")" || return 1
+        value="$(jq -jr --arg field value \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" \
+            <<<"$entry_json")" || return 1
         value="${value%$'\x1f'}"
         printf '# cloud-compose application: %s\n' "$name" >>"$tmp_file"
         write_runtime_env_assignment "$name" "$value" >>"$tmp_file" || return 1

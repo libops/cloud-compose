@@ -2,7 +2,7 @@ mock_provider "digitalocean" {}
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
       status_code   = 200
     }
   }

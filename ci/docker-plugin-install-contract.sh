@@ -103,6 +103,7 @@ run_installer() {
 
     PATH="${BIN_DIR}:$PATH" \
         DOCKER_PLUGIN_INSTALLER="$INSTALLER" \
+        CLOUD_COMPOSE_RELEASE_CHECKSUM_PROGRAM="$ROOT_DIR/rootfs/etc/cloud-compose/awk/release-checksum.awk" \
         DOCKER_CLI_PLUGIN_DIR="$PLUGIN_DIR" \
         DOCKER_COMPOSE_VERSION="$compose_version" \
         DOCKER_BUILDX_VERSION="$buildx_version" \

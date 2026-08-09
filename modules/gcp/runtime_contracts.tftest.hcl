@@ -2,7 +2,7 @@ mock_provider "cloudinit" {}
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
       status_code   = 200
     }
   }
@@ -104,9 +104,17 @@ run "disables_privileged_services_by_default" {
         local.cloud_init_yaml,
         filebase64("${path.module}/../../rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"),
       ) &&
+      strcontains(
+        local.cloud_init_yaml,
+        filebase64("${path.module}/../../rootfs/etc/cloud-compose/awk/reconcile-fstab.awk"),
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/jq/compose-validate-projects.jq\"",
+      ) &&
       strcontains(local.cloud_init_yaml, "Content-Type: text/cloud-boothook")
     )
-    error_message = "GCP's early every-boot filesystem program and root runtime environment must carry the same immutable data-disk identity."
+    error_message = "GCP's early every-boot filesystem programs and root runtime environment must carry the same immutable data-disk identity and checked fstab reconciler."
   }
 
   assert {
@@ -567,7 +575,7 @@ run "renders_verified_archive_before_downstream_overlay" {
   override_data {
     target = data.http.rootfs_contract[0]
     values = {
-      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
       status_code   = 200
     }
   }
@@ -752,7 +760,7 @@ run "rejects_archive_without_checksum" {
   override_data {
     target = data.http.rootfs_contract[0]
     values = {
-      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
       status_code   = 200
     }
   }

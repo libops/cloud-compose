@@ -99,6 +99,7 @@ export COMPOSE_PROJECTS_FILE="$tmp/compose-projects.json"
 export COMPOSE_APPS_ENV_DIR="$tmp/apps"
 export COMPOSE_APPS_STATE_DIR="$tmp/state"
 export CLOUD_COMPOSE_DATA_ROOT="$tmp/data"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 mkdir -p "$CLOUD_COMPOSE_DATA_ROOT/project"
 
 # shellcheck disable=SC1091
@@ -229,6 +230,21 @@ fi
 FAKE_COMPOSE_CONFIG="$(jq -cn '{services:{web:{network_mode:"default"}}}')"
 export FAKE_COMPOSE_CONFIG
 reject_host_network_compose_services
+
+checked_jq_program_dir="$CLOUD_COMPOSE_JQ_PROGRAM_DIR"
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="$tmp/missing-jq-programs"
+if reject_host_network_compose_services >/dev/null 2>&1; then
+  fail "GCP metadata isolation accepted a missing checked jq program"
+fi
+mkdir -p "$tmp/invalid-jq-programs"
+cp "$repo_root/ci/fixtures/invalid-checked-program.jq" \
+  "$tmp/invalid-jq-programs/compose-reject-host-network.jq"
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="$tmp/invalid-jq-programs"
+if reject_host_network_compose_services >/dev/null 2>&1; then
+  fail "GCP metadata isolation accepted an invalid checked jq program"
+fi
+CLOUD_COMPOSE_JQ_PROGRAM_DIR="$checked_jq_program_dir"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR
 
 FAKE_COMPOSE_CONFIG="$(jq -cn '{services:{web:{build:{context:".",network:"host"}}}}')"
 export FAKE_COMPOSE_CONFIG

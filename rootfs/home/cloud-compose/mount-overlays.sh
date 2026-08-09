@@ -2,8 +2,33 @@
 
 set -euo pipefail
 
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-/home/cloud-compose/profile.sh}"
-overlay_script="${CLOUD_COMPOSE_OVERLAY_INIT_PATH:-/home/cloud-compose/overlay-init.sh}"
+_cc_mount_overlays_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_mount_overlays_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_mount_overlays_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_mount_overlays_source _cc_mount_overlays_dir _cc_mount_overlays_installed_home
+if [[ -n "$_cc_mount_overlays_installed_home" &&
+    ( "$_cc_mount_overlays_installed_home" == "/" ||
+        "$_cc_mount_overlays_source" == "${_cc_mount_overlays_installed_home%/}/"* ) ]]; then
+    _cc_mount_overlays_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_mount_overlays_checked_programs="$_cc_mount_overlays_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_mount_overlays_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_mount_overlays_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_mount_overlays_source" \
+    CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh \
+    "$_cc_mount_overlays_dir/profile.sh"
+cloud_compose_bind_source_program \
+    "$_cc_mount_overlays_source" \
+    CLOUD_COMPOSE_OVERLAY_INIT_PATH \
+    /home/cloud-compose/overlay-init.sh \
+    "$_cc_mount_overlays_dir/overlay-init.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+overlay_script="$CLOUD_COMPOSE_OVERLAY_INIT_PATH"
+readonly profile_path overlay_script
 
 # shellcheck disable=SC1090
 source "$profile_path"

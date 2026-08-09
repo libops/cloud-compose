@@ -2,13 +2,34 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
-dr_library_path="${CLOUD_COMPOSE_DR_LIBRARY_PATH:-$script_dir/disaster-recovery-lib.sh}"
-jq_program_dir="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/etc/cloud-compose/jq}"
+_cc_restore_test_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_restore_test_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_restore_test_source script_dir _cc_restore_test_installed_home
+if [[ -n "$_cc_restore_test_installed_home" &&
+    ( "$_cc_restore_test_installed_home" == "/" ||
+        "$_cc_restore_test_source" == "${_cc_restore_test_installed_home%/}/"* ) ]]; then
+    _cc_restore_test_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_restore_test_checked_programs="$script_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_restore_test_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_restore_test_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_restore_test_source" CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh "$script_dir/profile.sh"
+cloud_compose_bind_source_program \
+    "$_cc_restore_test_source" CLOUD_COMPOSE_DR_LIBRARY_PATH \
+    /home/cloud-compose/disaster-recovery-lib.sh "$script_dir/disaster-recovery-lib.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+dr_library_path="$CLOUD_COMPOSE_DR_LIBRARY_PATH"
+readonly profile_path dr_library_path
 # shellcheck disable=SC1090
 source "$profile_path"
-CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir"
+# Restore the fixed binding functions before the final sourced dependency.
+# shellcheck disable=SC1090
+source "$_cc_restore_test_checked_programs"
 # shellcheck disable=SC1090
 source "$dr_library_path"
 
@@ -60,9 +81,9 @@ if [[ -L "$manifest_path" || ! -f "$manifest_path" ]]; then
     exit 1
 fi
 cloud_compose_dr_validate_json_file "$manifest_path" "Off-host backup manifest"
-manifest_sha256="$(sha256sum "$manifest_path" | awk '{print $1}')"
+manifest_sha256="$(cloud_compose_dr_sha256_file "$manifest_path")"
 cloud_compose_dr_validate_backup_receipt "$receipt_path" "$operation_id" "$manifest_sha256"
-receipt_sha256="$(sha256sum "$receipt_path" | awk '{print $1}')"
+receipt_sha256="$(cloud_compose_dr_sha256_file "$receipt_path")"
 
 test_id="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 staging_dir="$(mktemp -d "$staging_root/.restore-${test_id}.XXXXXX")"

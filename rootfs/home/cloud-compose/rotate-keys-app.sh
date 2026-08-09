@@ -2,10 +2,33 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
-rotate_keys_script="${CLOUD_COMPOSE_ROTATE_KEYS_PATH:-$script_dir/rotate-keys.sh}"
-compose_apps_path="${CLOUD_COMPOSE_COMPOSE_APPS_PATH:-/home/cloud-compose/compose-apps.sh}"
+_cc_rotate_keys_app_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_rotate_keys_app_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_rotate_keys_app_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_rotate_keys_app_source _cc_rotate_keys_app_dir _cc_rotate_keys_app_installed_home
+if [[ -n "$_cc_rotate_keys_app_installed_home" &&
+  ( "$_cc_rotate_keys_app_installed_home" == "/" ||
+    "$_cc_rotate_keys_app_source" == "${_cc_rotate_keys_app_installed_home%/}/"* ) ]]; then
+  _cc_rotate_keys_app_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_rotate_keys_app_checked_programs="$_cc_rotate_keys_app_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_rotate_keys_app_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_rotate_keys_app_checked_programs"
+cloud_compose_bind_source_program \
+  "$_cc_rotate_keys_app_source" CLOUD_COMPOSE_PROFILE_PATH \
+  /home/cloud-compose/profile.sh "$_cc_rotate_keys_app_dir/profile.sh"
+cloud_compose_bind_source_program \
+  "$_cc_rotate_keys_app_source" CLOUD_COMPOSE_ROTATE_KEYS_PATH \
+  /home/cloud-compose/rotate-keys.sh "$_cc_rotate_keys_app_dir/rotate-keys.sh"
+cloud_compose_bind_source_program \
+  "$_cc_rotate_keys_app_source" CLOUD_COMPOSE_COMPOSE_APPS_PATH \
+  /home/cloud-compose/compose-apps.sh "$_cc_rotate_keys_app_dir/compose-apps.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+rotate_keys_script="$CLOUD_COMPOSE_ROTATE_KEYS_PATH"
+compose_apps_path="$CLOUD_COMPOSE_COMPOSE_APPS_PATH"
+readonly profile_path rotate_keys_script compose_apps_path
 
 # shellcheck disable=SC1090
 source "$profile_path"
@@ -21,6 +44,17 @@ esac
 
 # shellcheck disable=SC1090
 source "$compose_apps_path"
+
+# Reload the owner-relative resolver after both sourced dependencies.
+# shellcheck disable=SC1090
+source "$_cc_rotate_keys_app_checked_programs"
+cloud_compose_bind_program_dir \
+  "$_cc_rotate_keys_app_source" \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+  /etc/cloud-compose/jq \
+  "$_cc_rotate_keys_app_dir/../../etc/cloud-compose/jq" \
+  service-account-key-id.jq \
+  service-account-credentials-valid.jq
 
 APP_CREDENTIALS_FILE="${APP_CREDENTIALS_FILE:-/mnt/disks/data/cloud-compose/app/GOOGLE_APPLICATION_CREDENTIALS}"
 ROTATION_APP_CREDENTIAL_OWNER="${ROTATION_CREDENTIAL_OWNER-100}"
@@ -98,11 +132,8 @@ require_inactive_app_service() {
 app_credential_key_id() {
   local file="$1" key_id
 
-  key_id="$(jq -jr '
-    (.private_key_id |
-      select(type == "string" and length > 0 and (explode | index(0) == null))),
-    "\u001f"
-  ' "$file")" || return 1
+  key_id="$(jq -jr -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/service-account-key-id.jq" \
+    "$file")" || return 1
   key_id="${key_id%$'\x1f'}"
   [[ "$key_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
   printf '%s\n' "$key_id"
@@ -116,16 +147,9 @@ validate_app_credentials() {
   jq -e \
     --arg key_id "$key_id" \
     --arg service_account "$GCP_APP_SERVICE_ACCOUNT_EMAIL" \
-    --arg project_id "$GCP_PROJECT" '
-      .type == "service_account" and
-      .private_key_id == $key_id and
-      .client_email == $service_account and
-      .project_id == $project_id and
-      .token_uri == "https://oauth2.googleapis.com/token" and
-      (.private_key | type == "string" and
-        startswith("-----BEGIN PRIVATE KEY-----") and
-        contains("-----END PRIVATE KEY-----"))
-    ' "$file" >/dev/null
+    --arg project_id "$GCP_PROJECT" \
+    -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/service-account-credentials-valid.jq" \
+    "$file" >/dev/null
 }
 
 restore_central_app_credentials() {

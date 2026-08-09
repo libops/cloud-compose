@@ -17,6 +17,21 @@ readonly archive_program="$bootstrap_dir/rootfs-archive.sh"
 readonly overlay_dir=/var/lib/cloud-compose/rootfs-overlay
 readonly filesystem_prep=/run/cloud-compose-prepare-filesystem
 readonly filesystem_persist=/run/cloud-compose-persist-filesystems
+readonly filesystem_reconcile=/run/cloud-compose-reconcile-fstab.awk
+
+require_root_owned_data_program() {
+    local path="$1" metadata
+
+    if [[ -L "$path" || ! -f "$path" ]]; then
+        echo "Checked filesystem data program is missing or unsafe: $path" >&2
+        return 1
+    fi
+    metadata="$(stat -c '%u:%g:%a:%h:%F' -- "$path")" || return 1
+    if [[ "$metadata" != "0:0:600:1:regular file" ]]; then
+        echo "Checked filesystem data program is not an unlinked root-owned mode-0600 file: $path" >&2
+        return 1
+    fi
+}
 
 for boolean_name in rootfs_archive_enabled rollout_enabled; do
     case "${!boolean_name}" in
@@ -46,7 +61,10 @@ fi
 if [[ "$rootfs_archive_enabled" == "false" ]]; then
     install -m 0600 -- /home/cloud-compose/prepare-filesystem.sh "$filesystem_prep"
     install -m 0600 -- /home/cloud-compose/persist-filesystems.sh "$filesystem_persist"
+    install -m 0600 -- /etc/cloud-compose/awk/reconcile-fstab.awk "$filesystem_reconcile"
 fi
+
+require_root_owned_data_program "$filesystem_reconcile"
 
 bash "$filesystem_prep" "$data_device" /mnt/disks/data --publish-fresh-marker
 bash "$filesystem_prep" "$volumes_device" /mnt/disks/volumes
@@ -60,7 +78,8 @@ for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/
         exit 1
     fi
 done
-bash "$filesystem_persist" "$data_device" "$volumes_device"
+CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM="$filesystem_reconcile" \
+    bash "$filesystem_persist" "$data_device" "$volumes_device"
 
 if [[ "$rootfs_archive_enabled" == "true" ]]; then
     bash "$archive_program" install-staged "$overlay_dir"

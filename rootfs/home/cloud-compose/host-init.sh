@@ -5,6 +5,28 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
+_cc_host_init_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_host_init_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_host_init_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_host_init_source _cc_host_init_dir _cc_host_init_installed_home
+if [[ -n "$_cc_host_init_installed_home" &&
+  ( "$_cc_host_init_installed_home" == "/" ||
+    "$_cc_host_init_source" == "${_cc_host_init_installed_home%/}/"* ) ]]; then
+  _cc_host_init_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_host_init_checked_programs="$_cc_host_init_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_host_init_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_host_init_checked_programs"
+cloud_compose_bind_program_dir \
+  "$_cc_host_init_source" \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+  /etc/cloud-compose/jq \
+  "$_cc_host_init_dir/../../etc/cloud-compose/jq" \
+  gcp-metadata-public-ip.jq \
+  gcp-metadata-private-ip.jq
+
 cleanup() {
   if [ -n "${metadata_file:-}" ]; then
     rm -f "$metadata_file"
@@ -23,9 +45,11 @@ if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
     "http://metadata.google.internal/computeMetadata/v1/?recursive=true" >"$metadata_file"
 
   update_runtime_env_file .env GCP_PUBLIC_IP \
-    "$(jq -er '.instance.networkInterfaces[0].accessConfigs[0].externalIp' "$metadata_file")"
+    "$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/gcp-metadata-public-ip.jq" \
+      "$metadata_file")"
   update_runtime_env_file .env GCP_PRIVATE_IP \
-    "$(jq -er '.instance.networkInterfaces[0].ip' "$metadata_file")"
+    "$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/gcp-metadata-private-ip.jq" \
+      "$metadata_file")"
 fi
 
 if [ "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}" = "true" ]; then

@@ -2,6 +2,28 @@
 
 set -euo pipefail
 
+_cc_default_lifecycle_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_default_lifecycle_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_default_lifecycle_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_default_lifecycle_source _cc_default_lifecycle_dir _cc_default_lifecycle_installed_home
+if [[ -n "$_cc_default_lifecycle_installed_home" &&
+    ( "$_cc_default_lifecycle_installed_home" == "/" ||
+        "$_cc_default_lifecycle_source" == "${_cc_default_lifecycle_installed_home%/}/"* ) ]]; then
+    _cc_default_lifecycle_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_default_lifecycle_checked_programs="$_cc_default_lifecycle_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_default_lifecycle_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_default_lifecycle_checked_programs"
+cloud_compose_bind_program \
+    "$_cc_default_lifecycle_source" \
+    CLOUD_COMPOSE_SITECTL_VERIFY_ARGS_PROGRAM \
+    /etc/cloud-compose/jq/sitectl-verify-args.jq \
+    "$_cc_default_lifecycle_dir/../../etc/cloud-compose/jq/sitectl-verify-args.jq"
+sitectl_verify_args_program="$CLOUD_COMPOSE_SITECTL_VERIFY_ARGS_PROGRAM"
+readonly sitectl_verify_args_program
+
 action="${1:-}"
 if [[ "$#" -ne 1 ]]; then
     echo "usage: default-lifecycle.sh init|up|down|rollout" >&2
@@ -28,11 +50,10 @@ run_sitectl() {
 
 verify_nonproduction() {
     local encoded decoded encoded_args
-    local verify_args_program="${CLOUD_COMPOSE_SITECTL_VERIFY_ARGS_PROGRAM:-/etc/cloud-compose/jq/sitectl-verify-args.jq}"
     local -a verify_args=()
 
     if [[ "${SITECTL_ENVIRONMENT:?SITECTL_ENVIRONMENT is required}" != "production" ]]; then
-        if ! encoded_args="$(jq -r -f "$verify_args_program" \
+        if ! encoded_args="$(jq -r -f "$sitectl_verify_args_program" \
             <<<"${SITECTL_VERIFY_ARGS_JSON:-[]}")"; then
             echo "SITECTL_VERIFY_ARGS_JSON must be an array of strings" >&2
             return 1

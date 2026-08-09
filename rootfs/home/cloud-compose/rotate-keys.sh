@@ -2,11 +2,63 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
+_cc_rotate_keys_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_rotate_keys_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_rotate_keys_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_rotate_keys_source _cc_rotate_keys_dir _cc_rotate_keys_installed_home
+if [[ -n "$_cc_rotate_keys_installed_home" &&
+    ( "$_cc_rotate_keys_installed_home" == "/" ||
+        "$_cc_rotate_keys_source" == "${_cc_rotate_keys_installed_home%/}/"* ) ]]; then
+    _cc_rotate_keys_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_rotate_keys_checked_programs="$_cc_rotate_keys_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_rotate_keys_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_rotate_keys_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_rotate_keys_source" \
+    CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh \
+    "$_cc_rotate_keys_dir/profile.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+readonly profile_path
 
 # shellcheck disable=SC1090
 source "$profile_path"
+
+# Reload the fixed resolver after the profile so an installed environment
+# cannot replace the binding functions used for checked data programs.
+# shellcheck disable=SC1090
+source "$_cc_rotate_keys_checked_programs"
+cloud_compose_bind_program_dir \
+    "$_cc_rotate_keys_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_rotate_keys_dir/../../etc/cloud-compose/jq" \
+    service-account-key-id.jq \
+    rotation-build-state.jq \
+    rotation-validate-state.jq \
+    rotation-normalize-user-keys.jq \
+    service-account-credentials-valid.jq \
+    rotation-jwt-claims.jq \
+    rotation-remaining-baseline.jq \
+    rotation-new-key-names.jq \
+    rotation-audit.jq \
+    rotation-first-key-id.jq \
+    rotation-idle-audit.jq \
+    rotation-key-disabled.jq \
+    rotation-key-ids-join.jq \
+    rotation-key-names-base64.jq \
+    rotation-key-names-sorted.jq \
+    rotation-key-object-ids-join.jq \
+    rotation-key-present.jq \
+    array-values-base64.jq \
+    json-length.jq \
+    nonempty-string-field.jq \
+    object-field-delimited.jq \
+    object-field.jq \
+    string-field-valid.jq
 
 log_info() {
     printf '[key-rotation] %s\n' "$1" >&2
@@ -179,11 +231,8 @@ valid_iam_key_id() {
 credential_key_id() {
     local file="$1" key_id
 
-    key_id="$(jq -jr '
-        (.private_key_id |
-            select(type == "string" and length > 0 and (explode | index(0) == null))),
-        "\u001f"
-    ' "$file")" || return 1
+    key_id="$(jq -jr -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/service-account-key-id.jq" \
+        "$file")" || return 1
     key_id="${key_id%$'\x1f'}"
     valid_iam_key_id "$key_id" || return 1
     printf '%s\n' "$key_id"
@@ -263,20 +312,8 @@ write_state() {
         --argjson created_at "$STATE_CREATED_AT" \
         --argjson ready_at "$STATE_READY_AT" \
         --argjson disabled_at "$STATE_DISABLED_AT" \
-        '{
-            version: 2,
-            phase: $phase,
-            service_account: $service_account,
-            project_id: $project_id,
-            credentials_file: $credentials_file,
-            current_key_id: $current_key_id,
-            new_key_id: $new_key_id,
-            new_key_name: $new_key_name,
-            baseline_key_names: $baseline_key_names,
-            created_at: $created_at,
-            ready_at: $ready_at,
-            disabled_at: $disabled_at
-        }' >"$state_tmp"; then
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-build-state.jq" \
+        >"$state_tmp"; then
         rm -f -- "$state_tmp"
         return 1
     fi
@@ -298,43 +335,32 @@ load_state() {
     payload="$(jq -ce \
         --arg service_account "$SERVICE_ACCOUNT" \
         --arg project_id "$PROJECT_ID" \
-        --arg credentials_file "$CREDENTIALS_FILE" '
-        select(
-            .version == 2 and
-            (.phase == "reconciling" or .phase == "creating-fresh" or
-             .phase == "creating" or .phase == "staged" or .phase == "authenticated" or
-             .phase == "ready" or .phase == "grace" or .phase == "rolling-back" or
-             .phase == "rollback" or .phase == "revoke-new") and
-            .service_account == $service_account and
-            .project_id == $project_id and
-            .credentials_file == $credentials_file and
-            (.current_key_id | type == "string" and (explode | index(0) == null)) and
-            (.new_key_id | type == "string" and (explode | index(0) == null)) and
-            (.new_key_name | type == "string" and (explode | index(0) == null)) and
-            (.baseline_key_names | type == "array") and
-            (.baseline_key_names | length <= 10 and . == (sort | unique)) and
-            all(.baseline_key_names[];
-                type == "string" and (explode | index(0) == null)) and
-            (.created_at | type == "number" and . >= 0 and floor == .) and
-            (.ready_at | type == "number" and . >= 0 and floor == .) and
-            (.disabled_at | type == "number" and . >= 0 and floor == .)
-        )
-    ' "$PENDING_STATE")" || {
+        --arg credentials_file "$CREDENTIALS_FILE" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-validate-state.jq" \
+        "$PENDING_STATE")" || {
         log_error "Pending rotation state is invalid or belongs to another target: $PENDING_STATE"
         return 1
     }
 
-    STATE_PHASE="$(jq -r '.phase' <<<"$payload")"
-    STATE_CURRENT_KEY_ID="$(jq -jr '(.current_key_id), "\u001f"' <<<"$payload")"
+    STATE_PHASE="$(jq -r --arg field phase \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" <<<"$payload")"
+    STATE_CURRENT_KEY_ID="$(jq -jr --arg field current_key_id \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" <<<"$payload")"
     STATE_CURRENT_KEY_ID="${STATE_CURRENT_KEY_ID%$'\x1f'}"
-    STATE_NEW_KEY_ID="$(jq -jr '(.new_key_id), "\u001f"' <<<"$payload")"
+    STATE_NEW_KEY_ID="$(jq -jr --arg field new_key_id \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" <<<"$payload")"
     STATE_NEW_KEY_ID="${STATE_NEW_KEY_ID%$'\x1f'}"
-    STATE_NEW_KEY_NAME="$(jq -jr '(.new_key_name), "\u001f"' <<<"$payload")"
+    STATE_NEW_KEY_NAME="$(jq -jr --arg field new_key_name \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" <<<"$payload")"
     STATE_NEW_KEY_NAME="${STATE_NEW_KEY_NAME%$'\x1f'}"
-    STATE_BASELINE_KEY_NAMES="$(jq -c '.baseline_key_names' <<<"$payload")"
-    STATE_CREATED_AT="$(jq -r '.created_at' <<<"$payload")"
-    STATE_READY_AT="$(jq -r '.ready_at' <<<"$payload")"
-    STATE_DISABLED_AT="$(jq -r '.disabled_at' <<<"$payload")"
+    STATE_BASELINE_KEY_NAMES="$(jq -c --arg field baseline_key_names \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" <<<"$payload")"
+    STATE_CREATED_AT="$(jq -r --arg field created_at \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" <<<"$payload")"
+    STATE_READY_AT="$(jq -r --arg field ready_at \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" <<<"$payload")"
+    STATE_DISABLED_AT="$(jq -r --arg field disabled_at \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" <<<"$payload")"
 
     if [[ -n "$STATE_CURRENT_KEY_ID" && ! "$STATE_CURRENT_KEY_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
         log_error "Pending rotation state contains an invalid previous key ID"
@@ -352,7 +378,8 @@ load_state() {
             log_error "Pending rotation state contains an invalid baseline key name"
             return 1
         fi
-    done < <(jq -r '.[] | @base64' <<<"$STATE_BASELINE_KEY_NAMES")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/array-values-base64.jq" \
+        <<<"$STATE_BASELINE_KEY_NAMES")
 
     case "$STATE_PHASE" in
         staged | authenticated | ready | grace | rolling-back | rollback | revoke-new)
@@ -383,7 +410,9 @@ fetch_access_token() {
         log_error "Failed to get access token from metadata server"
         return 1
     }
-    ACCESS_TOKEN="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$token_response")" || {
+    ACCESS_TOKEN="$(jq -er --arg field access_token \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/nonempty-string-field.jq" \
+        <<<"$token_response")" || {
         log_error "Metadata server returned an invalid access-token response"
         return 1
     }
@@ -412,23 +441,9 @@ list_user_keys() {
         log_error "Failed to list service-account keys"
         return 1
     fi
-    normalized_keys="$(jq -cer --arg prefix "$SA_RESOURCE/keys/" '
-        (.keys // []) as $keys |
-        if ($keys | type) != "array" then error("invalid key list") else
-            [$keys[] | select(.keyType == "USER_MANAGED")] as $user_keys |
-            if ($user_keys | length) > 10 then error("too many user-managed keys")
-            elif any($user_keys[];
-                (.name | type) != "string" or
-                (.name | startswith($prefix) | not) or
-                ((.disabled // false) | type) != "boolean")
-            then error("invalid user-managed key")
-            elif ([$user_keys[].name] | unique | length) != ($user_keys | length)
-            then error("duplicate user-managed key")
-            else
-                [$user_keys[] | {name: .name, disabled: (.disabled // false)}] | sort_by(.name)
-            end
-        end
-    ' <<<"$keys_response")" || {
+    normalized_keys="$(jq -cer --arg prefix "$SA_RESOURCE/keys/" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-normalize-user-keys.jq" \
+        <<<"$keys_response")" || {
         log_error "IAM returned an invalid user-managed key inventory"
         return 1
     }
@@ -444,21 +459,26 @@ list_user_keys() {
             log_error "IAM returned an invalid user-managed key name"
             return 1
         fi
-    done < <(jq -r '.[].name | @base64' <<<"$normalized_keys")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-names-base64.jq" \
+        <<<"$normalized_keys")
     printf '%s\n' "$normalized_keys"
 }
 
 list_user_key_names() {
-    list_user_keys | jq -c '[.[].name] | sort'
+    list_user_keys | jq -c -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-names-sorted.jq"
 }
 
 key_remote_status() {
     local key_name="$1" keys
 
     keys="$(list_user_keys)" || return 1
-    if ! jq -e --arg name "$key_name" 'any(.[]; .name == $name)' <<<"$keys" >/dev/null; then
+    if ! jq -e --arg name "$key_name" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-present.jq" \
+        <<<"$keys" >/dev/null; then
         printf 'absent\n'
-    elif jq -e --arg name "$key_name" 'any(.[]; .name == $name and .disabled == true)' <<<"$keys" >/dev/null; then
+    elif jq -e --arg name "$key_name" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-disabled.jq" \
+        <<<"$keys" >/dev/null; then
         printf 'disabled\n'
     else
         printf 'enabled\n'
@@ -550,14 +570,9 @@ validate_credentials_key() {
     jq -e \
         --arg key_id "$expected_key_id" \
         --arg service_account "$SERVICE_ACCOUNT" \
-        --arg project_id "$PROJECT_ID" '
-        .type == "service_account" and
-        .private_key_id == $key_id and
-        .client_email == $service_account and
-        .project_id == $project_id and
-        .token_uri == "https://oauth2.googleapis.com/token" and
-        (.private_key | type == "string" and startswith("-----BEGIN PRIVATE KEY-----") and contains("-----END PRIVATE KEY-----"))
-    ' "$file" >/dev/null
+        --arg project_id "$PROJECT_ID" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/service-account-credentials-valid.jq" \
+        "$file" >/dev/null
 }
 
 install_credentials_file() {
@@ -618,8 +633,10 @@ authenticate_credentials_once() {
         log_error "openssl is required to authenticate replacement credentials"
         return 1
     }
-    email="$(jq -er '.client_email' "$file")" || return 1
-    token_uri="$(jq -er '.token_uri' "$file")" || return 1
+    email="$(jq -er --arg field client_email \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" "$file")" || return 1
+    token_uri="$(jq -er --arg field token_uri \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" "$file")" || return 1
     private_key_tmp="$(mktemp "${credentials_dir}/.auth-key.XXXXXX")" || return 1
     request_tmp="$(mktemp "${credentials_dir}/.auth-request.XXXXXX")" || {
         rm -f -- "$private_key_tmp"
@@ -630,7 +647,9 @@ authenticate_credentials_once() {
         return 1
     }
     chmod 0600 "$private_key_tmp" "$request_tmp" "$response_tmp"
-    jq -er '.private_key' "$file" >"$private_key_tmp" || {
+    jq -er --arg field private_key \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field.jq" \
+        "$file" >"$private_key_tmp" || {
         rm -f -- "$private_key_tmp" "$request_tmp" "$response_tmp"
         return 1
     }
@@ -641,7 +660,7 @@ authenticate_credentials_once() {
         --arg iss "$email" \
         --arg aud "$token_uri" \
         --argjson iat "$now" \
-        '{iss: $iss, scope: "https://www.googleapis.com/auth/cloud-platform", aud: $aud, iat: $iat, exp: ($iat + 3600)}' | base64url)"
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-jwt-claims.jq" | base64url)"
     signing_input="${header}.${payload}"
     signature="$(printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$private_key_tmp" | base64url)" || {
         rm -f -- "$private_key_tmp" "$request_tmp" "$response_tmp"
@@ -657,7 +676,9 @@ authenticate_credentials_once() {
         "$token_uri" || curl_status=$?
     rm -f -- "$private_key_tmp" "$request_tmp"
     if ((curl_status != 0)) ||
-        ! jq -e '.access_token | type == "string" and length > 0' "$response_tmp" >/dev/null; then
+        ! jq -e --arg field access_token \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/string-field-valid.jq" \
+            "$response_tmp" >/dev/null; then
         rm -f -- "$response_tmp"
         return 1
     fi
@@ -752,7 +773,8 @@ create_replacement_key() {
         "https://iam.googleapis.com/v1/$SA_RESOURCE/keys")" || curl_status=$?
     rm -f -- "$ACCESS_HEADER_FILE"
 
-    new_key_name="$(jq -er '.name | select(type == "string" and length > 0)' \
+    new_key_name="$(jq -er --arg field name \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/nonempty-string-field.jq" \
         "$response_tmp" 2>/dev/null)" || new_key_name=""
     if [[ -z "$new_key_name" ]]; then
         cleanup_ephemeral_create_response
@@ -774,7 +796,8 @@ create_replacement_key() {
 
     STATE_NEW_KEY_ID="$new_key_id"
     STATE_NEW_KEY_NAME="$new_key_name"
-    private_key_data="$(jq -er '.privateKeyData | select(type == "string" and length > 0)' \
+    private_key_data="$(jq -er --arg field privateKeyData \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/nonempty-string-field.jq" \
         "$response_tmp" 2>/dev/null)" || private_key_data=""
     cleanup_ephemeral_create_response
     if [[ -z "$private_key_data" ]]; then
@@ -837,25 +860,30 @@ finish_orphan_reconciliation() {
             log_error "Failed to delete fresh-filesystem orphan key ${key_name##*/}; reconciliation will retry"
             return 1
         fi
-    done < <(jq -r '.[] | @base64' <<<"$STATE_BASELINE_KEY_NAMES")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/array-values-base64.jq" \
+        <<<"$STATE_BASELINE_KEY_NAMES")
 
     current_names="$(list_user_key_names)" || return 1
     remaining_baseline="$(jq -cn \
         --argjson before "$STATE_BASELINE_KEY_NAMES" \
         --argjson after "$current_names" \
-        '$after | map(select(. as $name | $before | index($name))) | sort')" || return 1
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-remaining-baseline.jq")" || return 1
     unexpected="$(jq -cn \
         --argjson before "$STATE_BASELINE_KEY_NAMES" \
         --argjson after "$current_names" \
-        '$after - $before | sort')" || return 1
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-new-key-names.jq")" || return 1
 
-    if [[ "$(jq -r 'length' <<<"$unexpected")" != "0" ]]; then
-        unexpected_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$unexpected")" || return 1
+    if [[ "$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+        <<<"$unexpected")" != "0" ]]; then
+        unexpected_ids="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-ids-join.jq" \
+            <<<"$unexpected")" || return 1
         log_error "Unexpected concurrent user-managed keys appeared during fresh-filesystem reconciliation: $unexpected_ids"
         return 1
     fi
-    if [[ "$(jq -r 'length' <<<"$remaining_baseline")" != "0" ]]; then
-        remaining_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$remaining_baseline")" || return 1
+    if [[ "$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+        <<<"$remaining_baseline")" != "0" ]]; then
+        remaining_ids="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-ids-join.jq" \
+            <<<"$remaining_baseline")" || return 1
         log_error "Deleted orphan keys are still visible and will be retried: $remaining_ids"
         return 1
     fi
@@ -993,9 +1021,11 @@ prepare_rotation() {
 
     fetch_access_token || return 1
     baseline_key_names="$(list_user_key_names)" || return 1
-    baseline_count="$(jq -r 'length' <<<"$baseline_key_names")" || return 1
+    baseline_count="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+        <<<"$baseline_key_names")" || return 1
     if ((10#$baseline_count >= 10)); then
-        baseline_ids="$(jq -r '[.[] | split("/")[-1]] | join(", ")' <<<"$baseline_key_names")" || return 1
+        baseline_ids="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-ids-join.jq" \
+            <<<"$baseline_key_names")" || return 1
         log_error "Service account already has the 10 user-managed keys allowed by IAM: $baseline_ids"
         return 1
     fi
@@ -1202,11 +1232,14 @@ retire_credentials() {
         # remaining IDs; never guess which externally managed key to delete.
         fetch_access_token || return 1
         remaining_keys="$(list_user_keys)" || return 1
-        if [[ "$(jq -r 'length' <<<"$remaining_keys")" == "0" ]]; then
+        if [[ "$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+            <<<"$remaining_keys")" == "0" ]]; then
             log_info "No local credential or remote user-managed key remains; retirement is complete"
             return 0
         fi
-        remaining_key_ids="$(jq -r '[.[].name | split("/")[-1]] | sort | join(", ")' <<<"$remaining_keys")" || return 1
+        remaining_key_ids="$(jq -r \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-key-object-ids-join.jq" \
+            <<<"$remaining_keys")" || return 1
         log_error "No local credential is available to identify the managed key, but remote user-managed keys remain: $remaining_key_ids"
         log_error "Audit and explicitly revoke the remaining key IDs before disabling managed credentials"
         return 1
@@ -1241,14 +1274,14 @@ creation_candidates() {
     fetch_access_token || return 1
     current_names="$(list_user_key_names)" || return 1
     jq -cn --argjson before "$STATE_BASELINE_KEY_NAMES" --argjson after "$current_names" \
-        '$after - $before | sort'
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-new-key-names.jq"
 }
 
 rotation_audit() {
     local candidates='[]' grace_remaining=0 elapsed
 
     if [[ ! -e "$PENDING_STATE" && ! -L "$PENDING_STATE" ]]; then
-        jq -n '{version: 1, phase: "idle", recovery_required: false, candidate_key_ids: [], grace_remaining_seconds: 0}'
+        jq -n -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-idle-audit.jq"
         return 0
     fi
     load_state || return 1
@@ -1269,19 +1302,8 @@ rotation_audit() {
         --argjson created_at "$STATE_CREATED_AT" \
         --argjson ready_at "$STATE_READY_AT" \
         --argjson disabled_at "$STATE_DISABLED_AT" \
-        --argjson grace_remaining "$grace_remaining" '
-        {
-            version: 1,
-            phase: $phase,
-            current_key_id: $current_key_id,
-            new_key_id: $new_key_id,
-            recovery_required: ($phase == "creating" or $phase == "creating-fresh"),
-            candidate_key_ids: [$candidate_names[] | split("/")[-1]],
-            created_at: $created_at,
-            ready_at: $ready_at,
-            disabled_at: $disabled_at,
-            grace_remaining_seconds: $grace_remaining
-        }'
+        --argjson grace_remaining "$grace_remaining" \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-audit.jq"
 }
 
 recover_ambiguous_creation() {
@@ -1299,7 +1321,8 @@ recover_ambiguous_creation() {
         return 1
     fi
     candidates="$(creation_candidates)" || return 1
-    if [[ "$(jq -r 'length' <<<"$candidates")" == "0" ]]; then
+    if [[ "$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+        <<<"$candidates")" == "0" ]]; then
         if [[ "$STATE_PHASE" == "creating-fresh" ]]; then
             STATE_PHASE=reconciling
             STATE_BASELINE_KEY_NAMES='[]'
@@ -1311,12 +1334,14 @@ recover_ambiguous_creation() {
         fi
         return 0
     fi
-    if [[ "$(jq -r 'length' <<<"$candidates")" != "1" ]]; then
+    if [[ "$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-length.jq" \
+        <<<"$candidates")" != "1" ]]; then
         rotation_audit
         log_error "Recovery is ambiguous because more than one post-baseline key exists; no key was changed"
         return 1
     fi
-    candidate_id="$(jq -r '.[0] | split("/")[-1]' <<<"$candidates")"
+    candidate_id="$(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-first-key-id.jq" \
+        <<<"$candidates")"
     if [[ -z "$RECOVERY_KEY_ID" || "$RECOVERY_KEY_ID" != "$candidate_id" ]]; then
         rotation_audit
         log_error "Recovery requires the single audited candidate key ID as the final argument; no key was changed"

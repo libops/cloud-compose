@@ -36,6 +36,12 @@ tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/home/cloud-co
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/home/cloud-compose/default-lifecycle.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/home/cloud-compose/lifecycle-entrypoint.sh' >/dev/null
 tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/jq/compose-validate-projects.jq' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/jq/rotation-validate-state.jq' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/awk/reconcile-fstab.awk' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/awk/release-checksum.awk' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/awk/compose-secret-files.awk' >/dev/null
+tar -tzf "$tmp/one/cloud-compose-rootfs.tar.gz" | grep -Fx 'rootfs/etc/cloud-compose/libexec/checked-programs.bash' >/dev/null
 for bootstrap_program in \
     gcp-cloud-init-finalize.sh \
     gcp-cloud-init-post-bootstrap.sh \

@@ -1,7 +1,7 @@
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
       status_code   = 200
     }
   }
@@ -44,9 +44,17 @@ run "renders_safe_ssh_values" {
       strcontains(
         local.write_files_content,
         "- path: \"/etc/cloud-compose/libexec/linux-vm-cloud-init.sh\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/jq/compose-validate-projects.jq\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/awk/reconcile-fstab.awk\"",
       )
     )
-    error_message = "Cloud-init must install one root-owned diagnostics program with exact passwordless sudo commands."
+    error_message = "Cloud-init must install root-owned diagnostics and checked jq/awk programs with exact passwordless sudo commands."
   }
 }
 

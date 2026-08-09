@@ -32,6 +32,17 @@ grep -Fq 'cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$ansible_t
 grep -Fq -- '- name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$salt_state" || \
   contract_fail "Salt does not apply the shared bootstrap path hardener"
 
+ansible_privileged_block="$(sed -n '/^- name: Secure Cloud Compose privileged program directories/,/^- name:/p' "$ansible_tasks")"
+grep -Fq -- '- "{{ cloud_compose_home }}"' <<<"$ansible_privileged_block" || \
+  contract_fail "Ansible does not close the account-owned runtime-home window after installing rootfs"
+salt_privileged_block="$(sed -n '/^cloud-compose-privileged-program-directories:/,/^[^[:space:]]/p' "$salt_state")"
+grep -Fq -- '- {{ home | json }}' <<<"$salt_privileged_block" || \
+  contract_fail "Salt does not close the account-owned runtime-home window after installing rootfs"
+grep -Fq 'path: /etc/cloud-compose/libexec/checked-programs.bash' "$ansible_tasks" || \
+  contract_fail "Ansible does not explicitly secure the checked program resolver"
+grep -Fq 'source: salt://rootfs/etc/cloud-compose/libexec/checked-programs.bash' "$salt_state" || \
+  contract_fail "Salt does not explicitly secure the checked program resolver"
+
 grep -Fq 'configure-metadata-firewall.sh | deploy-rollout.sh | docker-prune.sh' "$root_program_runner" || \
   contract_fail "the trusted root-program runner does not allow deploy-rollout.sh"
 
@@ -49,6 +60,9 @@ for marker in \
   '- file: cloud-compose-rootfs' \
   '- cmd: cloud-compose-lifecycle-lock' \
   '- cmd: cloud-compose-rootfs-script-modes' \
+  '- file: cloud-compose-checked-program-resolver' \
+  '- cmd: cloud-compose-rootfs-jq-modes' \
+  '- cmd: cloud-compose-rootfs-awk-modes' \
   '- file: cloud-compose-lifecycle-init' \
   '- file: cloud-compose-lifecycle-up' \
   '- file: cloud-compose-lifecycle-down' \

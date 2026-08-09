@@ -448,6 +448,7 @@ EOT
   gcp_filesystem_boothook = templatefile("${path.module}/../../templates/gcp-filesystem-boothook.sh.tftpl", {
     FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
     FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
+    FSTAB_RECONCILE_AWK_B64        = filebase64("${local.rootFs}/etc/cloud-compose/awk/reconcile-fstab.awk"),
     GCP_FILESYSTEM_BOOT_SCRIPT_B64 = filebase64("${local.rootFs}/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"),
     FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",
     USE_OVERLAY                    = local.use_overlay,

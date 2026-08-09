@@ -18,6 +18,7 @@ require_cmd base64
 require_cmd jq
 
 profile="$repo_root/rootfs/home/cloud-compose/profile.sh"
+jq_program_dir="$repo_root/rootfs/etc/cloud-compose/jq"
 rollout_service="$repo_root/rootfs/home/cloud-compose/run-rollout-service.sh"
 host_env="$tmp/host.env"
 application_env="$tmp/application-env.json"
@@ -69,6 +70,7 @@ done
 # shellcheck disable=SC2016
 env -i \
   PATH=/usr/bin:/bin \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir" \
   CLOUD_COMPOSE_ENV_FILE="$host_env" \
   CLOUD_COMPOSE_APPLICATION_ENV_FILE="$application_env" \
   bash --noprofile --norc -c '
@@ -138,7 +140,8 @@ for invalid_application_data in \
   '{"SAFE\n":"value"}' \
   '{"SAFE\u0000":"value"}'; do
   printf '%s' "$invalid_application_data" >"$tmp/application-env.invalid.json"
-  if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$host_env" \
+  if env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir" \
+    CLOUD_COMPOSE_ENV_FILE="$host_env" \
     CLOUD_COMPOSE_APPLICATION_ENV_FILE="$tmp/application-env.invalid.json" \
     bash --noprofile --norc -c '
       source "$1"
@@ -155,7 +158,8 @@ done
 jq 'del(.APPLICATION_LITERAL)' "$application_env" >"$tmp/application-env.next.json"
 # The child shell receives file paths as positional parameters.
 # shellcheck disable=SC2016
-env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_ENV_FILE="$host_env" \
+env -i PATH=/usr/bin:/bin CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir" \
+  CLOUD_COMPOSE_ENV_FILE="$host_env" \
   CLOUD_COMPOSE_APPLICATION_ENV_FILE="$tmp/application-env.next.json" \
   bash --noprofile --norc -c '
     source "$1"

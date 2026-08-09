@@ -5,6 +5,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 prep_script="$repo_root/rootfs/home/cloud-compose/prepare-filesystem.sh"
 persist_script="$repo_root/rootfs/home/cloud-compose/persist-filesystems.sh"
+export CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM="$repo_root/rootfs/etc/cloud-compose/awk/reconcile-fstab.awk"
 gcp_filesystem_boot="$repo_root/rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"
 gcp_filesystem_boothook="$repo_root/templates/gcp-filesystem-boothook.sh.tftpl"
 gcp_cloud_init_mime="$repo_root/templates/gcp-cloud-init.mime.tftpl"
@@ -795,8 +796,23 @@ fi
 
 grep -Fq 'FILESYSTEM_PERSIST_SCRIPT_B64' "$gcp_filesystem_boothook" || \
     fail "GCP boothook does not bootstrap persistent mount configuration"
+grep -Fq 'FSTAB_RECONCILE_AWK_B64' "$gcp_filesystem_boothook" || \
+    fail "GCP boothook does not bootstrap the checked fstab reconciliation program"
+grep -Fq 'require_root_owned_data_program "$filesystem_reconcile"' "$gcp_filesystem_boot" || \
+    fail "GCP filesystem bootstrap does not verify its checked fstab reconciliation program"
+grep -Fq 'CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM="$filesystem_reconcile" bash "$filesystem_persist"' \
+    "$gcp_filesystem_boot" || \
+    fail "GCP filesystem bootstrap does not pass the checked fstab reconciliation program as data"
 grep -Fq 'bash "$filesystem_persist" "$data_device" "$volumes_device"' "$linux_cloud_init" || \
     fail "Linux VM cloud-init does not invoke persistent mount configuration"
+grep -Fq 'install -m 0600 -- /etc/cloud-compose/awk/reconcile-fstab.awk "$filesystem_reconcile"' \
+    "$linux_cloud_init" || \
+    fail "embedded Linux bootstrap does not stage the checked fstab reconciliation program"
+grep -Fq 'require_root_owned_data_program "$filesystem_reconcile"' "$linux_cloud_init" || \
+    fail "Linux bootstrap does not verify its checked fstab reconciliation program"
+grep -Fq '"$staged_rootfs/etc/cloud-compose/awk/reconcile-fstab.awk"' \
+    "$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh" || \
+    fail "archive-mode Linux bootstrap does not stage the checked fstab reconciliation program from the verified rootfs"
 grep -Fq '/var/lib/cloud-compose/mounted-rootfs/mnt/disks' "$linux_cloud_init" || \
     fail "Linux VM cloud-init does not copy mounted-root files after mounting durable storage"
 

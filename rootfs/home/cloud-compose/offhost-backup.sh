@@ -2,16 +2,52 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
-compose_apps_path="${CLOUD_COMPOSE_COMPOSE_APPS_PATH:-$script_dir/compose-apps.sh}"
-dr_library_path="${CLOUD_COMPOSE_DR_LIBRARY_PATH:-$script_dir/disaster-recovery-lib.sh}"
-jq_program_dir="${CLOUD_COMPOSE_JQ_PROGRAM_DIR:-/etc/cloud-compose/jq}"
+_cc_offhost_backup_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_offhost_backup_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_offhost_backup_source script_dir _cc_offhost_backup_installed_home
+if [[ -n "$_cc_offhost_backup_installed_home" &&
+    ( "$_cc_offhost_backup_installed_home" == "/" ||
+        "$_cc_offhost_backup_source" == "${_cc_offhost_backup_installed_home%/}/"* ) ]]; then
+    _cc_offhost_backup_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_offhost_backup_checked_programs="$script_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_offhost_backup_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_offhost_backup_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_offhost_backup_source" CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh "$script_dir/profile.sh"
+cloud_compose_bind_source_program \
+    "$_cc_offhost_backup_source" CLOUD_COMPOSE_COMPOSE_APPS_PATH \
+    /home/cloud-compose/compose-apps.sh "$script_dir/compose-apps.sh"
+cloud_compose_bind_source_program \
+    "$_cc_offhost_backup_source" CLOUD_COMPOSE_DR_LIBRARY_PATH \
+    /home/cloud-compose/disaster-recovery-lib.sh "$script_dir/disaster-recovery-lib.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+compose_apps_path="$CLOUD_COMPOSE_COMPOSE_APPS_PATH"
+dr_library_path="$CLOUD_COMPOSE_DR_LIBRARY_PATH"
+readonly profile_path compose_apps_path dr_library_path
 # shellcheck disable=SC1090
 source "$profile_path"
 # shellcheck disable=SC1090
 source "$compose_apps_path"
-CLOUD_COMPOSE_JQ_PROGRAM_DIR="$jq_program_dir"
+# Restore the fixed binding functions before the final sourced dependency.
+# shellcheck disable=SC1090
+source "$_cc_offhost_backup_checked_programs"
+cloud_compose_bind_program_dir \
+    "$_cc_offhost_backup_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$script_dir/../../etc/cloud-compose/jq" \
+    offhost-validate-compose-config.jq \
+    offhost-validate-bind-roots.jq \
+    offhost-bind-sources.jq \
+    offhost-build-application-coverage.jq \
+    offhost-build-manifest.jq \
+    offhost-validate-manifest.jq \
+    offhost-manifest-app-digests.jq
 # shellcheck disable=SC1090
 source "$dr_library_path"
 
@@ -105,7 +141,7 @@ for app in "${apps[@]}"; do
         echo "Required local MariaDB recovery artifact is invalid for ${app}" >&2
         exit 1
     fi
-    dump_sha256="$(sha256sum "$staged_dump" | awk '{print $1}')"
+    dump_sha256="$(cloud_compose_dr_sha256_file "$staged_dump")"
     dump_bytes="$(wc -c <"$staged_dump")"
 
     (
@@ -170,14 +206,15 @@ while IFS=$'\t' read -r manifest_app manifest_sha; do
     fi
 done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/offhost-manifest-app-digests.jq" "$staged_manifest")
 
-manifest_sha256="$(sha256sum "$staged_manifest" | awk '{print $1}')"
+manifest_sha256="$(cloud_compose_dr_sha256_file "$staged_manifest")"
 staged_receipt="$staging_dir/receipt.json"
 cloud_compose_dr_run_driver "$driver" backup \
     --manifest "$staged_manifest" \
     --manifest-sha256 "$manifest_sha256" \
     --operation-id "$operation_id" \
     --receipt "$staged_receipt"
-if [[ "$(sha256sum "$staged_manifest" | awk '{print $1}')" != "$manifest_sha256" ]]; then
+post_driver_manifest_sha256="$(cloud_compose_dr_sha256_file "$staged_manifest")"
+if [[ "$post_driver_manifest_sha256" != "$manifest_sha256" ]]; then
     echo "Off-host backup driver modified the immutable coverage manifest" >&2
     exit 1
 fi

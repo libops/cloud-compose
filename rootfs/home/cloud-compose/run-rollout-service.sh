@@ -2,8 +2,40 @@
 
 set -euo pipefail
 
+_cc_run_rollout_service_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_run_rollout_service_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_run_rollout_service_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_run_rollout_service_source _cc_run_rollout_service_dir _cc_run_rollout_service_installed_home
+if [[ -n "$_cc_run_rollout_service_installed_home" &&
+  ( "$_cc_run_rollout_service_installed_home" == "/" ||
+    "$_cc_run_rollout_service_source" == "${_cc_run_rollout_service_installed_home%/}/"* ) ]]; then
+  _cc_run_rollout_service_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_run_rollout_service_checked_programs="$_cc_run_rollout_service_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_run_rollout_service_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_run_rollout_service_checked_programs"
+cloud_compose_bind_source_program \
+  "$_cc_run_rollout_service_source" \
+  CLOUD_COMPOSE_PROFILE_PATH \
+  /home/cloud-compose/profile.sh \
+  "$_cc_run_rollout_service_dir/profile.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+readonly profile_path
+
 # shellcheck disable=SC1090,SC1091
-source "${CLOUD_COMPOSE_PROFILE_PATH:-/home/cloud-compose/profile.sh}"
+source "$profile_path"
+
+# Reload the fixed resolver after the profile before binding data programs.
+# shellcheck disable=SC1090
+source "$_cc_run_rollout_service_checked_programs"
+cloud_compose_bind_program_dir \
+  "$_cc_run_rollout_service_source" \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+  /etc/cloud-compose/jq \
+  "$_cc_run_rollout_service_dir/../../etc/cloud-compose/jq" \
+  json-object-validate.jq
 
 unset BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH
 PORT="${ROLLOUT_PORT:?ROLLOUT_PORT is required}"
@@ -24,7 +56,8 @@ if [[ "$JWT_AUD" == *$'\n'* || "$JWT_AUD" == *$'\r'* || -z "$JWT_AUD" ]]; then
   exit 2
 fi
 if [[ -n "$CUSTOM_CLAIMS" ]] &&
-  ! jq -e 'type == "object"' <<<"$CUSTOM_CLAIMS" >/dev/null; then
+  ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/json-object-validate.jq" \
+    <<<"$CUSTOM_CLAIMS" >/dev/null; then
   echo "ROLLOUT_CUSTOM_CLAIMS must be empty or a JSON object" >&2
   exit 2
 fi

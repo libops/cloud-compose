@@ -7,6 +7,7 @@ readonly staged_rootfs="$stage_root/rootfs"
 readonly bootstrap_dir=/var/lib/cloud-compose/bootstrap
 readonly filesystem_prep=/run/cloud-compose-prepare-filesystem
 readonly filesystem_persist=/run/cloud-compose-persist-filesystems
+readonly filesystem_reconcile=/run/cloud-compose-reconcile-fstab.awk
 
 fail() {
     echo "rootfs archive: $*" >&2
@@ -232,14 +233,18 @@ prepare_archive() {
     rm -rf -- "$extract_dir"
 
     [[ -f "$staged_rootfs/home/cloud-compose/prepare-filesystem.sh" &&
-        -f "$staged_rootfs/home/cloud-compose/persist-filesystems.sh" ]] || \
-        fail "verified rootfs archive is missing filesystem preparation scripts"
+        -f "$staged_rootfs/home/cloud-compose/persist-filesystems.sh" &&
+        -f "$staged_rootfs/etc/cloud-compose/awk/reconcile-fstab.awk" ]] || \
+        fail "verified rootfs archive is missing filesystem preparation programs"
     install -m 0600 -- \
         "$staged_rootfs/home/cloud-compose/prepare-filesystem.sh" \
         "$filesystem_prep"
     install -m 0600 -- \
         "$staged_rootfs/home/cloud-compose/persist-filesystems.sh" \
         "$filesystem_persist"
+    install -m 0600 -- \
+        "$staged_rootfs/etc/cloud-compose/awk/reconcile-fstab.awk" \
+        "$filesystem_reconcile"
 }
 
 install_staged_archive() {

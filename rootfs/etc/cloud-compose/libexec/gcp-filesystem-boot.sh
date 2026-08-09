@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [[ "$#" -ne 4 ]]; then
-    echo "usage: gcp-filesystem-boot.sh FRESH_FILESYSTEM_IDENTITY USE_OVERLAY PREP_PROGRAM PERSIST_PROGRAM" >&2
+if [[ "$#" -ne 5 ]]; then
+    echo "usage: gcp-filesystem-boot.sh FRESH_FILESYSTEM_IDENTITY USE_OVERLAY PREP_PROGRAM PERSIST_PROGRAM FSTAB_RECONCILE_PROGRAM" >&2
     exit 2
 fi
 
@@ -11,6 +11,21 @@ fresh_filesystem_identity="$1"
 use_overlay="$2"
 filesystem_prep="$3"
 filesystem_persist="$4"
+filesystem_reconcile="$5"
+
+require_root_owned_data_program() {
+    local path="$1" metadata
+
+    if [[ -L "$path" || ! -f "$path" ]]; then
+        echo "Checked filesystem data program is missing or unsafe: $path" >&2
+        return 1
+    fi
+    metadata="$(stat -c '%u:%g:%a:%h:%F' -- "$path")" || return 1
+    if [[ "$metadata" != "0:0:600:1:regular file" ]]; then
+        echo "Checked filesystem data program is not an unlinked root-owned mode-0600 file: $path" >&2
+        return 1
+    fi
+}
 
 case "$use_overlay" in
     true | false) ;;
@@ -19,6 +34,8 @@ case "$use_overlay" in
         exit 2
         ;;
 esac
+
+require_root_owned_data_program "$filesystem_reconcile"
 
 rm -f /run/cloud-compose-filesystems-ready
 bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data \
@@ -41,12 +58,12 @@ if [[ "$use_overlay" == "true" ]]; then
         mount -o ro "$(readlink -f /dev/disk/by-id/google-prod-volumes)" \
             /mnt/disks/prod-readonly
     fi
-    bash "$filesystem_persist" \
+    CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM="$filesystem_reconcile" bash "$filesystem_persist" \
         /dev/disk/by-id/google-data \
         /dev/disk/by-id/google-docker-volumes \
         /dev/disk/by-id/google-prod-volumes
 else
-    bash "$filesystem_persist" \
+    CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM="$filesystem_reconcile" bash "$filesystem_persist" \
         /dev/disk/by-id/google-data \
         /dev/disk/by-id/google-docker-volumes
 fi
