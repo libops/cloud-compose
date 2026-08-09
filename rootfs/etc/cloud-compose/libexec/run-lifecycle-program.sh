@@ -80,4 +80,14 @@ if [[ "$validate_only" == "true" ]]; then
     exit 0
 fi
 
+# Container-Optimized OS mounts /home with noexec. The built-in lifecycle
+# program is still an unlinked, root-owned regular file below the checked
+# root-owned home boundary, so open it through the fixed system interpreter
+# after validation instead of asking the kernel to execute it from that mount.
+# Keep custom programs on the direct-exec path so their reviewed interpreter or
+# binary contract is preserved. No manifest value is evaluated as shell source.
+if [[ "$program" == "/home/cloud-compose/default-lifecycle.sh" ]]; then
+    exec /bin/bash -- "$program" "${program_args[@]}"
+fi
+
 exec "$program" "${program_args[@]}"

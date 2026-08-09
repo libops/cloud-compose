@@ -237,7 +237,13 @@ argument-free, root-controlled program immediately below
 environment. `true` and `false` remain explicit no-op and failure sentinels.
 Multi-step work, state such as local variables or traps, and any quoting belong
 inside that reviewed program file. The constrained executor invokes its argv
-directly and never evaluates a manifest value with a shell parser.
+without evaluating a manifest value as shell source. Custom programs retain
+direct execution. After the same root-owner, link-count, parent-directory, and
+mode checks, the built-in script is opened as
+`/bin/bash -- /home/cloud-compose/default-lifecycle.sh ACTION`; this fixed
+interpreter path keeps the built-in lifecycle usable on Container-Optimized OS,
+where `/home` is deliberately mounted `noexec`, without turning the manifest
+entry into a shell command string.
 
 ## Vault
 

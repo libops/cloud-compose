@@ -59,6 +59,18 @@ grep -Fq 'run_compose_lifecycle_executor --validate "$lifecycle" "$command" || r
 if grep -Fq 'bash -c "$command"' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"; then
   fail "Compose lifecycle entries still execute as shell strings"
 fi
+lifecycle_executor="$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh"
+grep -Fq 'if [[ "$program" == "/home/cloud-compose/default-lifecycle.sh" ]]; then' \
+  "$lifecycle_executor" || \
+  fail "checked executor does not isolate the built-in lifecycle program"
+grep -Fq 'exec /bin/bash -- "$program" "${program_args[@]}"' \
+  "$lifecycle_executor" || \
+  fail "checked executor cannot open the built-in lifecycle program from a noexec home mount"
+grep -Fq 'exec "$program" "${program_args[@]}"' "$lifecycle_executor" || \
+  fail "checked executor does not preserve direct execution for custom lifecycle programs"
+if grep -Eq '/bin/bash[[:space:]]+-[^[:space:]]*c([[:space:]]|$)' "$lifecycle_executor"; then
+  fail "checked executor evaluates a lifecycle entry as shell source"
+fi
 
 export COMPOSE_PROJECTS_FILE="$tmp/compose-projects.json"
 export COMPOSE_APPS_ENV_DIR="$tmp/apps"
