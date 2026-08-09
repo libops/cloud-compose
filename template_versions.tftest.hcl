@@ -27,8 +27,6 @@ run "default_template_uses_v1_core" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -60,8 +58,6 @@ run "non_isle_template_uses_v1_release_set" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   }
 
@@ -91,8 +87,6 @@ run "isle_template_uses_v1_release_set" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   }
 
@@ -131,8 +125,6 @@ run "explicit_application_environment_overrides_template_defaults" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       extra_env = {
         ISLANDORA_TAG = "6.3.20"
         SITE_LABEL    = "repository"
@@ -162,8 +154,6 @@ run "explicit_package_versions_override_template_defaults" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         package_versions = {
           sitectl      = "v0.40.1"
@@ -195,8 +185,6 @@ run "custom_package_set_filters_template_versions" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
@@ -227,8 +215,6 @@ run "explicit_core_only_package_set_disables_template_plugins" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl"]
       }
