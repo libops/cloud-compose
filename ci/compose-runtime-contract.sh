@@ -27,6 +27,20 @@ mkdir -p "$CLOUD_COMPOSE_DATA_ROOT/project"
 # shellcheck disable=SC1091
 source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
 
+cat >"$CLOUD_COMPOSE_DATA_ROOT/project/compose.yaml" <<'EOF'
+secrets:
+  DB_ROOT_PASSWORD:
+    file: ./secrets/DB_ROOT_PASSWORD
+  WORDPRESS_DB_PASSWORD:
+    file: ./secrets/WORDPRESS_DB_PASSWORD
+EOF
+mapfile -t compose_secrets < <(
+  cd "$CLOUD_COMPOSE_DATA_ROOT/project"
+  compose_secret_files
+)
+[[ "${compose_secrets[*]}" == "./secrets/DB_ROOT_PASSWORD ./secrets/WORDPRESS_DB_PASSWORD" ]] || \
+  fail "Compose Specification compose.yaml secret files were not discovered"
+
 jq -n \
   --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
   --arg trailing_command $'printf "trailing newline preserved"\n' '{

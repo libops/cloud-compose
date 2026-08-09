@@ -570,7 +570,7 @@ EOF
 compose_secret_files() {
     local compose_file
 
-    for compose_file in docker-compose.yaml docker-compose.yml; do
+    for compose_file in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
         if [ ! -f "$compose_file" ]; then
             continue
         fi
