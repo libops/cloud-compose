@@ -6,7 +6,7 @@ run "custom_package_set_merges_only_applicable_template_versions" {
   override_data {
     target = module.linode.module.runtime.data.http.rootfs_contract[0]
     values = {
-      response_body = "91e0257c5867a0f5084ffb1820df585b23502e4f5b66c91e8bb704565abe6ad4\n"
+      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
       status_code   = 200
     }
   }
@@ -57,7 +57,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
   override_data {
     target = module.linode.module.runtime.data.http.rootfs_contract[0]
     values = {
-      response_body = "91e0257c5867a0f5084ffb1820df585b23502e4f5b66c91e8bb704565abe6ad4\n"
+      response_body = "379b1887c46f9e4aedf105a509ccc888338da9d80170e35f05e25f54dd826151\n"
       status_code   = 200
     }
   }
