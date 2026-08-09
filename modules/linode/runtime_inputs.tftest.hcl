@@ -25,6 +25,9 @@ run "merges_provider_neutral_and_provider_specific_ssh_users" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       users = {
         shared       = ["ssh-ed25519 AAAARUNTIME"]
         runtime-only = ["ssh-ed25519 AAAANEUTRAL"]
@@ -59,6 +62,9 @@ run "rejects_multiline_authorized_key" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -79,6 +85,9 @@ run "rejects_unsafe_authorized_username" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -108,6 +117,9 @@ run "rejects_public_rollout_listener" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -123,7 +135,8 @@ run "rejects_archive_without_checksum" {
   variables {
     name = "contract-test"
     runtime = {
-      rootfs_archive_url = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -144,6 +157,9 @@ run "exposes_independent_sitectl_package_versions" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/isle.git"
       }
@@ -179,6 +195,9 @@ run "rejects_reserved_extra_environment" {
       }
     }
     runtime = {
+      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }

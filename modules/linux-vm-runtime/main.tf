@@ -5,7 +5,7 @@ locals {
   rootfs_archive_sha256             = lower(trimspace(var.rootfs_archive_sha256))
   rootfs_test_source_archive_prefix = trimspace(var.rootfs_test_source_archive_prefix)
   rootfs_archive_asset_url          = split("#", split("?", local.rootfs_archive_url)[0])[0]
-  rootfs_contract_sidecar_url       = local.rootfs_archive_url == "" || local.rootfs_test_source_archive_prefix != "" ? "" : replace(local.rootfs_archive_asset_url, "/[^/]+$/", "/cloud-compose-rootfs.contract.sha256")
+  rootfs_contract_sidecar_url       = local.rootfs_archive_url == "" || local.rootfs_test_source_archive_prefix != "" ? "" : replace(local.rootfs_archive_asset_url, "/[^/]+$/", "cloud-compose-rootfs.contract.sha256")
   rootfs_overlay_staging_path       = "/var/lib/cloud-compose/rootfs-overlay"
 
   single_compose_project = {
