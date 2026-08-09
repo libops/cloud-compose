@@ -81,7 +81,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v1.8.2"
+      sitectl = "v1.9.0"
     }
     error_message = "The Linode entrypoint must preserve an explicit core-only package set."
   }

@@ -6,7 +6,7 @@
     "packages": ["sitectl"],
     "extra_env": {},
     "package_versions": {
-      "sitectl": "v1.8.2"
+      "sitectl": "v1.9.0"
     }
   },
   "templates": {
@@ -17,8 +17,8 @@
       "packages": ["sitectl", "sitectl-archivesspace"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-archivesspace": "v2.0.0"
+        "sitectl": "v1.9.0",
+        "sitectl-archivesspace": "v2.1.1"
       }
     },
     "ojs": {
@@ -28,8 +28,8 @@
       "packages": ["sitectl", "sitectl-ojs"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-ojs": "v1.2.0"
+        "sitectl": "v1.9.0",
+        "sitectl-ojs": "v1.4.0"
       }
     },
     "isle": {
@@ -41,9 +41,9 @@
         "ISLANDORA_TAG": "6.3.19"
       },
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-drupal": "v1.3.0",
-        "sitectl-isle": "v1.5.0"
+        "sitectl": "v1.9.0",
+        "sitectl-drupal": "v1.5.0",
+        "sitectl-isle": "v1.6.0"
       }
     },
     "drupal": {
@@ -53,8 +53,8 @@
       "packages": ["sitectl", "sitectl-drupal"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-drupal": "v1.3.0"
+        "sitectl": "v1.9.0",
+        "sitectl-drupal": "v1.5.0"
       }
     },
     "wp": {
@@ -64,8 +64,8 @@
       "packages": ["sitectl", "sitectl-wp"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-wp": "v2.0.0"
+        "sitectl": "v1.9.0",
+        "sitectl-wp": "v2.1.0"
       }
     },
     "omeka-s": {
@@ -75,8 +75,8 @@
       "packages": ["sitectl", "sitectl-omeka-s"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-omeka-s": "v1.2.0"
+        "sitectl": "v1.9.0",
+        "sitectl-omeka-s": "v1.4.0"
       }
     },
     "omeka-classic": {
@@ -86,8 +86,8 @@
       "packages": ["sitectl", "sitectl-omeka-classic"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.8.2",
-        "sitectl-omeka-classic": "v1.2.0"
+        "sitectl": "v1.9.0",
+        "sitectl-omeka-classic": "v1.4.0"
       }
     }
   }

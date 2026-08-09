@@ -30,36 +30,36 @@ func TestTemplateVersionContract(t *testing.T) {
 
 	expectedVersions := map[string]map[string]string{
 		"default": {
-			"sitectl": "v1.8.2",
+			"sitectl": "v1.9.0",
 		},
 		"archivesspace": {
-			"sitectl":               "v1.8.2",
-			"sitectl-archivesspace": "v2.0.0",
+			"sitectl":               "v1.9.0",
+			"sitectl-archivesspace": "v2.1.1",
 		},
 		"drupal": {
-			"sitectl":        "v1.8.2",
-			"sitectl-drupal": "v1.3.0",
+			"sitectl":        "v1.9.0",
+			"sitectl-drupal": "v1.5.0",
 		},
 		"isle": {
-			"sitectl":        "v1.8.2",
-			"sitectl-drupal": "v1.3.0",
-			"sitectl-isle":   "v1.5.0",
+			"sitectl":        "v1.9.0",
+			"sitectl-drupal": "v1.5.0",
+			"sitectl-isle":   "v1.6.0",
 		},
 		"ojs": {
-			"sitectl":     "v1.8.2",
-			"sitectl-ojs": "v1.2.0",
+			"sitectl":     "v1.9.0",
+			"sitectl-ojs": "v1.4.0",
 		},
 		"omeka-classic": {
-			"sitectl":               "v1.8.2",
-			"sitectl-omeka-classic": "v1.2.0",
+			"sitectl":               "v1.9.0",
+			"sitectl-omeka-classic": "v1.4.0",
 		},
 		"omeka-s": {
-			"sitectl":         "v1.8.2",
-			"sitectl-omeka-s": "v1.2.0",
+			"sitectl":         "v1.9.0",
+			"sitectl-omeka-s": "v1.4.0",
 		},
 		"wp": {
-			"sitectl":    "v1.8.2",
-			"sitectl-wp": "v2.0.0",
+			"sitectl":    "v1.9.0",
+			"sitectl-wp": "v2.1.0",
 		},
 	}
 	expectedBranches := map[string]string{
@@ -146,8 +146,8 @@ func TestTemplateVersionContract(t *testing.T) {
 		for _, packageName := range []string{"sitectl", "sitectl-wp", "sitectl-drupal"} {
 			requireContains(t, content, packageName, relativePath+" bin-pack package")
 		}
-		requireContains(t, content, `sitectl        = "v1.8.2"`, relativePath+" bin-pack core selector")
-		requireContains(t, content, `sitectl-wp     = "v2.0.0"`, relativePath+" bin-pack WordPress selector")
-		requireContains(t, content, `sitectl-drupal = "v1.3.0"`, relativePath+" bin-pack Drupal selector")
+		requireContains(t, content, `sitectl        = "v1.9.0"`, relativePath+" bin-pack core selector")
+		requireContains(t, content, `sitectl-wp     = "v2.1.0"`, relativePath+" bin-pack WordPress selector")
+		requireContains(t, content, `sitectl-drupal = "v1.5.0"`, relativePath+" bin-pack Drupal selector")
 	}
 }
