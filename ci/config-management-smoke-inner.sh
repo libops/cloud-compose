@@ -165,13 +165,20 @@ run_invalid_ansible_case() {
     echo "Ansible accepted invalid settings from ${invalid_case}.yml" >&2
     exit 1
   fi
-  grep -Fq -- "$expected" "$log"
-  [[ "$(stat -c '%u:%g:%a' /)" == "$root_before" ]]
-  [[ "$(stat -c '%u:%g:%a' /etc)" == "$etc_before" ]]
-  [[ "$(getent passwd cloud-compose || true)" == "$passwd_before" ]]
-  [[ "$(getent group cloud-compose || true)" == "$group_before" ]]
-  [[ ! -e /home/cloud-compose ]]
-  [[ ! -e /mnt/disks/volumes ]]
+  if ! grep -Fq -- "$expected" "$log"; then
+    echo "Ansible invalid case ${invalid_case} did not report: ${expected}" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  if [[ "$(stat -c '%u:%g:%a' /)" != "$root_before" ||
+    "$(stat -c '%u:%g:%a' /etc)" != "$etc_before" ||
+    "$(getent passwd cloud-compose || true)" != "$passwd_before" ||
+    "$(getent group cloud-compose || true)" != "$group_before" ||
+    -e /home/cloud-compose || -e /mnt/disks/volumes ]]; then
+    echo "Ansible invalid case ${invalid_case} mutated host state before rejection" >&2
+    cat "$log" >&2
+    exit 1
+  fi
   if [[ "$invalid_case" == "invalid-project-dir-symlink" ]]; then
     grep -Fxq 'must-not-change' /tmp/cloud-compose-symlink-target/sentinel
     [[ -L /mnt/disks/data/escape ]]
