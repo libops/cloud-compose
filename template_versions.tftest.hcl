@@ -35,7 +35,7 @@ run "default_template_uses_v1_core" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl = "v1.8.2"
+      sitectl = "v1.9.0"
     }
     error_message = "The default template must select the released sitectl v1 core."
   }
@@ -63,8 +63,8 @@ run "non_isle_template_uses_v1_release_set" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.8.2"
-      sitectl-wp = "v2.0.0"
+      sitectl    = "v1.9.0"
+      sitectl-wp = "v2.1.0"
     }
     error_message = "Non-ISLE templates must select their coordinated sitectl v1 release set."
   }
@@ -92,9 +92,9 @@ run "isle_template_uses_v1_release_set" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl        = "v1.8.2"
-      sitectl-drupal = "v1.3.0"
-      sitectl-isle   = "v1.5.0"
+      sitectl        = "v1.9.0"
+      sitectl-drupal = "v1.5.0"
+      sitectl-isle   = "v1.6.0"
     }
     error_message = "The ISLE template must select its coordinated sitectl v1 release set by default."
   }
@@ -166,7 +166,7 @@ run "explicit_package_versions_override_template_defaults" {
   assert {
     condition = local.sitectl.package_versions == {
       sitectl        = "v0.40.1"
-      sitectl-drupal = "v1.3.0"
+      sitectl-drupal = "v1.5.0"
       sitectl-isle   = "v0.19.1"
     }
     error_message = "Explicit per-package selectors must override only their matching template defaults."
@@ -196,7 +196,7 @@ run "custom_package_set_filters_template_versions" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.8.2"
+      sitectl    = "v1.9.0"
       sitectl-wp = "v0.6.1"
     }
     error_message = "Template selectors for packages omitted by a custom package set must not reach the runtime."
@@ -223,7 +223,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.sitectl.packages == tolist(["sitectl"]) && local.sitectl.package_versions == {
-      sitectl = "v1.8.2"
+      sitectl = "v1.9.0"
     }
     error_message = "An explicit core-only package set must not be mistaken for an omitted template package selection."
   }
