@@ -213,27 +213,38 @@ reject_host_network_compose_services
 
 # Preserve list(string) verify arguments as argv. A value containing spaces is
 # one argument, not an unquoted scalar split by the lifecycle shell.
-jq -n --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" '{app: {
+jq -n \
+  --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
+  --arg up_program "$repo_root/ci/fixtures/lifecycle.d/default-up" '{app: {
   docker_compose_repo: "https://github.com/libops/wp.git",
   docker_compose_branch: "main",
   project_dir: $project_dir,
   compose_project_name: "app",
   sitectl_context_name: "app",
+  sitectl_environment: "preview",
   sitectl_verify_args: ["--label", "value with spaces"],
-  up_commands: ["sitectl verify --context \"$SITECTL_CONTEXT_NAME\" ${SITECTL_VERIFY_ARGS:-}"],
+  up_commands: [$up_program],
   init_commands: [], down_commands: [], rollout_commands: []
 }}' >"$COMPOSE_PROJECTS_FILE"
-cat >"$tmp/bin/sitectl" <<'EOF'
-#!/usr/bin/env bash
-printf '<%s>\n' "$@" >"${SITECTL_ARGV_LOG:?}"
-EOF
-chmod +x "$tmp/bin/sitectl"
+ln -s "$repo_root/ci/fixtures/sitectl-argv-log.sh" "$tmp/bin/sitectl"
 export SITECTL_ARGV_LOG="$tmp/sitectl.argv"
+export CLOUD_COMPOSE_LIFECYCLE_PROGRAM_DIR="$repo_root/ci/fixtures/lifecycle.d"
+export CLOUD_COMPOSE_SITECTL_VERIFY_ARGS_PROGRAM="$repo_root/rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq"
 clone_or_update_compose_app() { source_compose_app_env "$1"; }
 record_compose_app_head() { return 0; }
 CLOUD_COMPOSE_PROVIDER=linode
 run_compose_app_lifecycle app up
 cat >"$tmp/expected.argv" <<'EOF'
+<compose>
+<--context>
+<app>
+<up>
+<-d>
+<--remove-orphans>
+<healthcheck>
+<--context>
+<app>
+<--persist>
 <verify>
 <--context>
 <app>
