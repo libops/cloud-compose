@@ -1042,6 +1042,10 @@ trusted and provider-job checkouts set `persist-credentials: false`.
 Pull-request smoke jobs also build one binary before apply and reuse that exact
 workspace binary from their `always()` cleanup step. Shell remains responsible
 for Terraform, SSH, cloud-init, diagnostics, and host-runtime black-box checks.
+The application smoke stages its checked-in lifecycle contract in a private,
+strictly validated directory on the executable data disk, so its fake `sitectl`
+program remains executable on COS hosts whose temporary filesystems are
+`noexec`; the contract is removed immediately after the check.
 No privileged fallback executes a pull-request binary or downloads one as an
 artifact. The fallback runs
 automatically after a failed, cancelled, or timed-out smoke workflow, including

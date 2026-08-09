@@ -606,9 +606,12 @@ run_lifecycle_program_contract() {
   host="$(jq -r '.host' "$output_json")"
   port="$(jq -r '.ssh_port' "$output_json")"
   user="$(jq -r '.ssh_user' "$output_json")"
-  remote_contract_dir="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    'mktemp -d /tmp/cloud-compose-hosted-contract.XXXXXX')" || return 1
-  if [[ ! "$remote_contract_dir" =~ ^/tmp/cloud-compose-hosted-contract\.[A-Za-z0-9]+$ ]]; then
+  if ! remote_contract_dir="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    'mktemp -d /mnt/disks/data/cloud-compose-hosted-contract.XXXXXX')"; then
+    echo "Could not create the remote lifecycle contract directory on the executable data disk" >&2
+    return 1
+  fi
+  if [[ ! "$remote_contract_dir" =~ ^/mnt/disks/data/cloud-compose-hosted-contract\.[A-Za-z0-9]+$ ]]; then
     echo "Remote lifecycle contract directory is unsafe: $remote_contract_dir" >&2
     return 1
   fi
@@ -617,8 +620,9 @@ run_lifecycle_program_contract() {
   if ! ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
     "install -m 0700 /dev/stdin $remote_contract" \
     <"$repo_root/ci/lifecycle-program-contract.sh"; then
+    echo "Could not install the remote lifecycle program contract" >&2
     ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-      "rmdir -- $remote_contract_dir" || true
+      "rm -f -- $remote_contract && rmdir -- $remote_contract_dir" || true
     return 1
   fi
 
@@ -627,9 +631,12 @@ run_lifecycle_program_contract() {
     status=0
   else
     status=$?
+    echo "Remote lifecycle program contract failed with status $status" >&2
   fi
-  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "rm -f -- $remote_contract && rmdir -- $remote_contract_dir" || true
+  if ! ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "rm -f -- $remote_contract && rmdir -- $remote_contract_dir"; then
+    echo "Could not remove the remote lifecycle program contract" >&2
+  fi
   return "$status"
 }
 

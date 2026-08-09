@@ -31,6 +31,16 @@ bash "$repo_root/ci/lifecycle-program-contract.sh" \
   "$repo_root/rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq"
 grep -Fq -- 'run_lifecycle_program_contract "$home_dir" "$key_path" "$output_json"' \
   "$repo_root/ci/cloud-smoke.sh" || fail "provider smoke does not execute the lifecycle program contract"
+smoke_lifecycle_contract="$(sed -n '/^run_lifecycle_program_contract()/,/^}/p' "$repo_root/ci/cloud-smoke.sh")"
+grep -Fq -- 'mktemp -d /mnt/disks/data/cloud-compose-hosted-contract.XXXXXX' \
+  <<<"$smoke_lifecycle_contract" || \
+  fail "provider smoke does not stage its executable lifecycle contract on the data disk"
+grep -Fq -- '^/mnt/disks/data/cloud-compose-hosted-contract\.[A-Za-z0-9]+$' \
+  <<<"$smoke_lifecycle_contract" || \
+  fail "provider smoke does not validate the exact remote lifecycle contract directory"
+if grep -Fq -- '/tmp/cloud-compose-hosted-contract' <<<"$smoke_lifecycle_contract"; then
+  fail "provider smoke still stages an executable lifecycle contract below /tmp"
+fi
 grep -Fq -- 'bash "$lifecycle_program_contract" /home/cloud-compose/default-lifecycle.sh' \
   "$repo_root/ci/remote/config-management-verify.sh" || \
   fail "config-management smoke does not execute the lifecycle program contract"
