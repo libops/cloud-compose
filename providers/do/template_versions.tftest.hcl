@@ -2,7 +2,7 @@ mock_provider "digitalocean" {}
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "8cc800954d4780c933ebd680b25ec7dacfb61a733b9295f272ab56ac8fbf6b74\n"
+      response_body = "c71bcb8a431176c641eaded5a8a9d8f36d76ea3ad3d709f8b6d2b3eaa12c7cb0\n"
       status_code   = 200
     }
   }
@@ -15,6 +15,8 @@ run "custom_package_set_merges_only_applicable_template_versions" {
     name     = "template-versions"
     template = "isle"
     runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
@@ -51,6 +53,8 @@ run "explicit_core_only_package_set_disables_template_plugins" {
     name     = "template-versions"
     template = "isle"
     runtime = {
+      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
+      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = []
       }
