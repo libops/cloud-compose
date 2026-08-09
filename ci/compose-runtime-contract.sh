@@ -44,13 +44,16 @@ grep -Fq 'cd /home/cloud-compose' "$repo_root/rootfs/home/cloud-compose/run.sh" 
 if grep -Fq 'su -s /bin/bash -c' "$repo_root/rootfs/home/cloud-compose/run.sh"; then
   fail "privilege-drop helper still synthesizes a shell program through su"
 fi
-grep -Fq '"$COMPOSE_LIFECYCLE_EXECUTOR" "$lifecycle" "$command"' \
+grep -Fq 'run_compose_lifecycle_executor "$lifecycle" "$command"' \
   "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
   fail "Compose lifecycle entries do not pass through the checked executor"
 grep -Fq 'readonly COMPOSE_LIFECYCLE_EXECUTOR="/etc/cloud-compose/libexec/run-lifecycle-program.sh"' \
   "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
   fail "Compose lifecycle entries do not use the canonical checked executor path"
-grep -Fq '"$COMPOSE_LIFECYCLE_EXECUTOR" --validate "$lifecycle" "$command" || return 1' \
+grep -Fq '"$COMPOSE_LIFECYCLE_EXECUTOR" "$@"' \
+  "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
+  fail "Compose lifecycle executor wrapper does not invoke the canonical checked program"
+grep -Fq 'run_compose_lifecycle_executor --validate "$lifecycle" "$command" || return 1' \
   "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
   fail "Compose lifecycle program sets are not validated before execution"
 if grep -Fq 'bash -c "$command"' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"; then
@@ -65,6 +68,13 @@ mkdir -p "$CLOUD_COMPOSE_DATA_ROOT/project"
 
 # shellcheck disable=SC1091
 source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
+
+# Exercise the checked-in executor while retaining the immutable production
+# path contract above. The production image installs the same file at the
+# canonical /etc location.
+run_compose_lifecycle_executor() {
+  "$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh" "$@"
+}
 
 cat >"$CLOUD_COMPOSE_DATA_ROOT/project/compose.yaml" <<'EOF'
 secrets:

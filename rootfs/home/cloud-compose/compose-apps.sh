@@ -10,6 +10,10 @@ compose_apps_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_SECRET_FILES_PROGRAM="${CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM:-$compose_apps_dir/compose-secret-files.awk}"
 readonly COMPOSE_LIFECYCLE_EXECUTOR="/etc/cloud-compose/libexec/run-lifecycle-program.sh"
 
+run_compose_lifecycle_executor() {
+    "$COMPOSE_LIFECYCLE_EXECUTOR" "$@"
+}
+
 shell_env_line() {
     local name="$1"
     local value="$2"
@@ -1065,7 +1069,7 @@ run_compose_app_lifecycle() {
     compose_app_array_values "$app" "$field" commands || return 1
     for command in "${commands[@]}"; do
         [[ -n "$command" ]] || continue
-        "$COMPOSE_LIFECYCLE_EXECUTOR" --validate "$lifecycle" "$command" || return 1
+        run_compose_lifecycle_executor --validate "$lifecycle" "$command" || return 1
     done
 
     case "$lifecycle" in
@@ -1103,7 +1107,7 @@ run_compose_app_lifecycle() {
         if [ -z "$command" ]; then
             continue
         fi
-        "$COMPOSE_LIFECYCLE_EXECUTOR" "$lifecycle" "$command" || {
+        run_compose_lifecycle_executor "$lifecycle" "$command" || {
             command_status=$?
             popd >/dev/null
             return "$command_status"
