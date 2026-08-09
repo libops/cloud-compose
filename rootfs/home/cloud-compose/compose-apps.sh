@@ -789,6 +789,82 @@ record_compose_app_head() {
     mv -f "$state_tmp" "$state_file"
 }
 
+compose_checkout_diff_digest() {
+    local digest digest_output diff_file
+
+    diff_file="$(mktemp)" || return 1
+    if ! git diff --binary --full-index --no-color --no-ext-diff --no-textconv HEAD -- >"$diff_file"; then
+        rm -f -- "$diff_file"
+        echo "Could not fingerprint managed Compose changes" >&2
+        return 1
+    fi
+    if ! digest_output="$(sha256sum "$diff_file")"; then
+        rm -f -- "$diff_file"
+        echo "Could not hash managed Compose changes" >&2
+        return 1
+    fi
+    rm -f -- "$diff_file"
+    digest="${digest_output%% *}"
+    if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "Managed Compose change fingerprint is invalid" >&2
+        return 1
+    fi
+    printf '%s\n' "$digest"
+}
+
+record_compose_managed_diff() {
+    local app="$1"
+    local digest state_file state_tmp
+
+    validate_compose_app_name "$app" || return 1
+    digest="$(compose_checkout_diff_digest)" || return 1
+    install -d -m 0750 "$COMPOSE_APPS_STATE_DIR"
+    state_file="${COMPOSE_APPS_STATE_DIR}/${app}.managed-diff"
+    state_tmp="$(mktemp "${state_file}.tmp.XXXXXX")"
+    printf '%s\n' "$digest" >"$state_tmp"
+    chmod 0640 "$state_tmp"
+    chown cloud-compose:cloud-compose "$state_tmp" 2>/dev/null || true
+    mv -f "$state_tmp" "$state_file"
+}
+
+verify_recorded_compose_managed_diff() {
+    local app="$1"
+    local current_digest recorded_digest state_file
+
+    validate_compose_app_name "$app" || return 1
+    state_file="${COMPOSE_APPS_STATE_DIR}/${app}.managed-diff"
+    if [[ -L "$state_file" || ! -f "$state_file" ]]; then
+        echo "Compose checkout contains tracked changes without recorded managed state: $state_file" >&2
+        return 1
+    fi
+    recorded_digest="$(<"$state_file")"
+    if [[ ! "$recorded_digest" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "Recorded managed Compose state is invalid for ${app}: $state_file" >&2
+        return 1
+    fi
+    current_digest="$(compose_checkout_diff_digest)" || return 1
+    if [[ "$current_digest" != "$recorded_digest" ]]; then
+        echo "Compose checkout differs from its recorded sitectl-managed state; commit operator changes in the downstream fork before deployment" >&2
+        return 1
+    fi
+}
+
+restore_recorded_compose_managed_diff() {
+    local app="$1"
+
+    if git diff --quiet --ignore-submodules -- &&
+        git diff --cached --quiet --ignore-submodules --; then
+        return 0
+    fi
+    verify_recorded_compose_managed_diff "$app" || return 1
+    git restore --source=HEAD --staged --worktree -- . || return 1
+    if ! git diff --quiet --ignore-submodules -- ||
+        ! git diff --cached --quiet --ignore-submodules --; then
+        echo "Could not restore the committed Compose source before deployment" >&2
+        return 1
+    fi
+}
+
 checkout_exact_compose_commit() {
     local app="$1"
     local requested_commit="$2"
@@ -824,12 +900,16 @@ verify_compose_origin() {
 }
 
 verify_clean_compose_checkout() {
+    local app="${1:-}"
     local untracked_compose_control
 
     if ! git diff --quiet --ignore-submodules -- ||
         ! git diff --cached --quiet --ignore-submodules --; then
-        echo "Compose checkout contains tracked or staged changes; commit them in the downstream fork before deployment" >&2
-        return 1
+        if [[ -z "$app" ]]; then
+            echo "Compose checkout contains tracked or staged changes; commit them in the downstream fork before deployment" >&2
+            return 1
+        fi
+        verify_recorded_compose_managed_diff "$app" || return 1
     fi
     untracked_compose_control="$(git ls-files --others --exclude-standard -- \
         ':(glob)**/compose*.yml' ':(glob)**/compose*.yaml' \
@@ -899,7 +979,7 @@ clone_or_update_compose_app() {
                 return 1
             }
         fi
-        verify_clean_compose_checkout || { popd >/dev/null; return 1; }
+        verify_clean_compose_checkout "$app" || { popd >/dev/null; return 1; }
         if [ "$(id -u)" -eq 0 ]; then
             chown -R cloud-compose:cloud-compose . || { popd >/dev/null; return 1; }
         fi
@@ -907,7 +987,8 @@ clone_or_update_compose_app() {
     else
         pushd "$DOCKER_COMPOSE_DIR" >/dev/null || return 1
         verify_compose_origin || { popd >/dev/null; return 1; }
-        verify_clean_compose_checkout || { popd >/dev/null; return 1; }
+        verify_clean_compose_checkout "$app" || { popd >/dev/null; return 1; }
+        restore_recorded_compose_managed_diff "$app" || { popd >/dev/null; return 1; }
         if compose_ref_is_full_commit "$DOCKER_COMPOSE_BRANCH"; then
             checkout_exact_compose_commit "$app" "$DOCKER_COMPOSE_BRANCH" || { popd >/dev/null; return 1; }
         else
@@ -953,7 +1034,7 @@ clone_or_update_compose_app() {
                 return 1
             fi
         fi
-        verify_clean_compose_checkout || { popd >/dev/null; return 1; }
+        verify_clean_compose_checkout "$app" || { popd >/dev/null; return 1; }
         popd >/dev/null
     fi
 }
@@ -971,7 +1052,7 @@ verify_existing_compose_app_checkout() {
 
     pushd "$DOCKER_COMPOSE_DIR" >/dev/null || return 1
     verify_compose_origin || { popd >/dev/null; return 1; }
-    verify_clean_compose_checkout || { popd >/dev/null; return 1; }
+    verify_clean_compose_checkout "$app" || { popd >/dev/null; return 1; }
     current_head="$(git rev-parse --verify 'HEAD^{commit}')" || {
         echo "Compose checkout has no deployed commit for ${app}: $DOCKER_COMPOSE_DIR" >&2
         popd >/dev/null
@@ -1080,6 +1161,11 @@ run_compose_app_lifecycle() {
             else
                 clone_or_update_compose_app "$app" || return 1
             fi
+            if [[ "$lifecycle" == "rollout" ]]; then
+                pushd "$DOCKER_COMPOSE_DIR" >/dev/null || return 1
+                restore_recorded_compose_managed_diff "$app" || { popd >/dev/null; return 1; }
+                popd >/dev/null
+            fi
             ;;
         down)
             source_compose_app_env "$app" || return 1
@@ -1105,6 +1191,9 @@ run_compose_app_lifecycle() {
     done
     if [[ "$lifecycle" != "down" ]]; then
         record_compose_app_head "$app" || { popd >/dev/null; return 1; }
+    fi
+    if [[ "$lifecycle" == "rollout" ]]; then
+        record_compose_managed_diff "$app" || { popd >/dev/null; return 1; }
     fi
     popd >/dev/null
 }

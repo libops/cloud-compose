@@ -209,6 +209,29 @@ fi
 rm -f -- "$tag_checkout/compose.override.yaml"
 clone_or_update_compose_app tag
 assert_head "$tag_checkout" "$commit_one"
+
+# A successful sitectl reconciliation may intentionally derive tracked runtime
+# configuration from the untracked desired-state document. Accept only the
+# exact recorded diff, reject any later mutation, and restore the committed
+# source before a source move.
+printf 'managed\n' >"$tag_checkout/version.txt"
+pushd "$tag_checkout" >/dev/null
+record_compose_managed_diff tag
+verify_clean_compose_checkout tag
+printf 'unexpected\n' >>version.txt
+if verify_clean_compose_checkout tag >/dev/null 2>&1; then
+  fail "recorded managed Compose state accepted a different tracked change"
+fi
+printf 'managed\n' >version.txt
+restore_recorded_compose_managed_diff tag
+popd >/dev/null
+[[ "$(<"$tag_checkout/version.txt")" == "one" ]] || \
+  fail "recorded managed Compose state was not restored to committed source"
+if ! git -C "$tag_checkout" diff --quiet --ignore-submodules -- ||
+  ! git -C "$tag_checkout" diff --cached --quiet --ignore-submodules --; then
+  fail "recorded managed Compose restore left tracked changes"
+fi
+
 run_compose_app_lifecycle tag init
 [[ "$(<"$COMPOSE_APPS_STATE_DIR/tag.deployed-head")" == "$commit_one" ]] || \
   fail "tag deployed HEAD was not recorded"

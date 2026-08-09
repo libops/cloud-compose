@@ -138,6 +138,16 @@ remote branch moves. The deployed commit for every app is recorded at
 `/home/cloud-compose/state/<app>.deployed-head`, including branch/tag
 deployments, so operators can compare desired and observed source state.
 
+`sitectl` component reconciliation can derive tracked runtime configuration
+from `.libops/site.yaml`. After a successful initialization or rollout,
+cloud-compose records the exact binary Git-diff fingerprint at
+`/home/cloud-compose/state/<app>.managed-diff`. Service starts accept that
+derived state only while its fingerprint is unchanged. A source update or
+rollout restores the committed tree only after the current diff matches the
+recorded value, then derives a new fingerprint after success. Partial
+reconciliation and operator edits still fail closed; institution-specific
+source changes must be committed in the downstream repository.
+
 Use a full commit for reproducible production rollouts. A commit pin fixes the
 repository contents but does not prove who authored them; protect the selected
 repository and review/sign commits according to your downstream governance.
