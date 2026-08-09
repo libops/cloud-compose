@@ -303,7 +303,7 @@ run_salt_case \
   sitectl-wp \
   wp.example.edu \
   /mnt/disks/data/libops/wp.git/wp-prod \
-  libops-wp-v1-1-0
+  libops-wp-v1-1-1
 
 run_salt_case \
   drupal-prod \
