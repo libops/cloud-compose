@@ -1,15 +1,15 @@
 mock_provider "digitalocean" {}
-mock_provider "http" {
-  mock_data "http" {
-    defaults = {
+
+run "custom_package_set_merges_only_applicable_template_versions" {
+  command = plan
+
+  override_data {
+    target = module.digitalocean.module.runtime.data.http.rootfs_contract[0]
+    values = {
       response_body = "c71bcb8a431176c641eaded5a8a9d8f36d76ea3ad3d709f8b6d2b3eaa12c7cb0\n"
       status_code   = 200
     }
   }
-}
-
-run "custom_package_set_merges_only_applicable_template_versions" {
-  command = plan
 
   variables {
     name     = "template-versions"
@@ -48,6 +48,14 @@ run "custom_package_set_merges_only_applicable_template_versions" {
 
 run "explicit_core_only_package_set_disables_template_plugins" {
   command = plan
+
+  override_data {
+    target = module.digitalocean.module.runtime.data.http.rootfs_contract[0]
+    values = {
+      response_body = "c71bcb8a431176c641eaded5a8a9d8f36d76ea3ad3d709f8b6d2b3eaa12c7cb0\n"
+      status_code   = 200
+    }
+  }
 
   variables {
     name     = "template-versions"
