@@ -245,13 +245,18 @@ fi
 
 archive_source="$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"
 verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
+source_members_line="$(grep -n 'validate_rootfs_test_source_archive "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+source_extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
 members_line="$(grep -n 'validate_rootfs_archive "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
-extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | tail -n 1 | cut -d: -f1)"
 contract_line="$(grep -n 'rootfs archive paths, bytes, or canonical metadata do not match this cloud-compose module source' "$archive_source" | head -n 1 | cut -d: -f1)"
 copy_line="$(grep -n 'cp -a "\$staged_rootfs"/. /' "$archive_source" | head -n 1 | cut -d: -f1)"
-[[ -n "$verify_line" && -n "$members_line" && -n "$extract_line" && -n "$contract_line" && -n "$copy_line" &&
-  "$verify_line" -lt "$members_line" && "$members_line" -lt "$extract_line" &&
-  "$extract_line" -lt "$contract_line" && "$contract_line" -lt "$copy_line" ]] || \
+[[ -n "$verify_line" && -n "$source_members_line" && -n "$source_extract_line" &&
+  -n "$members_line" && -n "$extract_line" && -n "$contract_line" && -n "$copy_line" &&
+  "$verify_line" -lt "$source_members_line" && "$source_members_line" -lt "$source_extract_line" &&
+  "$source_extract_line" -lt "$contract_line" && "$verify_line" -lt "$members_line" &&
+  "$members_line" -lt "$extract_line" && "$extract_line" -lt "$contract_line" &&
+  "$contract_line" -lt "$copy_line" ]] || \
   fail "$archive_source does not verify archive bytes and canonical rootfs metadata before installation"
 assert_contains "$archive_source" "stat -c '%a:%h:%F'"
 assert_contains "$archive_source" '[[ "$metadata" == "${expected_mode}:1:regular file" ]]'
