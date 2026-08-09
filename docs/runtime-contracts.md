@@ -994,11 +994,15 @@ convention:
 | --- | --- | --- |
 | DigitalOcean create/test/destroy | `cloud-smoke-digitalocean` | `DIGITALOCEAN_TOKEN` |
 | Linode create/test/destroy | `cloud-smoke-linode` | `LINODE_TOKEN` |
-| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` |
+| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE` |
 | GCP major-version upgrade | `cloud-smoke-gcp` | the GCP values above plus `GCLOUD_NETWORK_PROJECT_ID`, `GCLOUD_NETWORK_NAME`, `GCLOUD_SUBNETWORK_NAME`, `GCLOUD_POWER_START_ROLE`, and `GCLOUD_POWER_SUSPEND_ROLE` |
 | DigitalOcean fallback deletion | `cloud-smoke-cleanup-digitalocean` | a distinct cleanup-only `DIGITALOCEAN_TOKEN` |
 | Linode fallback deletion | `cloud-smoke-cleanup-linode` | a distinct cleanup-only `LINODE_TOKEN` |
-| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` |
+| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE` |
+
+When `GCLOUD_ZONE` is set, it must belong to `GCLOUD_REGION`. Mirror the same
+zone in `cloud-smoke-gcp` and `cloud-smoke-cleanup-gcp` so fallback cleanup
+targets the smoke-test location.
 
 Configure required reviewers and prevent self-review on the three
 `cloud-smoke-*` environments. Permit only the same-repository feature branches

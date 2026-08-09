@@ -100,6 +100,7 @@ jobs:
       GCLOUD_OIDC_POOL: ${{ vars.GCLOUD_OIDC_POOL || secrets.GCLOUD_OIDC_POOL }}
       GCLOUD_PROJECT: ${{ vars.GCLOUD_PROJECT || secrets.GCLOUD_PROJECT }}
       GCLOUD_REGION: ${{ vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
+      GCLOUD_ZONE: ${{ vars.GCLOUD_ZONE || secrets.GCLOUD_ZONE }}
       GSA: ${{ vars.GSA || secrets.GSA }}
     steps:
       - name: Checkout repository
