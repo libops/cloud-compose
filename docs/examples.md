@@ -136,7 +136,7 @@ healthcheck settings:
 runtime = {
   sitectl = {
     package_versions = {
-      sitectl      = "v1.9.0"
+      sitectl      = "v1.9.1"
       sitectl-wp   = "v2.1.0"
     }
   }
@@ -182,7 +182,7 @@ runtime = {
   }
   sitectl = {
     package_versions = {
-      sitectl        = "v1.9.0"
+      sitectl        = "v1.9.1"
       sitectl-wp     = "v2.1.0"
       sitectl-drupal = "v1.5.0"
     }

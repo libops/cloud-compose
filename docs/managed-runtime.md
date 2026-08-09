@@ -26,7 +26,7 @@ core and plugins independently. The provider-neutral
 backward-compatible fallback only for an installed package with neither a
 template selector nor an explicit per-package selector.
 
-All presets pin sitectl v1.9.0 with reviewed application plugins:
+All presets pin sitectl v1.9.1 with reviewed application plugins:
 sitectl-archivesspace v2.1.1, sitectl-drupal v1.5.0, sitectl-isle v1.6.0,
 sitectl-ojs v1.4.0, sitectl-omeka-classic v1.4.0, sitectl-omeka-s v1.4.0,
 and sitectl-wp v2.1.0. ISLE includes both the Drupal and ISLE plugins. The
@@ -54,7 +54,7 @@ runtime = {
       "sitectl-isle",
     ]
     package_versions = {
-      sitectl          = "v1.9.0"
+      sitectl          = "v1.9.1"
       sitectl-drupal   = "v1.5.0"
       sitectl-isle     = "v1.6.0"
     }
