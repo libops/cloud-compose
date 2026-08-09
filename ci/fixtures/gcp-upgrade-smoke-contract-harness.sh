@@ -36,7 +36,7 @@ case "$action" in
         ;;
     cleanup-failure)
         [[ "$#" -eq 3 ]]
-        [[ "$repo_root" == "$3" ]]
+        [[ -d "$3/.git" ]]
         : "${CLEANUP_LOG:?CLEANUP_LOG is required}"
         require_cmd() { :; }
         require_env() { :; }

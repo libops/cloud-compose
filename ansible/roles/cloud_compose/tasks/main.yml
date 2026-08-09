@@ -39,7 +39,7 @@
       - (cloud_compose_bootstrap_wait_seconds | int) >= 1
       - (cloud_compose_bootstrap_wait_seconds | int) <= 43200
       - (cloud_compose_bootstrap_timeout | int) > (cloud_compose_bootstrap_wait_seconds | int)
-    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, dedicated-host acknowledgement, and a bootstrap async timeout longer than the 1-43200 second service wait."
+    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, cloud_compose_dedicated_host_acknowledged=true, and a bootstrap async timeout longer than the 1-43200 second service wait."
 
 - name: Require safe cloud-compose environment entries
   ansible.builtin.assert:
