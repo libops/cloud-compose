@@ -3,4 +3,4 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
-exec "$repo_root/rootfs/home/cloud-compose/default-lifecycle.sh" up
+exec bash "$repo_root/rootfs/home/cloud-compose/default-lifecycle.sh" up
