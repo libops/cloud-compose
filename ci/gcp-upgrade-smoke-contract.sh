@@ -24,10 +24,34 @@ script="$repo_root/ci/gcp-upgrade-smoke.sh"
 shared_smoke="$repo_root/ci/cloud-smoke.sh"
 fixture="$repo_root/tests/smoke/gcp-upgrade/main.tf"
 variables="$repo_root/tests/smoke/gcp-upgrade/variables.tf"
+fixture_prepare="$repo_root/tests/smoke/gcp-upgrade/rootfs/home/cloud-compose/gcp-upgrade-prepare-repository.sh"
+fixture_up="$repo_root/tests/smoke/gcp-upgrade/rootfs/etc/cloud-compose/lifecycle.d/gcp-upgrade-up.sh"
+context_fixture="$repo_root/tests/smoke/modules/context/main.tf"
+remote_services="$repo_root/ci/remote/gcp-upgrade-assert-services-disabled.sh"
+remote_metadata="$repo_root/ci/remote/gcp-upgrade-verify-metadata-isolation.sh"
+remote_container_metadata="$repo_root/ci/remote/gcp-upgrade-container-metadata-isolation.sh"
+remote_sentinels="$repo_root/ci/remote/gcp-upgrade-write-disk-sentinels.sh"
+remote_filesystem_size="$repo_root/ci/remote/gcp-upgrade-read-filesystem-size.sh"
 workflow="$repo_root/.github/workflows/cloud-smoke.yml"
 docs="$repo_root/docs/runtime-contracts.md"
+contract_harness="$repo_root/ci/fixtures/gcp-upgrade-smoke-contract-harness.sh"
 
-for required in "$script" "$shared_smoke" "$fixture" "$variables" "$workflow" "$docs"; do
+for required in \
+  "$script" \
+  "$shared_smoke" \
+  "$fixture" \
+  "$variables" \
+  "$fixture_prepare" \
+  "$fixture_up" \
+  "$context_fixture" \
+  "$remote_services" \
+  "$remote_metadata" \
+  "$remote_container_metadata" \
+  "$remote_sentinels" \
+  "$remote_filesystem_size" \
+  "$contract_harness" \
+  "$workflow" \
+  "$docs"; do
   [[ -f "$required" ]] || fail "required file is missing: $required"
 done
 
@@ -100,16 +124,20 @@ grep -Fq '/mnt/disks/data/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner omits the persistent data-disk sentinel"
 grep -Fq '/mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script" ||
   fail "upgrade runner omits the Docker-volume disk sentinel"
-[[ "$(grep -Fc 'sudo tee /mnt/disks/data/.cloud-compose-upgrade-sentinel' "$script")" -eq 1 ]] ||
-  fail "upgrade runner must write the data-disk sentinel exactly once"
-[[ "$(grep -Fc 'sudo tee /mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$script")" -eq 1 ]] ||
-  fail "upgrade runner must write the Docker-volume sentinel exactly once"
+grep -Fq 'gcp-upgrade-write-disk-sentinels.sh' "$script" ||
+  fail "upgrade runner does not stage the checked disk-sentinel program"
+[[ "$(grep -Fc '>/mnt/disks/data/.cloud-compose-upgrade-sentinel' "$remote_sentinels")" -eq 1 ]] ||
+  fail "checked remote program must write the data-disk sentinel exactly once"
+[[ "$(grep -Fc '>/mnt/disks/volumes/.cloud-compose-upgrade-sentinel' "$remote_sentinels")" -eq 1 ]] ||
+  fail "checked remote program must write the Docker-volume sentinel exactly once"
+grep -Fq '[[ "$#" -ne 1 || ! "$1" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]' "$remote_sentinels" ||
+  fail "checked disk-sentinel program does not validate its nonce argument"
 grep -Fq 'read_data_filesystem_size_bytes()' "$script" ||
   fail "upgrade runner does not measure mounted application-data filesystem capacity"
-grep -Fq 'filesystem="$(findmnt -n -o FSTYPE --target /mnt/disks/data)"' "$script" ||
-  fail "upgrade runner does not require the application-data mount to remain ext4"
-grep -Fq 'df --block-size=1 --output=size -- /mnt/disks/data' "$script" ||
-  fail "upgrade runner does not measure mounted ext4 capacity in bytes"
+grep -Fq 'filesystem="$(findmnt -n -o FSTYPE --target /mnt/disks/data)"' "$remote_filesystem_size" ||
+  fail "checked filesystem-size program does not require the application-data mount to remain ext4"
+grep -Fq 'df --block-size=1 --output=size -- /mnt/disks/data' "$remote_filesystem_size" ||
+  fail "checked filesystem-size program does not measure mounted ext4 capacity in bytes"
 grep -Fq '((10#$upgraded_data_filesystem_bytes > 10#$baseline_data_filesystem_bytes))' "$script" ||
   fail "upgrade runner does not prove mounted ext4 grew beyond its baseline capacity"
 
@@ -158,11 +186,28 @@ grep -Fq 'branch       = var.wordpress_compose_ref' "$fixture" ||
 grep -Fq 'projects = var.legacy_baseline ? {} : {' "$fixture" ||
   fail "upgrade fixture does not transition from the legacy inputs to the current project map"
 for unit in internal-services.timer cloud-compose-internal-services.timer; do
-  grep -Fq "$unit" "$fixture" || fail "upgrade fixture does not disable ${unit}"
+  grep -Fq "$unit" "$fixture_prepare" || fail "upgrade fixture program does not disable ${unit}"
 done
 grep -Fq 'initcmd = [' "$fixture" ||
   fail "upgrade fixture does not disable internal-service timers before bootstrap"
-grep -Fq 'git -c safe.directory=\"$project\" -C \"$project\"' "$fixture" ||
+grep -Fq 'rootfs = "${path.module}/rootfs"' "$fixture" ||
+  fail "upgrade fixture does not package its checked initialization program"
+grep -Fq 'bash /home/cloud-compose/gcp-upgrade-prepare-repository.sh' "$fixture" ||
+  fail "upgrade fixture does not invoke its checked initialization program"
+grep -Fq '"/etc/cloud-compose/lifecycle.d/gcp-upgrade-up.sh"' "$fixture" ||
+  fail "upgrade fixture does not invoke its checked lifecycle program"
+grep -Fq '"/home/cloud-compose/default-lifecycle.sh up"' "$context_fixture" ||
+  fail "hosted smoke context does not invoke the checked default lifecycle program"
+grep -Fq 'sitectl compose --context "$context" up -d --remove-orphans' "$fixture_up" ||
+  fail "checked upgrade lifecycle program does not bring up the exact sitectl context"
+grep -Fq 'sitectl healthcheck --context "$context" --persist' "$fixture_up" ||
+  fail "checked upgrade lifecycle program does not persist the post-start healthcheck"
+[[ -x "$fixture_up" ]] ||
+  fail "checked upgrade lifecycle program is not executable"
+if grep -Eq '"sitectl (compose|healthcheck)' "$fixture" "$context_fixture"; then
+  fail "smoke fixtures still embed raw sitectl lifecycle commands in Terraform"
+fi
+grep -Fq 'git -c safe.directory="$project" -C "$project"' "$fixture_prepare" ||
   fail "upgrade fixture does not explicitly trust its preserved pinned repository"
 if grep -Fq 'runcmd = [' "$fixture"; then
   fail "upgrade fixture defers its timer shutdown until after bootstrap"
@@ -176,25 +221,41 @@ baseline_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$tmp/baseline
 
 current_bootstrap_line="$(
   grep -nF 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
-    "$repo_root/templates/cloud-init.yml" |
+    "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" |
     cut -d: -f1 || true
 )"
 current_initcmd_line="$(
-  grep -nF 'for CMD in ADDITIONAL_INITCMD' "$repo_root/templates/cloud-init.yml" |
+  grep -nF 'source "$init_commands_file"' \
+    "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" |
     cut -d: -f1 || true
 )"
 [[ -n "$current_initcmd_line" && -n "$current_bootstrap_line" && "$current_initcmd_line" -lt "$current_bootstrap_line" ]] ||
-  fail "current cloud-init does not execute fixture initcmd before retryable bootstrap"
-grep -Fq 'for unit in internal-services.timer internal-services.service cloud-compose-internal-services.timer cloud-compose-internal-services.service' "$script" ||
-  fail "upgrade runner does not assert that both timer generations remain inactive after boot"
+  fail "current checked-in cloud-init program does not execute fixture initcmd before retryable bootstrap"
+for unit in internal-services.timer internal-services.service cloud-compose-internal-services.timer cloud-compose-internal-services.service; do
+  grep -Fq "$unit" "$remote_services" ||
+    fail "checked service assertion does not cover ${unit}"
+done
+grep -Fq 'gcp-upgrade-assert-services-disabled.sh' "$script" ||
+  fail "upgrade runner does not invoke the checked service assertion after boot"
 grep -Fq 'run_direct_vpc_cold_start "$new_home" "$key_path" "$new_output" "$name" "$zone"' "$script" ||
   fail "upgrade runner does not exercise the upgraded Direct VPC cold-start path"
 grep -Fq 'verify_metadata_isolation "$new_home" "$key_path" "$new_output"' "$script" ||
   fail "upgrade runner does not verify metadata isolation after the replacement boot"
-grep -Fq 'nslookup metadata.google.internal' "$script" ||
+grep -Fq 'nslookup metadata.google.internal' "$remote_container_metadata" ||
   fail "upgrade runner does not prove that Compute internal DNS survives metadata isolation"
-grep -Fq 'sudo -u cloud-compose curl' "$script" ||
+grep -Fq 'for metadata_scheme in http https; do' "$remote_metadata" ||
   fail "upgrade runner does not prove that unprivileged host metadata access is denied"
+grep -Fq 'type=bind,src=${container_program},dst=/usr/local/bin/cloud-compose-metadata-isolation,readonly' "$remote_metadata" ||
+  fail "metadata-isolation smoke does not mount its checked container program read-only"
+grep -Fq '/bin/sh /usr/local/bin/cloud-compose-metadata-isolation' "$remote_metadata" ||
+  fail "metadata-isolation smoke does not invoke its checked container program directly"
+if grep -Eq 'base64[^[:space:]]*[[:space:]]*\|[[:space:]]*(sudo[[:space:]]+)?bash|ssh_cmd.*bash[[:space:]]+-(c|lc)' "$script"; then
+  fail "upgrade runner still sends an embedded Bash program to the remote host"
+fi
+grep -Fq 'remote_dir=/home/cloud-compose/.cache/libops-ci' "$script" ||
+  fail "upgrade runner does not stage checked remote programs at a stable path"
+grep -Fq 'install -m 0700 /dev/stdin $remote_path' "$script" ||
+  fail "upgrade runner does not install checked remote programs with a private executable mode"
 grep -Fq -- '--header '\''X-Forwarded-For: 10.0.0.8'\''' "$script" ||
   fail "Direct VPC smoke does not test an attacker-controlled forwarded prefix"
 grep -Fq -- '--max-time 600' "$script" ||
@@ -225,24 +286,20 @@ grep -Fq 'valid_direct_vpc_cidr "$subnet_cidr"' "$script" ||
   fail "upgrade runner does not enforce Cloud Run Direct VPC supported IPv4 ranges"
 grep -Fq '((10#$subnet_prefix <= 26))' "$script" ||
   fail "upgrade runner does not require a /26-or-larger persistent Direct VPC subnet"
-bash -c '
-  source "$1"
-  valid_direct_vpc_cidr "10.60.0.0/26"
-  valid_direct_vpc_cidr "172.20.0.0/24"
-  valid_direct_vpc_cidr "100.64.0.0/26"
-  valid_direct_vpc_cidr "240.0.0.0/26"
-' _ "$script" || fail "upgrade runner rejected a supported Direct VPC IPv4 range"
-if bash -c 'source "$1"; valid_direct_vpc_cidr "203.0.113.0/24"' _ "$script"; then
+"$contract_harness" supported-cidrs "$script" ||
+  fail "upgrade runner rejected a supported Direct VPC IPv4 range"
+if "$contract_harness" cidr "$script" "203.0.113.0/24"; then
   fail "upgrade runner accepted an unsupported Direct VPC IPv4 range"
 fi
-bash -c 'source "$1"; validate_upgrade_network_ownership "service-project" "service-project" "ci-network" "ci-subnet"' \
-  _ "$script" || fail "upgrade runner rejected safe persistent-network ownership"
-if bash -c 'source "$1"; validate_upgrade_network_ownership "service-project" "host-project" "ci-network" "ci-subnet"' \
-  _ "$script" >/dev/null 2>&1; then
+"$contract_harness" network-ownership "$script" \
+  service-project service-project ci-network ci-subnet ||
+  fail "upgrade runner rejected safe persistent-network ownership"
+if "$contract_harness" network-ownership "$script" \
+  service-project host-project ci-network ci-subnet >/dev/null 2>&1; then
   fail "upgrade runner accepted Shared VPC input unsupported by the baseline"
 fi
-if bash -c 'source "$1"; validate_upgrade_network_ownership "service-project" "service-project" "cc-g-wp-owned" "ci-subnet"' \
-  _ "$script" >/dev/null 2>&1; then
+if "$contract_harness" network-ownership "$script" \
+  service-project service-project cc-g-wp-owned ci-subnet >/dev/null 2>&1; then
   fail "upgrade runner placed its persistent network inside the disposable sweep boundary"
 fi
 network_validation_line="$(grep -nF '  validate_upgrade_network \' "$script" | cut -d: -f1)"
@@ -256,23 +313,18 @@ wordpress_ref='5058610fddc7267ace92d65a5c49713dce570ac3'
   fail "upgrade fixture variable does not default to and enforce the pinned WordPress commit"
 grep -Fq 'docker_compose_branch = var.wordpress_compose_ref' "$fixture" ||
   fail "upgrade fixture does not use its pinned WordPress commit"
-grep -Fq "git_project checkout --detach \${var.wordpress_compose_ref}" "$fixture" ||
+grep -Fq 'git_project checkout --detach "$revision"' "$fixture_prepare" ||
   fail "legacy bootstrap does not pre-check out the exact WordPress commit"
 grep -Eq 'wordpress_project_dir[[:space:]]*=[[:space:]]*"/mnt/disks/data/libops/wp.git/\$\{var\.wordpress_compose_ref\}"' "$fixture" ||
   fail "upgrade fixture does not derive the exact legacy single-project checkout path"
-grep -Fq 'project=${local.wordpress_project_dir};' "$fixture" ||
-  fail "upgrade fixture does not pre-check out the shared baseline/current Compose path"
+grep -Fq '[[ "$project" == "/mnt/disks/data/libops/wp.git/${revision}" ]]' "$fixture_prepare" ||
+  fail "upgrade fixture program does not constrain the shared baseline/current Compose path"
 grep -Fq 'project_dir           = local.wordpress_project_dir' "$fixture" ||
   fail "baseline and current phases do not share the pinned Compose checkout path"
 
 tfvars_dir="$tmp/tfvars"
 mkdir -p "$tfvars_dir"
-bash -c '
-  set -euo pipefail
-  source "$1"
-  write_tfvars "$2" name project us-east5 us-east5-b key 192.0.2.1/32 \
-    project network subnet projects/project/roles/startVM projects/project/roles/suspendVM true
-' _ "$script" "$tfvars_dir"
+"$contract_harness" write-tfvars "$script" "$tfvars_dir"
 jq -e '.legacy_baseline == true' "$tfvars_dir/upgrade.auto.tfvars.json" >/dev/null ||
   fail "upgrade runner does not mark the old phase as a legacy baseline"
 
@@ -290,21 +342,7 @@ GCLOUD_POWER_START_ROLE=projects/contract-project/roles/startVM \
 GCLOUD_POWER_SUSPEND_ROLE=projects/contract-project/roles/suspendVM \
 CLOUD_COMPOSE_GCP_UPGRADE_WORKDIR="$tmp/cleanup-work" \
 CLEANUP_LOG="$cleanup_log" \
-  bash -c '
-    set -euo pipefail
-    source "$1"
-    repo_root="$2"
-    require_cmd() { :; }
-    require_env() { :; }
-    validate_upgrade_network() { :; }
-    cleanup_calls=0
-    cleanup_resources() {
-      cleanup_calls=$((cleanup_calls + 1))
-      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$@" >>"$CLEANUP_LOG"
-      [[ "$cleanup_calls" -gt 1 ]]
-    }
-    run_upgrade
-  ' _ "$script" "$repo_root"
+  "$contract_harness" cleanup-failure "$script" "$repo_root"
 cleanup_status=$?
 set -e
 [[ "$cleanup_status" -eq 1 ]] ||

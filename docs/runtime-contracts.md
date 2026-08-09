@@ -143,11 +143,14 @@ repository contents but does not prove who authored them; protect the selected
 repository and review/sign commits according to your downstream governance.
 
 First boot runs through `cloud-compose-bootstrap.service`. Both that bootstrap
-and `cloud-compose.service` retry failures after 30 seconds, so a transient
-registry, Vault, or Compose failure converges without an operator restarting
-cloud-init. Application initialization is serialized by the normal lifecycle
-lock and recorded for the current boot before the app starts; a bootstrap retry
-reuses that successful initialization instead of repeating it. Durable
+and `cloud-compose.service` retry transient failures after 30 seconds, with a
+three-attempt systemd start limit. A terminal unit failure stops the caller's
+wait immediately; a five-minute heartbeat records the unit state during a long
+but healthy convergence. An operator can inspect the failure and start the
+unit again to open a new bounded retry window. Application initialization is
+serialized by the normal lifecycle lock and recorded for the current boot
+before the app starts; a bootstrap retry reuses that successful initialization
+instead of repeating it. Durable
 readiness is published only after the Compose `up` unit reaches its successful
 oneshot state. The cloud-init caller waits for that result, so configured
 post-initialization commands retain their ordering. Inspect the bounded system
@@ -163,6 +166,25 @@ diagnostics command, and checked-in `jq` programs live below
 `/etc/cloud-compose/{libexec,bin,jq}` because COS permits cloud-init to rebuild
 that stateless tree while its `/usr` filesystem is immutable. Application
 services retain their unprivileged execution model.
+
+Terraform and cloud-init are transport and orchestration boundaries, not the
+home of bootstrap implementations. The GCP and provider-neutral templates
+transfer checked-in programs from `rootfs/etc/cloud-compose/libexec` and invoke
+them by path with data-only arguments. GCP packages its checked filesystem
+program in a `text/cloud-boothook` MIME part so durable mounts are validated at
+the original early, every-boot phase before cloud-config writes files or starts
+services. Archive-mode Linux user data separately transports the small current
+bootstrap driver and verifies its Terraform-rendered SHA-256 before execution;
+filesystem helpers and the rest of the runtime still come from the verified
+rootfs archive. This preserves metadata headroom without requiring an older
+rootfs archive to contain the new driver. Files destined for `/mnt/disks` are
+staged until the checked-in filesystem program has mounted and validated the
+durable disks. GCP `initcmd` and `runcmd` values are likewise written as
+root-controlled program files before they are sourced at their documented
+points in the bootstrap sequence. Keep substantive shell, Python, `jq`, and
+similar programs in reviewed files; do not interpolate them into Terraform
+heredocs, cloud-init command strings, Compose commands, or configuration-
+management task bodies.
 
 ## Sitectl
 
@@ -195,6 +217,17 @@ and appends each value through an argv-aware wrapper when a lifecycle command
 invokes `sitectl verify`; spaces in one value never become additional arguments.
 Newlines, carriage returns, and NUL bytes are rejected instead of being flattened
 into an ambiguous shell scalar.
+
+Each configured lifecycle list value names an independent checked program; it
+is not parsed as shell source. The built-in `init`, `up`, `down`, and `rollout`
+defaults each contain exactly `/home/cloud-compose/default-lifecycle.sh ACTION`,
+where `ACTION` matches the lifecycle field. A custom entry must be one
+argument-free, root-controlled program immediately below
+`/etc/cloud-compose/lifecycle.d`; pass data through the documented lifecycle
+environment. `true` and `false` remain explicit no-op and failure sentinels.
+Multi-step work, state such as local variables or traps, and any quoting belong
+inside that reviewed program file. The constrained executor invokes its argv
+directly and never evaluates a manifest value with a shell parser.
 
 ## Vault
 
@@ -667,14 +700,34 @@ All Terraform entrypoints, including GCP, DigitalOcean, and Linode, support the
 same verified rootfs archive contract. When `runtime.rootfs_archive_url` is
 used, it must be an HTTPS URL without whitespace and
 `runtime.rootfs_archive_sha256` is mandatory with a 64-character SHA-256
-digest. Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer,
-downloads to a temporary path, and verifies the complete file before extracting
-its `rootfs` directory. Both archive installers normalize the verified tree to
-UID/GID `0:0` before loading a helper or copying it onto the host, so Git forge
-source-archive ownership cannot leak into the privileged runtime. The GCP path
-stages the caller's packaged rootfs overlay and reapplies it after the archive,
-so consumer overrides still win. Use an immutable archive URL; a moving branch
-and a pinned checksum intentionally fail as soon as the branch content changes.
+digest. Terraform derives the adjacent
+`cloud-compose-rootfs.contract.sha256` URL and reads it during planning. That
+sidecar must contain exactly the canonical contract digest for the module's
+checked-in `rootfs`: every directory, file path, file byte, root ownership,
+mode, and single-link file topology. A missing, malformed, older, or otherwise
+mismatched sidecar rejects the plan before Terraform can replace a VM.
+
+Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer, downloads to
+a root-only temporary path, verifies the complete archive checksum, rejects
+links and unsupported filesystem objects, and re-verifies the same canonical
+rootfs contract before copying anything onto the host. Packaged directories are
+root-owned mode `0755`; checked `*.sh` programs are mode `0755`; other files are
+mode `0644`; regular files must have one link. The GCP path stages the caller's
+packaged rootfs overlay and reapplies it after the archive, so consumer
+overrides still win. A single checked-in archive program implements download,
+verification, and installation for every Terraform provider rather than
+duplicating provider-specific shell bodies. Use the immutable assets from the
+same release as the Terraform module. Keeping an older archive while advancing
+the module fails safely during planning and leaves the existing workload
+untouched.
+
+Each release publishes three assets:
+`cloud-compose-rootfs.tar.gz`, its archive-byte `.sha256`, and
+`cloud-compose-rootfs.contract.sha256`. The release workflow downloads the
+published assets again, validates the archive bytes and canonical tree, and
+does not complete its release gate until all three agree. Downstream catalogs
+or automation must promote a cloud-compose release only after the
+`Verify rootfs release assets` job is green.
 
 ## Backups
 

@@ -29,10 +29,22 @@ users:
 %{ endfor ~}
 
 write_files:
+- path: /var/lib/cloud-compose/bootstrap/rootfs-archive.sh
+  owner: root:root
+  permissions: "0700"
+  encoding: gzip+base64
+  content: ${ROOTFS_ARCHIVE_SCRIPT_B64}
+%{ if ROOTFS_ARCHIVE_ENABLED ~}
+- path: /var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh
+  owner: root:root
+  permissions: "0700"
+  encoding: gzip+base64
+  content: ${LINUX_CLOUD_INIT_SCRIPT_B64}
+%{ endif ~}
 - path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
   owner: root:root
   permissions: "0600"
-  encoding: b64
+  encoding: gzip+base64
   content: ${DIAGNOSTICS_SCRIPT_B64}
 ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
@@ -43,78 +55,13 @@ ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
-- |
-  set -eu
-  ensure_cloud_compose_user() {
-    if ! getent group docker >/dev/null 2>&1; then
-      groupadd docker
-    fi
-    if ! id -u cloud-compose >/dev/null 2>&1; then
-      useradd --create-home --shell /bin/bash --groups docker cloud-compose
-    else
-      usermod --append --groups docker cloud-compose
-    fi
-    install -d -m 0700 -o cloud-compose -g cloud-compose /home/cloud-compose/.ssh
-    cat >/home/cloud-compose/.ssh/authorized_keys <<'EOF'
-%{ for key in CLOUD_COMPOSE_SSH_KEYS ~}
-  ${key}
-%{ endfor ~}
-  EOF
-    chown cloud-compose:cloud-compose /home/cloud-compose/.ssh/authorized_keys
-    chmod 0600 /home/cloud-compose/.ssh/authorized_keys
-    install -d -m 0755 /etc/sudoers.d
-    printf '%s\n' \
-      'cloud-compose ALL=(root) NOPASSWD:/usr/bin/systemctl start cloud-compose.service,/usr/bin/systemctl stop cloud-compose.service,/usr/bin/systemctl restart cloud-compose.service,/usr/bin/systemctl status cloud-compose.service' \
-      'cloud-compose ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh state' \
-      'cloud-compose ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh status' \
-      'cloud-compose ALL=(root) NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh dump' \
-      >/etc/sudoers.d/90-cloud-compose
-    chmod 0440 /etc/sudoers.d/90-cloud-compose
-  }
-
-  ensure_cloud_compose_user
-  filesystem_prep=/run/cloud-compose-prepare-filesystem
-  filesystem_persist=/run/cloud-compose-persist-filesystems
-%{ if ROOTFS_ARCHIVE_ENABLED }
-  ${indent(2, ROOTFS_ARCHIVE_PREPARE_COMMAND)}
-%{ else }
-  printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
-  printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
-  chmod 0600 "$filesystem_prep" "$filesystem_persist"
-%{ endif }
-  bash "$filesystem_prep" '${DATA_DEVICE}' /mnt/disks/data --publish-fresh-marker
-  bash "$filesystem_prep" '${VOLUMES_DEVICE}' /mnt/disks/volumes
-  mkdir -p /mnt/disks/data/docker/volumes
-  if ! mountpoint -q /mnt/disks/data/docker/volumes; then
-    mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
-  fi
-  for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do
-    if ! mountpoint -q -- "$required_mount"; then
-      echo "Required cloud-compose mount is unavailable: $required_mount" >&2
-      exit 1
-    fi
-  done
-  bash "$filesystem_persist" '${DATA_DEVICE}' '${VOLUMES_DEVICE}'
-%{ if ROOTFS_ARCHIVE_ENABLED }
-  ${indent(2, ROOTFS_ARCHIVE_INSTALL_COMMAND)}
-  ${indent(2, ARCHIVE_ADDITIONAL_ROOTFS)}
-%{ else }
-  if [ -d /var/lib/cloud-compose/mounted-rootfs/mnt/disks ]; then
-    cp -a /var/lib/cloud-compose/mounted-rootfs/mnt/disks/. /mnt/disks/
-  fi
-%{ endif }
-  install -d -m 0755 -o root -g root /etc/cloud-compose/bin
-  install -m 0755 -o root -g root \
-    /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh \
-    /etc/cloud-compose/bin/cloud-compose-diagnostics.sh
-  chown root:cloud-compose /mnt/disks/data
-  chmod 1775 /mnt/disks/data
-  chown cloud-compose:cloud-compose /mnt/disks/volumes
-  chmod 0775 /mnt/disks/volumes
-  install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
-%{ if ROLLOUT_RUNCMD != "" ~}
-  ${ROLLOUT_RUNCMD}
+%{ if ROOTFS_ARCHIVE_ENABLED ~}
+%{ if ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX != "" ~}
+- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, prepare-linux-test-source, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(LINUX_CLOUD_INIT_SCRIPT_SHA256)}, ${jsonencode(ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX)}]
+%{ else ~}
+- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, prepare-linux, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(LINUX_CLOUD_INIT_SCRIPT_SHA256)}]
 %{ endif ~}
-  rm -f /var/lib/cloud-compose/bootstrap-complete
-  /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
-  bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+- [bash, /var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh, ${jsonencode(DATA_DEVICE)}, ${jsonencode(VOLUMES_DEVICE)}, "true", ${jsonencode(ROLLOUT_ENABLED)}, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
+%{ else ~}
+- [bash, /etc/cloud-compose/libexec/linux-vm-cloud-init.sh, ${jsonencode(DATA_DEVICE)}, ${jsonencode(VOLUMES_DEVICE)}, "false", ${jsonencode(ROLLOUT_ENABLED)}, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
+%{ endif ~}

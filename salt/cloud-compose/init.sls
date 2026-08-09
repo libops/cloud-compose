@@ -117,6 +117,11 @@
 {% set reload_systemd = cc.get('reload_systemd', True) %}
 {% set run_bootstrap = cc.get('run_bootstrap', True) %}
 {% set force_bootstrap = cc.get('force_bootstrap', False) %}
+{% set bootstrap_wait_seconds = cc.get('bootstrap_wait_seconds', 10800) %}
+{% if bootstrap_wait_seconds is boolean or bootstrap_wait_seconds is not number or bootstrap_wait_seconds != bootstrap_wait_seconds | int or bootstrap_wait_seconds < 1 or bootstrap_wait_seconds > 43200 %}
+{% set ignored = invalid_runtime_inputs.append('bootstrap_wait_seconds must be a whole number from 1 through 43200') %}
+{% set bootstrap_wait_seconds = 10800 %}
+{% endif %}
 {% set raw_template_name = cc.get('template', '') %}
 {% if raw_template_name is string %}
 {% set template_name = raw_template_name | lower | trim %}
@@ -209,21 +214,16 @@
   'upload_timeout': ''
 } %}
 {% set default_init = [
-  'sitectl config set-context "${SITECTL_CONTEXT_NAME}" --type local --project-dir "${DOCKER_COMPOSE_DIR}" --site "${CLOUD_COMPOSE_INSTANCE_NAME}" --plugin "${SITECTL_PLUGIN}" --environment "${SITECTL_ENVIRONMENT}" --compose-project-name "${COMPOSE_PROJECT_NAME}" --docker-socket /var/run/docker.sock --env-file .env --yolo --default'
+  '/home/cloud-compose/default-lifecycle.sh init'
 ] %}
 {% set default_up = [
-  'sitectl compose --context "${SITECTL_CONTEXT_NAME}" up -d --remove-orphans',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
-  'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
+  '/home/cloud-compose/default-lifecycle.sh up'
 ] %}
 {% set default_down = [
-  'sitectl compose --context "${SITECTL_CONTEXT_NAME}" down'
+  '/home/cloud-compose/default-lifecycle.sh down'
 ] %}
 {% set default_rollout = [
-  'TARGET_REF="${GIT_REF:-${GIT_BRANCH:-}}"',
-  'if [ -n "$TARGET_REF" ]; then sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --ref "$TARGET_REF"; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --skip-git; fi',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
-  'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
+  '/home/cloud-compose/default-lifecycle.sh rollout'
 ] %}
 {% set lifecycle_defaults = {
   'init': default_init,
@@ -704,16 +704,10 @@ cloud-compose-rootfs-jq-modes:
 cloud-compose-lifecycle-{{ lifecycle }}:
   file.managed:
     - name: {{ (home ~ '/' ~ lifecycle) | json }}
+    - source: salt://rootfs/home/cloud-compose/lifecycle-entrypoint.sh
     - user: root
     - group: {{ group | json }}
     - mode: '0750'
-    - contents: |
-        #!/usr/bin/env bash
-
-        set -eou pipefail
-
-        source /home/cloud-compose/profile.sh
-        exec bash /home/cloud-compose/compose-dispatch.sh "{{ lifecycle }}"
     - require:
       - file: cloud-compose-rootfs
 {% endfor %}
@@ -832,6 +826,8 @@ cloud-compose-clear-bootstrap-marker:
 cloud-compose-bootstrap:
   cmd.run:
     - name: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+    - env:
+        CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS: {{ (bootstrap_wait_seconds | string) | json }}
     - unless: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
     - require:
 {% if install_packages %}

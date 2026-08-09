@@ -1,3 +1,12 @@
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "8cc800954d4780c933ebd680b25ec7dacfb61a733b9295f272ab56ac8fbf6b74\n"
+      status_code   = 200
+    }
+  }
+}
+
 run "renders_safe_ssh_values" {
   command = plan
 
@@ -28,11 +37,14 @@ run "renders_safe_ssh_values" {
 
   assert {
     condition = (
-      strcontains(output.cloud_init, "path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh") &&
+      strcontains(output.cloud_init, "path: \"/etc/cloud-compose/bin/cloud-compose-diagnostics.sh\"") &&
       strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh state") &&
       strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh status") &&
       strcontains(output.cloud_init, "NOPASSWD:/etc/cloud-compose/bin/cloud-compose-diagnostics.sh dump") &&
-      strcontains(output.cloud_init, "install -m 0755 -o root -g root")
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/libexec/linux-vm-cloud-init.sh\"",
+      )
     )
     error_message = "Cloud-init must install one root-owned diagnostics program with exact passwordless sudo commands."
   }
@@ -220,47 +232,38 @@ run "renders_verified_rootfs_archive" {
   }
 
   assert {
-    condition     = strcontains(output.cloud_init, "sha256sum -c -")
-    error_message = "Archive cloud-init must verify SHA-256 before extraction."
-  }
-
-  assert {
     condition = (
-      strcontains(output.cloud_init, "tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"") &&
-      strcontains(output.cloud_init, "chown -hR 0:0 -- \"$rootfs_dir\"") &&
-      strcontains(output.cloud_init, "install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"") &&
-      strcontains(output.cloud_init, "bash \"$filesystem_prep\"") &&
-      strcontains(output.cloud_init, "bash \"$filesystem_persist\"") &&
-      strcontains(output.cloud_init, "cp -a \"$rootfs_dir\"/. /") &&
-      length(split("sha256sum -c -", output.cloud_init)[0]) < length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) &&
-      length(split("tar --no-same-owner -xzf \"$tmp/rootfs.tar.gz\"", output.cloud_init)[0]) < length(split("chown -hR 0:0 -- \"$rootfs_dir\"", output.cloud_init)[0]) &&
-      length(split("chown -hR 0:0 -- \"$rootfs_dir\"", output.cloud_init)[0]) < length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) &&
-      length(split("install -m 0600 -- \"$filesystem_prep_source\" \"$filesystem_prep\"", output.cloud_init)[0]) < length(split("bash \"$filesystem_prep\"", output.cloud_init)[0]) &&
-      length(split("bash \"$filesystem_persist\"", output.cloud_init)[0]) < length(split("cp -a \"$rootfs_dir\"/. /", output.cloud_init)[0])
+      strcontains(
+        output.cloud_init,
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/libexec/rootfs-archive.sh")),
+      ) &&
+      length(data.http.rootfs_contract) == 1 &&
+      strcontains(output.cloud_init, local.rootfs_contract_sha256) &&
+      data.http.rootfs_contract[0].url == "https://example.invalid/cloud-compose-rootfs.contract.sha256" &&
+      strcontains(output.cloud_init, "[bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, prepare-linux") &&
+      strcontains(output.cloud_init, "[bash, /var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh")
     )
-    error_message = "Archive cloud-init must verify, extract, and normalize root ownership before loading its helpers, then install the rootfs only after filesystem preparation and persistence."
+    error_message = "Archive-mode Linux cloud-init must transfer compressed checked bootstrap programs, bind the archive to the exact module rootfs, and invoke stable paths."
   }
 
   assert {
     condition = (
-      !strcontains(output.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/prepare-filesystem.sh")) &&
-      !strcontains(output.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/persist-filesystems.sh"))
+      !strcontains(
+        local.write_files_content,
+        base64gzip(file("${path.module}/../../rootfs/home/cloud-compose/prepare-filesystem.sh")),
+      ) &&
+      !strcontains(
+        local.write_files_content,
+        base64gzip(file("${path.module}/../../rootfs/home/cloud-compose/persist-filesystems.sh")),
+      )
     )
     error_message = "Archive-backed cloud-init must not embed the filesystem helper payloads."
   }
 
   assert {
     condition = (
-      strcontains(output.cloud_init, "verified rootfs archive is missing filesystem preparation scripts") &&
-      strcontains(output.cloud_init, "verified rootfs directory is unavailable during installation")
-    )
-    error_message = "Archive-backed cloud-init must fail closed when the verified rootfs or its filesystem helpers are missing."
-  }
-
-  assert {
-    condition = (
-      strcontains(output.cloud_init, "archive_url_b64=") &&
-      !strcontains(output.cloud_init, "$(id)")
+      strcontains(output.cloud_init, base64encode(var.rootfs_archive_url)) &&
+      !strcontains(output.cloud_init, var.rootfs_archive_url)
     )
     error_message = "Archive URLs must be rendered as base64 data rather than executable shell syntax."
   }
@@ -270,16 +273,121 @@ run "renders_verified_rootfs_archive" {
       local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
       local.rootfs_file_permissions["etc/cloud-compose/unrelated-config"] == "0644" &&
       strcontains(
-        split(base64encode("/etc/cloud-compose/libexec/custom-offhost-driver"), local.archive_additional_rootfs_commands)[1],
-        "chmod 0755 \"$destination\"",
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
       ) &&
       strcontains(
-        split(base64encode("/etc/cloud-compose/unrelated-config"), local.archive_additional_rootfs_commands)[1],
-        "chmod 0644 \"$destination\"",
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/unrelated-config\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
       )
     )
     error_message = "Archive-backed Linux VM overlays must make only the configured off-host backup driver executable."
   }
+}
+
+run "renders_exact_current_source_archive_for_hosted_smoke" {
+  command = plan
+
+  variables {
+    name                              = "contract-test"
+    provider_name                     = "linode"
+    region                            = "us-east"
+    data_device                       = "/dev/test-data"
+    volumes_device                    = "/dev/test-volumes"
+    docker_compose_repo               = "https://github.com/libops/wp.git"
+    rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
+    rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
+  }
+
+  assert {
+    condition = (
+      length(data.http.rootfs_contract) == 0 &&
+      strcontains(output.cloud_init, "prepare-linux-test-source") &&
+      strcontains(output.cloud_init, jsonencode(var.rootfs_test_source_archive_prefix)) &&
+      strcontains(output.cloud_init, local.rootfs_contract_sha256)
+    )
+    error_message = "Hosted smoke source-archive mode must skip the unavailable release sidecar while binding the exact source rootfs to this module contract."
+  }
+}
+
+run "rejects_source_archive_from_another_commit" {
+  command = plan
+
+  variables {
+    name                              = "contract-test"
+    provider_name                     = "linode"
+    region                            = "us-east"
+    data_device                       = "/dev/test-data"
+    volumes_device                    = "/dev/test-volumes"
+    docker_compose_repo               = "https://github.com/libops/wp.git"
+    rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/2222222222222222222222222222222222222222.tar.gz"
+    rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
+  }
+
+  expect_failures = [output.cloud_init]
+}
+
+run "rejects_tag_named_source_archive_prefix" {
+  command = plan
+
+  variables {
+    name                              = "contract-test"
+    provider_name                     = "linode"
+    region                            = "us-east"
+    data_device                       = "/dev/test-data"
+    volumes_device                    = "/dev/test-volumes"
+    docker_compose_repo               = "https://github.com/libops/wp.git"
+    rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/refs/tags/v1.2.3.tar.gz"
+    rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    rootfs_test_source_archive_prefix = "cloud-compose-v1.2.3"
+  }
+
+  expect_failures = [var.rootfs_test_source_archive_prefix]
+}
+
+run "rejects_arbitrary_test_source_archive_url" {
+  command = plan
+
+  variables {
+    name                              = "contract-test"
+    provider_name                     = "linode"
+    region                            = "us-east"
+    data_device                       = "/dev/test-data"
+    volumes_device                    = "/dev/test-volumes"
+    docker_compose_repo               = "https://github.com/libops/wp.git"
+    rootfs_archive_url                = "https://example.invalid/1111111111111111111111111111111111111111.tar.gz"
+    rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
+  }
+
+  expect_failures = [output.cloud_init]
+}
+
+run "rejects_rootfs_release_from_another_module_version" {
+  command = plan
+
+  variables {
+    name                  = "contract-test"
+    provider_name         = "linode"
+    region                = "us-east"
+    data_device           = "/dev/test-data"
+    volumes_device        = "/dev/test-volumes"
+    docker_compose_repo   = "https://github.com/libops/wp.git"
+    rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "0000000000000000000000000000000000000000000000000000000000000000\n"
+      status_code   = 200
+    }
+  }
+
+  expect_failures = [data.http.rootfs_contract[0]]
 }
 
 run "embeds_filesystem_helpers_without_archive" {
@@ -298,11 +406,17 @@ run "embeds_filesystem_helpers_without_archive" {
 
   assert {
     condition = (
-      strcontains(output.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/prepare-filesystem.sh")) &&
-      strcontains(output.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/persist-filesystems.sh")) &&
-      !strcontains(output.cloud_init, "archive_url_b64=")
+      strcontains(
+        local.write_files_content,
+        base64gzip(file("${path.module}/../../rootfs/home/cloud-compose/prepare-filesystem.sh")),
+      ) &&
+      strcontains(
+        local.write_files_content,
+        base64gzip(file("${path.module}/../../rootfs/home/cloud-compose/persist-filesystems.sh")),
+      ) &&
+      !strcontains(local.write_files_content, "/var/lib/cloud-compose/rootfs-overlay/")
     )
-    error_message = "Inline cloud-init must retain the embedded filesystem-helper bootstrap when no archive is configured."
+    error_message = "Non-archive cloud-init must transfer the checked-in filesystem helpers without using the archive overlay."
   }
 
   assert {

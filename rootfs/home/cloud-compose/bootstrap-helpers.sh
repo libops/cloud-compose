@@ -142,6 +142,7 @@ cloud_compose_wait_for_oneshot() {
     local unit="$1"
     local timeout_seconds="$2"
     local poll_seconds="${CLOUD_COMPOSE_SYSTEMD_POLL_SECONDS:-2}"
+    local heartbeat_seconds="${CLOUD_COMPOSE_SYSTEMD_HEARTBEAT_SECONDS:-300}"
     local elapsed=0 active_state load_state
 
     cloud_compose_validate_systemd_unit "$unit" || return
@@ -153,6 +154,11 @@ cloud_compose_wait_for_oneshot() {
     if [[ ! "$poll_seconds" =~ ^[1-9][0-9]{0,2}$ ]] ||
         ((10#$poll_seconds > 300)); then
         echo "CLOUD_COMPOSE_SYSTEMD_POLL_SECONDS must be from 1 through 300 seconds" >&2
+        return 2
+    fi
+    if [[ ! "$heartbeat_seconds" =~ ^[1-9][0-9]{0,3}$ ]] ||
+        ((10#$heartbeat_seconds > 3600)); then
+        echo "CLOUD_COMPOSE_SYSTEMD_HEARTBEAT_SECONDS must be from 1 through 3600 seconds" >&2
         return 2
     fi
 
@@ -167,8 +173,19 @@ cloud_compose_wait_for_oneshot() {
         if [[ "$active_state" == "active" ]]; then
             return 0
         fi
+        if [[ "$active_state" == "failed" ]]; then
+            echo "Cloud Compose systemd unit reached a terminal failed state: $unit" >&2
+            systemctl status --no-pager --full -- "$unit" >&2 || true
+            return 1
+        fi
         sleep "$poll_seconds"
         elapsed=$((elapsed + 10#$poll_seconds))
+        if ((elapsed % 10#$heartbeat_seconds < 10#$poll_seconds)); then
+            echo "Still waiting for $unit after ${elapsed}s (active state: $active_state)" >&2
+            systemctl show --no-pager \
+                --property=ActiveState,SubState,Result,NRestarts,ExecMainCode,ExecMainStatus \
+                -- "$unit" >&2 || true
+        fi
     done
 
     echo "Timed out waiting ${timeout_seconds}s for $unit to become active" >&2

@@ -45,6 +45,8 @@ assert_contains "$unit_dir/cloud-compose.service" 'After=network-online.target d
 assert_contains "$unit_dir/cloud-compose.service" 'ExecStartPre=/bin/bash /home/cloud-compose/assert-app-initialized.sh'
 assert_contains "$unit_dir/cloud-compose.service" 'Restart=on-failure'
 assert_contains "$unit_dir/cloud-compose.service" 'RestartSec=30s'
+assert_contains "$unit_dir/cloud-compose.service" 'StartLimitIntervalSec=6h'
+assert_contains "$unit_dir/cloud-compose.service" 'StartLimitBurst=3'
 if grep -Fq 'ConditionPathExists=' "$unit_dir/cloud-compose-bootstrap.service"; then
   fail "bootstrap still trusts an unvalidated marker path condition"
 fi
@@ -52,6 +54,8 @@ assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecCondition=/bin/
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'ExecStart=/bin/bash /etc/cloud-compose/libexec/run-bootstrap.sh'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'Restart=on-failure'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'RestartSec=30s'
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'StartLimitIntervalSec=8h'
+assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'StartLimitBurst=3'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'TimeoutStartSec=2h'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'UMask=0022'
 assert_contains "$unit_dir/cloud-compose-bootstrap.service" 'StandardOutput=journal'

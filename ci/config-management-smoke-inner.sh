@@ -51,6 +51,7 @@ verify_lifecycle_lock_contract() {
   local lock_dir=/run/lock/cloud-compose
   local lock_file="$lock_dir/lifecycle.lock"
   local profile=/home/cloud-compose/profile.sh
+  local fixture=/work/ci/fixtures/config-management-lifecycle-lock.sh
   local ready=/tmp/cloud-compose-lifecycle-lock-ready
   local holder_pid contention_status passwd_sha
 
@@ -62,14 +63,7 @@ verify_lifecycle_lock_contract() {
 
   rm -f -- "$ready"
   CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c '
-      set -euo pipefail
-      source "$1"
-      acquire_cloud_compose_lifecycle_lock root-first-contract
-      touch "$2"
-      sleep 3
-      release_cloud_compose_lifecycle_lock
-    ' _ "$profile" "$ready" &
+    "$fixture" hold "$profile" "$ready" &
   holder_pid=$!
   for _ in {1..50}; do
     [[ -e "$ready" ]] && break
@@ -82,10 +76,7 @@ verify_lifecycle_lock_contract() {
     HOME=/home/cloud-compose \
     CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
     CLOUD_COMPOSE_LIFECYCLE_LOCK_TIMEOUT_SECONDS=1 \
-    bash -c '
-      source "$1"
-      acquire_cloud_compose_lifecycle_lock contention-contract
-    ' _ "$profile" >/dev/null 2>&1
+    "$fixture" contend "$profile" >/dev/null 2>&1
   contention_status=$?
   set -e
   [[ "$contention_status" -ne 0 ]]
@@ -94,20 +85,13 @@ verify_lifecycle_lock_contract() {
   runuser -u cloud-compose -- env \
     HOME=/home/cloud-compose \
     CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c '
-      set -euo pipefail
-      source "$1"
-      (
-        acquire_cloud_compose_lifecycle_lock subshell-contract
-        release_cloud_compose_lifecycle_lock
-      )
-    ' _ "$profile"
+    "$fixture" subshell "$profile"
 
   passwd_sha="$(sha256sum /etc/passwd)"
   mv -- "$lock_file" "${lock_file}.real"
   ln -s /etc/passwd "$lock_file"
   if CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c 'source "$1"; acquire_cloud_compose_lifecycle_lock symlink-contract' _ "$profile" \
+    "$fixture" reject-symlink "$profile" \
       >/dev/null 2>&1; then
     echo "Lifecycle lock accepted a symbolic-link target" >&2
     exit 1

@@ -266,7 +266,7 @@ target_workdir() {
 target_var_args() {
   local root="$1" key_path="$2" target="$3" run_id="$4" run_namespace="$5"
   local public_key provider template
-  local source_ref source_sha256 source_cache_key checksum_dir checksum_file archive_tmp
+  local source_ref source_sha256 source_cache_key checksum_dir checksum_file archive_tmp checkout_sha
 
   provider="$(target_provider "$target")"
   template="$(target_template "$target")"
@@ -285,14 +285,19 @@ target_var_args() {
     printf '%s\0%s\0' "-var" "template=${template}"
   fi
   if grep -q 'variable "cloud_compose_source_ref"' "$root/variables.tf"; then
-    source_ref="${CLOUD_COMPOSE_SOURCE_REF:-${GITHUB_SHA:-main}}"
+    checkout_sha="$(git -C "$repo_root" rev-parse HEAD)"
+    source_ref="${CLOUD_COMPOSE_SOURCE_REF:-${GITHUB_SHA:-$checkout_sha}}"
+    if [[ ! "$source_ref" =~ ^[0-9a-f]{40}$ || "$source_ref" != "$checkout_sha" ]]; then
+      echo "CLOUD_COMPOSE_SOURCE_REF must equal the exact lowercase checked-out commit ${checkout_sha}" >&2
+      return 1
+    fi
     printf '%s\0%s\0' "-var" "cloud_compose_source_ref=${source_ref}"
   fi
   if grep -q 'variable "cloud_compose_source_sha256"' "$root/variables.tf"; then
     source_sha256="${CLOUD_COMPOSE_SOURCE_SHA256:-}"
     if [[ -z "$source_sha256" ]]; then
       checksum_dir="$(target_workdir "$target")"
-      source_cache_key="$(printf '%s' "$source_ref" | sha256sum | awk '{print $1}')"
+      source_cache_key="$(printf '%s' "$source_ref" | sha256sum | cut -d' ' -f1)"
       checksum_file="${checksum_dir}/cloud-compose-source-${source_cache_key}.sha256"
       mkdir -p "$checksum_dir"
       if [[ -s "$checksum_file" ]]; then
@@ -303,7 +308,7 @@ target_var_args() {
         curl -fsSL --retry 3 \
           "https://github.com/libops/cloud-compose/archive/${source_ref}.tar.gz" \
           -o "$archive_tmp"
-        source_sha256="$(sha256sum "$archive_tmp" | awk '{print $1}')"
+        source_sha256="$(sha256sum "$archive_tmp" | cut -d' ' -f1)"
         rm -f "$archive_tmp"
         printf '%s\n' "$source_sha256" > "$checksum_file"
       fi
@@ -594,6 +599,40 @@ run_healthcheck() {
     --format table
 }
 
+run_lifecycle_program_contract() {
+  local home_dir="$1" key_path="$2" output_json="$3"
+  local host port user remote_contract_dir remote_contract status
+
+  host="$(jq -r '.host' "$output_json")"
+  port="$(jq -r '.ssh_port' "$output_json")"
+  user="$(jq -r '.ssh_user' "$output_json")"
+  remote_contract_dir="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    'mktemp -d /tmp/cloud-compose-hosted-contract.XXXXXX')" || return 1
+  if [[ ! "$remote_contract_dir" =~ ^/tmp/cloud-compose-hosted-contract\.[A-Za-z0-9]+$ ]]; then
+    echo "Remote lifecycle contract directory is unsafe: $remote_contract_dir" >&2
+    return 1
+  fi
+
+  remote_contract="$remote_contract_dir/lifecycle-program-contract.sh"
+  if ! ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "install -m 0700 /dev/stdin $remote_contract" \
+    <"$repo_root/ci/lifecycle-program-contract.sh"; then
+    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+      "rmdir -- $remote_contract_dir" || true
+    return 1
+  fi
+
+  if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "test -x /home/cloud-compose/default-lifecycle.sh && bash $remote_contract /home/cloud-compose/default-lifecycle.sh"; then
+    status=0
+  else
+    status=$?
+  fi
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "rm -f -- $remote_contract && rmdir -- $remote_contract_dir" || true
+  return "$status"
+}
+
 run_target() (
   set -euo pipefail
 
@@ -687,6 +726,11 @@ run_target() (
 
   wait_for_ssh "$home_dir" "$key_path" "$host" "$port" "$user"
   if ! wait_for_cloud_init "$home_dir" "$key_path" "$host" "$port" "$user"; then
+    dump_remote_logs "$home_dir" "$key_path" "$host" "$port" "$user" "$project_dir"
+    return 1
+  fi
+
+  if ! run_lifecycle_program_contract "$home_dir" "$key_path" "$output_json"; then
     dump_remote_logs "$home_dir" "$key_path" "$host" "$port" "$user" "$project_dir"
     return 1
   fi

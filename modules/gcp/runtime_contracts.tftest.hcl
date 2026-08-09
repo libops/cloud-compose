@@ -1,4 +1,12 @@
 mock_provider "cloudinit" {}
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "8cc800954d4780c933ebd680b25ec7dacfb61a733b9295f272ab56ac8fbf6b74\n"
+      status_code   = 200
+    }
+  }
+}
 mock_provider "google" {
   mock_resource "google_compute_disk" {
     override_during = plan
@@ -90,10 +98,15 @@ run "disables_privileged_services_by_default" {
       local.host_env.CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY == "v1:gcp-disk-id:987654321012345678" &&
       strcontains(
         local.cloud_init_yaml,
-        "--publish-fresh-marker \"v1:gcp-disk-id:987654321012345678\"",
-      )
+        jsonencode("v1:gcp-disk-id:987654321012345678"),
+      ) &&
+      strcontains(
+        local.cloud_init_yaml,
+        filebase64("${path.module}/../../rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"),
+      ) &&
+      strcontains(local.cloud_init_yaml, "Content-Type: text/cloud-boothook")
     )
-    error_message = "GCP cloud-init and the root runtime environment must carry the same immutable data-disk identity."
+    error_message = "GCP's early every-boot filesystem program and root runtime environment must carry the same immutable data-disk identity."
   }
 
   assert {
@@ -553,19 +566,26 @@ run "renders_verified_archive_before_downstream_overlay" {
 
   assert {
     condition = (
-      strcontains(local.cloud_init_yaml, "sha256sum -c -") &&
+      strcontains(
+        local.cloud_init_yaml,
+        filebase64("${path.module}/../../rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"),
+      ) &&
+      strcontains(local.cloud_init_yaml, local.rootfs_contract_sha256) &&
+      data.http.rootfs_contract[0].url == "https://example.invalid/cloud-compose-rootfs.contract.sha256" &&
       strcontains(local.cloud_init_yaml, base64encode(var.rootfs_archive_url)) &&
       !strcontains(local.cloud_init_yaml, var.rootfs_archive_url)
     )
-    error_message = "The GCP archive URL must be transported as literal base64 data and verified before extraction."
+    error_message = "The GCP archive program must be transferred as a checked file and receive literal URL data plus the exact module rootfs contract."
   }
 
   assert {
-    condition = can(regex(
-      "(?s)sha256sum -c -.*tar --no-same-owner -xzf \\\"\\$tmp/rootfs\\.tar\\.gz\\\".*chown -hR 0:0 -- \\\"\\$rootfs_dir\\\".*cp -a \\\"\\$rootfs_dir\\\"/\\. /.*cp -a \\\"\\$overlay_dir\\\"/\\. /",
-      local.cloud_init_yaml,
-    ))
-    error_message = "The verified base archive must be extracted ownership-safely, normalized to root, and installed before the consumer rootfs overlay."
+    condition = (
+      strcontains(local.cloud_init_yaml, "[bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install") &&
+      strcontains(local.cloud_init_yaml, "[bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh") &&
+      length(split("/var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install", local.cloud_init_yaml)[0]) <
+      length(split("/var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh", local.cloud_init_yaml)[0])
+    )
+    error_message = "The verified base archive and downstream overlay must be installed before GCP application initialization."
   }
 
   assert {
@@ -598,6 +618,28 @@ run "renders_verified_archive_before_downstream_overlay" {
     )
     error_message = "Archive-backed GCP overlays must make only the configured off-host backup driver executable."
   }
+}
+
+run "rejects_rootfs_release_from_another_module_version" {
+  command = plan
+
+  variables {
+    name                  = "gcp-contract"
+    project_id            = "test-project"
+    docker_compose_repo   = "https://github.com/libops/wp.git"
+    rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "0000000000000000000000000000000000000000000000000000000000000000\n"
+      status_code   = 200
+    }
+  }
+
+  expect_failures = [data.http.rootfs_contract[0]]
 }
 
 run "renders_embedded_offhost_backup_driver_executable" {

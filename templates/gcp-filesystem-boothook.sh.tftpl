@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+umask 077
+readonly filesystem_boot=/run/cloud-compose-gcp-filesystem-boot
+readonly filesystem_prep=/run/cloud-compose-prepare-filesystem
+readonly filesystem_persist=/run/cloud-compose-persist-filesystems
+
+printf '%s' '${GCP_FILESYSTEM_BOOT_SCRIPT_B64}' | base64 -d >"$filesystem_boot"
+printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
+printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
+chmod 0600 "$filesystem_boot" "$filesystem_prep" "$filesystem_persist"
+
+bash "$filesystem_boot" \
+    ${jsonencode(FRESH_FILESYSTEM_IDENTITY)} \
+    ${jsonencode(USE_OVERLAY ? "true" : "false")} \
+    "$filesystem_prep" \
+    "$filesystem_persist"

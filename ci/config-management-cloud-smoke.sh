@@ -25,6 +25,7 @@ Required environment:
 Optional environment:
   CLOUD_COMPOSE_SMOKE_AUTO_APPROVE=true
   CLOUD_COMPOSE_SMOKE_BOOT_TIMEOUT=1200
+  CLOUD_COMPOSE_SMOKE_CONFIG_MANAGEMENT_TIMEOUT=3600
   CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT=1800
   CLOUD_COMPOSE_SMOKE_KEEP=true
   CLOUD_COMPOSE_SMOKE_ALLOW_ALL_RUNS=true
@@ -93,6 +94,10 @@ boot_timeout_seconds() {
 
 destroy_timeout_seconds() {
   positive_integer_env CLOUD_COMPOSE_SMOKE_DESTROY_TIMEOUT 1800
+}
+
+config_management_timeout_seconds() {
+  positive_integer_env CLOUD_COMPOSE_SMOKE_CONFIG_MANAGEMENT_TIMEOUT 3600
 }
 
 smoke_run_id() {
@@ -240,22 +245,15 @@ wait_for_cloud_init() {
 
 dump_remote_logs() {
   local home_dir="$1" key_path="$2" host="$3"
+  local diagnostics_source="$repo_root/ci/remote/config-management-diagnostics.sh"
+  local diagnostics_dir=/root/.cache/libops-ci
+  local diagnostics_path="$diagnostics_dir/config-management-diagnostics.sh"
 
   echo "Dumping config-management smoke diagnostics from ${host}" >&2
-  ssh_cmd "$home_dir" "$key_path" "$host" "bash -lc 'set +e
-echo \"--- cloud-init status ---\"
-cloud-init status --long
-echo \"--- /var/log/cloud-init-output.log ---\"
-tail -n 300 /var/log/cloud-init-output.log
-echo \"--- cloud-compose bootstrap unit ---\"
-sudo journalctl -u cloud-compose-bootstrap --no-pager -n 300
-echo \"--- cloud-compose unit ---\"
-journalctl -u cloud-compose --no-pager -n 300
-echo \"--- docker ps ---\"
-docker ps -a
-echo \"--- compose manifest ---\"
-cat /home/cloud-compose/compose-projects.json
-'" || true
+  ssh_cmd "$home_dir" "$key_path" "$host" \
+    "install -d -m 0700 $diagnostics_dir && install -m 0700 /dev/stdin $diagnostics_path" \
+    <"$diagnostics_source" || return 0
+  ssh_cmd "$home_dir" "$key_path" "$host" "$diagnostics_path" || true
 }
 
 target_var_args() {
@@ -272,7 +270,7 @@ target_var_args() {
 
 deploy_config_management() {
   local target="$1" key_path="$2" output_json="$3"
-  local method host name template environment project_dir image
+  local method host name template environment project_dir image deploy_timeout container_entrypoint
 
   method="$(jq -r '.method' "$output_json")"
   host="$(jq -r '.host' "$output_json")"
@@ -281,6 +279,12 @@ deploy_config_management() {
   environment="$(jq -r '.environment' "$output_json")"
   project_dir="$(jq -r '.project_dir' "$output_json")"
   image="${CLOUD_COMPOSE_CONFIG_MANAGEMENT_IMAGE:-$CONFIG_MANAGEMENT_IMAGE_DEFAULT}"
+  deploy_timeout="$(config_management_timeout_seconds)"
+  container_entrypoint="$repo_root/ci/config-management-cloud-smoke-container.sh"
+  [[ -f "$container_entrypoint" && ! -L "$container_entrypoint" ]] || {
+    echo "Config-management smoke container entrypoint is missing or unsafe" >&2
+    return 1
+  }
 
   if [[ -L "$key_path" || ! -f "$key_path" ]]; then
     echo "Config-management smoke SSH private-key path is missing or unsafe: $key_path" >&2
@@ -297,7 +301,7 @@ deploy_config_management() {
   # would also copy ignored Terraform state and the generated private key into
   # the helper container and, for Salt, onward to the provisioned VM.
   git -C "$repo_root" archive --format=tar HEAD |
-    docker run --rm -i \
+    timeout --signal=TERM --kill-after=30s "${deploy_timeout}s" docker run --rm -i \
       --env "SMOKE_METHOD=${method}" \
       --env "SMOKE_HOST=${host}" \
       --env "SMOKE_NAME=${name}" \
@@ -305,10 +309,11 @@ deploy_config_management() {
       --env "SMOKE_ENVIRONMENT=${environment}" \
       --env "SMOKE_PROJECT_DIR=${project_dir}" \
       --mount "type=bind,src=${key_path},dst=/run/secrets/cloud-compose-ssh-key,readonly" \
+      --mount "type=bind,src=${container_entrypoint},dst=/usr/local/libexec/cloud-compose-config-management-smoke,readonly" \
       --tmpfs /run \
       --tmpfs /tmp \
       "$image" \
-      bash -lc 'mkdir -p /work && tar -C /work -xf - && cd /work && bash ci/config-management-cloud-smoke-inner.sh'
+      /usr/local/libexec/cloud-compose-config-management-smoke
 }
 
 require_run_commands() {
@@ -319,6 +324,7 @@ require_run_commands() {
   require_cmd ssh-keygen
   require_cmd ssh-keyscan
   require_cmd terraform
+  require_cmd timeout
 }
 
 require_destroy_commands() {

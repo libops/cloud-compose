@@ -5,7 +5,10 @@ Requires=docker.service cloud-compose-metadata-firewall.service
 RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
 Wants=network-online.target
 After=network-online.target docker.service cloud-compose-metadata-firewall.service cloud-compose-vault-agent.service
-StartLimitIntervalSec=0
+# Keep all three possible 90-minute activation attempts inside one rate-limit
+# window so repeated hangs cannot age out and restart forever.
+StartLimitIntervalSec=6h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot

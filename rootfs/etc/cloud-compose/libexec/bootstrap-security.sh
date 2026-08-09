@@ -54,6 +54,7 @@ cloud_compose_secure_runtime_home() {
         "$CLOUD_COMPOSE_RUNTIME_HOME/host-conf.sh"
         "$CLOUD_COMPOSE_RUNTIME_HOME/host-init.sh"
         "$CLOUD_COMPOSE_RUNTIME_HOME/converge-app-filesystems.sh"
+        "$CLOUD_COMPOSE_RUNTIME_HOME/default-lifecycle.sh"
         "$CLOUD_COMPOSE_RUNTIME_HOME/prepare-app-sources.sh"
         "$CLOUD_COMPOSE_RUNTIME_HOME/rotate-keys-daily.sh"
         "$CLOUD_COMPOSE_RUNTIME_HOME/vault-agent-init.sh"

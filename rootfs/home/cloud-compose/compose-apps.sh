@@ -8,6 +8,7 @@ COMPOSE_APPS_STATE_DIR="${COMPOSE_APPS_STATE_DIR:-/home/cloud-compose/state}"
 CLOUD_COMPOSE_DATA_ROOT="${CLOUD_COMPOSE_DATA_ROOT:-/mnt/disks/data}"
 compose_apps_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_SECRET_FILES_PROGRAM="${CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM:-$compose_apps_dir/compose-secret-files.awk}"
+readonly COMPOSE_LIFECYCLE_EXECUTOR="/etc/cloud-compose/libexec/run-lifecycle-program.sh"
 
 shell_env_line() {
     local name="$1"
@@ -1052,6 +1053,22 @@ run_compose_app_lifecycle() {
     local -a commands=()
 
     case "$lifecycle" in
+        init | up | down | rollout) ;;
+        *)
+            echo "Unsupported cloud-compose lifecycle: $lifecycle" >&2
+            return 2
+            ;;
+    esac
+
+    # Reject the entire program set before cloning, updating, or running
+    # anything so a bad later selector cannot leave partial lifecycle state.
+    compose_app_array_values "$app" "$field" commands || return 1
+    for command in "${commands[@]}"; do
+        [[ -n "$command" ]] || continue
+        "$COMPOSE_LIFECYCLE_EXECUTOR" --validate "$lifecycle" "$command" || return 1
+    done
+
+    case "$lifecycle" in
         init)
             # Initialization is the explicit baseline-source convergence phase.
             # It follows a configured moving ref or restores a configured pin.
@@ -1074,14 +1091,9 @@ run_compose_app_lifecycle() {
             source_compose_app_env "$app" || return 1
             validate_compose_git_source || return 1
             ;;
-        *)
-            echo "Unsupported cloud-compose lifecycle: $lifecycle" >&2
-            return 2
-            ;;
     esac
 
     echo "Running cloud-compose ${lifecycle} for ${app}"
-    compose_app_array_values "$app" "$field" commands || return 1
     configure_sitectl_verify_argv || return 1
     pushd "$DOCKER_COMPOSE_DIR" >/dev/null || return 1
     if [[ "$lifecycle" != "down" ]]; then
@@ -1091,7 +1103,7 @@ run_compose_app_lifecycle() {
         if [ -z "$command" ]; then
             continue
         fi
-        bash -c "$command" || {
+        "$COMPOSE_LIFECYCLE_EXECUTOR" "$lifecycle" "$command" || {
             command_status=$?
             popd >/dev/null
             return "$command_status"

@@ -73,6 +73,7 @@ func TestRootEntrypointLoadsOnlyGCPProviders(t *testing.T) {
 		"digitalocean/digitalocean",
 		"hashicorp/cloudinit",
 		"hashicorp/google",
+		"hashicorp/http",
 		"hashicorp/time",
 		"linode/linode",
 		"Unexpected Terraform provider graph",

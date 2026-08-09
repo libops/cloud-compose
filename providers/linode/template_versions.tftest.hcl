@@ -1,4 +1,12 @@
 mock_provider "linode" {}
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "8cc800954d4780c933ebd680b25ec7dacfb61a733b9295f272ab56ac8fbf6b74\n"
+      status_code   = 200
+    }
+  }
+}
 
 run "custom_package_set_merges_only_applicable_template_versions" {
   command = plan

@@ -14,23 +14,25 @@ provider "linode" {}
 module "context" {
   source = "../modules/context"
 
-  cloud_provider           = "linode"
-  template                 = var.template
-  ssh_public_key           = var.ssh_public_key
-  operator_ssh_public_keys = var.operator_ssh_public_keys
-  smoke_run_id             = var.smoke_run_id
-  docker_compose_branch    = var.docker_compose_branch
-  ingress_port             = var.ingress_port
-  rootfs_archive_url       = "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz"
-  rootfs_archive_sha256    = var.cloud_compose_source_sha256
-  tags                     = var.tags
+  cloud_provider                    = "linode"
+  template                          = var.template
+  ssh_public_key                    = var.ssh_public_key
+  operator_ssh_public_keys          = var.operator_ssh_public_keys
+  smoke_run_id                      = var.smoke_run_id
+  docker_compose_branch             = var.docker_compose_branch
+  ingress_port                      = var.ingress_port
+  rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz"
+  rootfs_archive_sha256             = var.cloud_compose_source_sha256
+  rootfs_test_source_archive_prefix = "cloud-compose-${var.cloud_compose_source_ref}"
+  tags                              = var.tags
 }
 
 module "app" {
-  source = "../../../providers/linode"
+  # Hosted smoke alone needs the exact-commit source-archive fixture. Keep that
+  # test-only escape hatch below the public provider entrypoint.
+  source = "../../../modules/linode"
 
-  name     = module.context.name
-  template = module.context.template
+  name = module.context.name
   linode = {
     region = var.linode_region
     tags   = module.context.tags
@@ -56,7 +58,7 @@ module "smoke" {
   cloud_provider          = "linode"
   template                = module.context.template
   name                    = module.context.name
-  host                    = module.app.external_ip
+  host                    = module.app.instance.public_ipv4
   primary_compose_project = module.app.primary_compose_project
 }
 

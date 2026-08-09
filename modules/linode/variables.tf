@@ -88,7 +88,9 @@ variable "runtime" {
     rootfs                = optional(string, "")
     rootfs_archive_url    = optional(string, "")
     rootfs_archive_sha256 = optional(string, "")
-    users                 = optional(map(list(string)), {})
+    # Internal hosted-smoke escape hatch. Public provider entrypoints must not expose it.
+    rootfs_test_source_archive_prefix = optional(string, "")
+    users                             = optional(map(list(string)), {})
 
     disaster_recovery = optional(object({
       required    = optional(bool, false)

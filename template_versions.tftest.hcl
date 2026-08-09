@@ -1,4 +1,12 @@
 mock_provider "cloudinit" {}
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "8cc800954d4780c933ebd680b25ec7dacfb61a733b9295f272ab56ac8fbf6b74\n"
+      status_code   = 200
+    }
+  }
+}
 mock_provider "google" {
   mock_data "google_project" {
     defaults = {

@@ -79,7 +79,7 @@ variable "rootfs" {
 variable "rootfs_archive_url" {
   type        = string
   default     = ""
-  description = "Optional HTTPS tar.gz URL containing a rootfs directory to fetch during boot instead of embedding the packaged rootfs in cloud-init. Must be set with rootfs_archive_sha256."
+  description = "Optional immutable HTTPS cloud-compose rootfs release archive to fetch during boot instead of embedding the packaged rootfs in cloud-init. Must be set with rootfs_archive_sha256; planning also requires the adjacent cloud-compose-rootfs.contract.sha256 asset to match this module source."
 
   validation {
     condition = (
@@ -94,6 +94,20 @@ variable "rootfs_archive_sha256" {
   type        = string
   default     = ""
   description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
+}
+
+variable "rootfs_test_source_archive_prefix" {
+  type        = string
+  default     = ""
+  description = "Test-only GitHub source-archive prefix for hosted smoke tests of an unreleased exact commit. Empty keeps the production canonical release archive and adjacent sidecar contract mandatory."
+
+  validation {
+    condition = (
+      trimspace(var.rootfs_test_source_archive_prefix) == "" ||
+      can(regex("^cloud-compose-[0-9a-f]{40}$", trimspace(var.rootfs_test_source_archive_prefix)))
+    )
+    error_message = "rootfs_test_source_archive_prefix must be empty or cloud-compose- followed by one exact lowercase 40-character commit SHA."
+  }
 }
 
 variable "offhost_backup_required" {
@@ -209,7 +223,7 @@ variable "compose_projects" {
 variable "docker_compose_init" {
   type = list(string)
   default = [
-    "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --yolo --default"
+    "/home/cloud-compose/default-lifecycle.sh init"
   ]
   nullable    = false
   description = "Commands run after a compose repository is cloned."
@@ -218,9 +232,7 @@ variable "docker_compose_init" {
 variable "docker_compose_up" {
   type = list(string)
   default = [
-    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
-    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
+    "/home/cloud-compose/default-lifecycle.sh up"
   ]
   nullable    = false
   description = "Commands used to bring a compose project up."
@@ -229,7 +241,7 @@ variable "docker_compose_up" {
 variable "docker_compose_down" {
   type = list(string)
   default = [
-    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
+    "/home/cloud-compose/default-lifecycle.sh down"
   ]
   nullable    = false
   description = "Commands used to stop a compose project."
@@ -238,13 +250,10 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-}}\"",
-    "if [ -n \"$TARGET_REF\" ]; then sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --ref \"$TARGET_REF\"; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git; fi",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
-    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
+    "/home/cloud-compose/default-lifecycle.sh rollout"
   ]
   nullable    = false
-  description = "Commands used by rollout triggers. GIT_REF/GIT_BRANCH selects a source ref; without one, sitectl reconciles the current checkout."
+  description = "Commands used by rollout triggers. A validated GIT_COMMIT_SHA takes precedence over GIT_REF/GIT_BRANCH; without one, sitectl reconciles the current checkout."
 }
 
 variable "rollout_enabled" {

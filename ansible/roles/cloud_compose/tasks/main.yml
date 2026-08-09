@@ -33,7 +33,13 @@
       - cloud_compose_managed_runtime_enabled is boolean
       - cloud_compose_internal_services_enabled is boolean
       - cloud_compose_internal_services_auto_update is boolean
-    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, and cloud_compose_dedicated_host_acknowledged=true before it can own Docker and host runtime configuration."
+      - cloud_compose_bootstrap_wait_seconds is number
+      - cloud_compose_bootstrap_wait_seconds is not boolean
+      - (cloud_compose_bootstrap_wait_seconds | int) == cloud_compose_bootstrap_wait_seconds
+      - (cloud_compose_bootstrap_wait_seconds | int) >= 1
+      - (cloud_compose_bootstrap_wait_seconds | int) <= 43200
+      - (cloud_compose_bootstrap_timeout | int) > (cloud_compose_bootstrap_wait_seconds | int)
+    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, dedicated-host acknowledgement, and a bootstrap async timeout longer than the 1-43200 second service wait."
 
 - name: Require safe cloud-compose environment entries
   ansible.builtin.assert:
@@ -593,17 +599,12 @@
 
 - name: Write cloud-compose lifecycle dispatchers
   ansible.builtin.copy:
+    src: /home/cloud-compose/lifecycle-entrypoint.sh
     dest: "{{ cloud_compose_home }}/{{ item }}"
+    remote_src: true
     owner: root
     group: "{{ cloud_compose_group }}"
     mode: "0750"
-    content: |
-      #!/usr/bin/env bash
-
-      set -eou pipefail
-
-      source /home/cloud-compose/profile.sh
-      exec bash /home/cloud-compose/compose-dispatch.sh "{{ item }}"
   loop:
     - init
     - up
@@ -678,6 +679,8 @@
     cmd: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
   async: "{{ cloud_compose_bootstrap_timeout }}"
   poll: "{{ cloud_compose_bootstrap_poll_interval }}"
+  environment:
+    CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS: "{{ cloud_compose_bootstrap_wait_seconds | int }}"
   when:
     - cloud_compose_run_bootstrap | bool
     - (cloud_compose_bootstrap_readiness.rc | default(1)) != 0

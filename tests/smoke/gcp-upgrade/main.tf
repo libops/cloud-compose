@@ -79,9 +79,7 @@ module "app" {
       # timer can suspend the disposable host during a long bootstrap, so
       # disabling it in the later runcmd phase is too late.
       initcmd = [
-        "systemctl disable --now internal-services.timer internal-services.service 2>/dev/null || true",
-        "systemctl disable --now cloud-compose-internal-services.timer cloud-compose-internal-services.service 2>/dev/null || true",
-        "bash -ceu 'project=${local.wordpress_project_dir}; git_project() { git -c safe.directory=\"$project\" -C \"$project\" \"$@\"; }; install -d -m 0755 \"$project\"; if [[ ! -d \"$project/.git\" ]]; then git_project init; git_project remote add origin https://github.com/libops/wp.git; fi; git_project remote set-url origin https://github.com/libops/wp.git; git_project fetch --force --no-tags --depth=1 origin ${var.wordpress_compose_ref}; git_project checkout --detach ${var.wordpress_compose_ref}; test \"$(git_project rev-parse HEAD)\" = ${var.wordpress_compose_ref}; chown -R cloud-compose:cloud-compose \"$project\"'",
+        "bash /home/cloud-compose/gcp-upgrade-prepare-repository.sh",
       ]
     }
     power_management = {
@@ -91,6 +89,7 @@ module "app" {
     }
   }
   runtime = {
+    rootfs = "${path.module}/rootfs"
     users = {
       cloud-compose = [var.ssh_public_key]
     }
@@ -112,8 +111,7 @@ module "app" {
         }
       }
       up = [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
+        "/etc/cloud-compose/lifecycle.d/gcp-upgrade-up.sh",
       ]
     }
     sitectl = {

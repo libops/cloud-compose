@@ -228,6 +228,7 @@ assert_contains "$bootstrap_security" '"$marker_size" == "6"'
 assert_contains "$bootstrap_security" '"$payload" == "ready"'
 assert_contains "$bootstrap_security" 'Cloud Compose control input is not root-controlled'
 assert_contains "$bootstrap_security" 'Cloud Compose lifecycle dispatcher is not root-controlled'
+assert_contains "$bootstrap_security" '"$CLOUD_COMPOSE_RUNTIME_HOME/default-lifecycle.sh"'
 if rg -n 'bootstrap\\.log|exec (>>|>)[^[:space:]]' "$run_bootstrap" >/dev/null; then
     fail "bootstrap wrapper writes an independently unbounded log file"
 fi
@@ -274,15 +275,19 @@ if rg -n '_SYSTEMD_UNIT=cloud-compose-bootstrap\\.service' \
     fail "raw bootstrap output was added to Fluent Bit"
 fi
 
-for cloud_init_template in \
-    "$repo_root/templates/cloud-init.yml" \
-    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
-    assert_contains "$cloud_init_template" 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh'
+for cloud_init_program in \
+    "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" \
+    "$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"; do
+    assert_contains "$cloud_init_program" 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh'
     if grep -Fq 'bash /home/cloud-compose/run.sh > /home/cloud-compose/run.log 2>&1' \
-        "$cloud_init_template"; then
-        fail "cloud-init bypasses the retryable bootstrap unit"
+        "$cloud_init_program"; then
+        fail "$cloud_init_program bypasses the retryable bootstrap unit"
     fi
 done
+assert_contains "$repo_root/templates/cloud-init.yml" \
+    '/var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh'
+assert_contains "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" \
+    '/var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh'
 
 : >"$systemctl_log"
 printf '0\n' >"$active_calls"

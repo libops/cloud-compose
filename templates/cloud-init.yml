@@ -28,56 +28,37 @@ users:
 %{ endfor ~}
 %{ endfor ~}
 
-bootcmd:
-# mount the main Data disk
-- |
-  set -eu
-  rm -f /run/cloud-compose-filesystems-ready
-  filesystem_prep=/run/cloud-compose-prepare-filesystem
-  filesystem_persist=/run/cloud-compose-persist-filesystems
-  printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
-  printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
-  chmod 0600 "$filesystem_prep" "$filesystem_persist"
-  bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data \
-    --publish-fresh-marker ${jsonencode(FRESH_FILESYSTEM_IDENTITY)}
-
-# mount the specific Volumes disk
-- bash /run/cloud-compose-prepare-filesystem /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes
-
-- mkdir -p /mnt/disks/data/docker/volumes
-- |
-  set -eu
-  if ! mountpoint -q /mnt/disks/data/docker/volumes; then
-    mount --bind /mnt/disks/volumes /mnt/disks/data/docker/volumes
-  fi
-  for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do
-    if ! mountpoint -q -- "$required_mount"; then
-      echo "Required cloud-compose mount is unavailable: $required_mount" >&2
-      exit 1
-    fi
-  done
-%{ if USE_OVERLAY ~}
-  mkdir -p /mnt/disks/prod-readonly
-  if ! mountpoint -q /mnt/disks/prod-readonly; then
-    mount -o ro "$(readlink -f /dev/disk/by-id/google-prod-volumes)" /mnt/disks/prod-readonly
-  fi
-  bash /run/cloud-compose-persist-filesystems \
-    /dev/disk/by-id/google-data \
-    /dev/disk/by-id/google-docker-volumes \
-    /dev/disk/by-id/google-prod-volumes
-%{ else ~}
-  bash /run/cloud-compose-persist-filesystems \
-    /dev/disk/by-id/google-data \
-    /dev/disk/by-id/google-docker-volumes
-%{ endif ~}
-  install -m 0600 /dev/null /run/cloud-compose-filesystems-ready
-
 write_files:
+- path: /var/lib/cloud-compose/bootstrap/rootfs-archive.sh
+  owner: root:root
+  permissions: "0700"
+  encoding: b64
+  content: ${ROOTFS_ARCHIVE_SCRIPT_B64}
+- path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh
+  owner: root:root
+  permissions: "0700"
+  encoding: b64
+  content: ${GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64}
+- path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-post-bootstrap.sh
+  owner: root:root
+  permissions: "0700"
+  encoding: b64
+  content: ${GCP_CLOUD_INIT_POST_SCRIPT_B64}
 - path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
   owner: root:root
   permissions: "0600"
   encoding: b64
   content: ${DIAGNOSTICS_SCRIPT_B64}
+- path: /var/lib/cloud-compose/bootstrap/init-commands.sh
+  owner: root:root
+  permissions: "0600"
+  encoding: b64
+  content: ${jsonencode(INIT_COMMANDS_B64)}
+- path: /var/lib/cloud-compose/bootstrap/runcmd.sh
+  owner: root:root
+  permissions: "0600"
+  encoding: b64
+  content: ${jsonencode(RUNCMD_B64)}
 ${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
@@ -87,33 +68,10 @@ ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
-${ROOTFS_ARCHIVE_COMMAND}
-- |
-  set -eu
-  install -d -m 0755 -o root -g root /etc/cloud-compose/bin
-  install -m 0755 -o root -g root \
-    /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh \
-    /etc/cloud-compose/bin/cloud-compose-diagnostics.sh
-  test -f /run/cloud-compose-filesystems-ready || {
-    echo "Cloud Compose filesystems were not prepared; refusing application initialization" >&2
-    exit 1
-  }
-%{ for CMD in ADDITIONAL_INITCMD ~}
-  ${indent(2, CMD)}
-%{ endfor ~}
-  chown root:cloud-compose /mnt/disks/data
-  chmod 1775 /mnt/disks/data
-  chown cloud-compose:cloud-compose /mnt/disks/volumes
-  chmod 0775 /mnt/disks/volumes
-  install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
-  rm -f /var/lib/cloud-compose/bootstrap-complete
-  /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
-  bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
-%{ if length(ADDITIONAL_RUNCMD) > 0 ~}
-- |
-  set -eu
-  bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
-%{ for CMD in ADDITIONAL_RUNCMD ~}
-  ${indent(2, CMD)}
-%{ endfor ~}
+%{ if ROOTFS_ARCHIVE_ENABLED ~}
+- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(ROOTFS_OVERLAY_DIR)}]
+%{ endif ~}
+- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh, /var/lib/cloud-compose/bootstrap/init-commands.sh, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
+%{ if POST_BOOTSTRAP_REQUIRED ~}
+- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-post-bootstrap.sh, ${jsonencode(ROLLOUT_ENABLED)}, /var/lib/cloud-compose/bootstrap/runcmd.sh]
 %{ endif ~}

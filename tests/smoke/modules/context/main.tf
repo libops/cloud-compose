@@ -29,6 +29,11 @@ locals {
   cloud_provider = lower(trimspace(var.cloud_provider))
   template       = lower(trimspace(var.template))
 
+  app_registry   = jsondecode(file("${path.module}/../../../../templates/apps.json"))
+  app_templates  = local.app_registry.templates
+  empty_template = local.app_registry.default
+  app_template   = try(local.app_templates[local.template], local.empty_template)
+
   provider_prefixes = {
     digitalocean = "do"
     gcp          = "g"
@@ -55,18 +60,22 @@ locals {
   tags                = distinct(concat(var.tags, ["cloud-compose-smoke", local.target], local.run_tag != "" ? [local.run_tag] : []))
   ssh_keys            = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
   runtime_base = {
-    rootfs_archive_url    = var.rootfs_archive_url
-    rootfs_archive_sha256 = var.rootfs_archive_sha256
+    rootfs_archive_url                = var.rootfs_archive_url
+    rootfs_archive_sha256             = var.rootfs_archive_sha256
+    rootfs_test_source_archive_prefix = var.rootfs_test_source_archive_prefix
     compose = {
+      repo         = local.app_template.repo
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port
       up = [
-        "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist"
+        "/home/cloud-compose/default-lifecycle.sh up"
       ]
     }
     sitectl = {
-      environment = "smoke"
+      packages         = local.app_template.packages
+      package_versions = local.app_template.package_versions
+      plugin           = local.app_template.plugin
+      environment      = "smoke"
     }
     managed_runtime = {
       enabled                       = true
@@ -76,6 +85,7 @@ locals {
     vault = {
       auth_method = "consumer-managed"
     }
+    extra_env = local.app_template.extra_env
   }
 
   gcp_runtime = merge(local.runtime_base, {

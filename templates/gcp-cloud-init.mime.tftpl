@@ -1,0 +1,18 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============cloud-compose=="
+
+--===============cloud-compose==
+Content-Type: text/cloud-boothook; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="gcp-filesystem-boothook.sh"
+
+${FILESYSTEM_BOOTHOOK}
+--===============cloud-compose==
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="cloud-config.yml"
+
+${CLOUD_CONFIG}
+--===============cloud-compose==--

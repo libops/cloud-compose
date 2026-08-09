@@ -11,12 +11,51 @@ fail() {
   exit 1
 }
 
+lifecycle_program="$repo_root/rootfs/home/cloud-compose/default-lifecycle.sh"
+for defaults_file in \
+  modules/gcp/variables.tf \
+  modules/linux-vm-runtime/variables.tf \
+  ansible/roles/cloud_compose/defaults/main.yml \
+  salt/cloud-compose/init.sls; do
+  for action in init up down rollout; do
+    if [[ "$(grep -Fc -- "/home/cloud-compose/default-lifecycle.sh $action" "$repo_root/$defaults_file")" -ne 1 ]]; then
+      fail "$defaults_file does not invoke the $action lifecycle program exactly once"
+    fi
+  done
+  if grep -Fq -- 'TARGET_REF=' "$repo_root/$defaults_file"; then
+    fail "$defaults_file still splits rollout state across lifecycle command entries"
+  fi
+done
+bash "$repo_root/ci/lifecycle-program-contract.sh" \
+  "$lifecycle_program" \
+  "$repo_root/rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq"
+grep -Fq -- 'run_lifecycle_program_contract "$home_dir" "$key_path" "$output_json"' \
+  "$repo_root/ci/cloud-smoke.sh" || fail "provider smoke does not execute the lifecycle program contract"
+grep -Fq -- 'bash "$lifecycle_program_contract" /home/cloud-compose/default-lifecycle.sh' \
+  "$repo_root/ci/remote/config-management-verify.sh" || \
+  fail "config-management smoke does not execute the lifecycle program contract"
+
 grep -Fq 'cd "$script_dir"' "$repo_root/rootfs/home/cloud-compose/prepare-app-sources.sh" || \
   fail "source preparation does not enter an accessible working directory before dropping privileges"
 grep -Fq 'run_as_cloud_compose() (' "$repo_root/rootfs/home/cloud-compose/run.sh" || \
   fail "privilege-drop helper does not isolate its working-directory change"
 grep -Fq 'cd /home/cloud-compose' "$repo_root/rootfs/home/cloud-compose/run.sh" || \
   fail "privilege-drop helper can inherit an inaccessible caller working directory"
+if grep -Fq 'su -s /bin/bash -c' "$repo_root/rootfs/home/cloud-compose/run.sh"; then
+  fail "privilege-drop helper still synthesizes a shell program through su"
+fi
+grep -Fq '"$COMPOSE_LIFECYCLE_EXECUTOR" "$lifecycle" "$command"' \
+  "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
+  fail "Compose lifecycle entries do not pass through the checked executor"
+grep -Fq 'readonly COMPOSE_LIFECYCLE_EXECUTOR="/etc/cloud-compose/libexec/run-lifecycle-program.sh"' \
+  "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
+  fail "Compose lifecycle entries do not use the canonical checked executor path"
+grep -Fq '"$COMPOSE_LIFECYCLE_EXECUTOR" --validate "$lifecycle" "$command" || return 1' \
+  "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" || \
+  fail "Compose lifecycle program sets are not validated before execution"
+if grep -Fq 'bash -c "$command"' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"; then
+  fail "Compose lifecycle entries still execute as shell strings"
+fi
 
 export COMPOSE_PROJECTS_FILE="$tmp/compose-projects.json"
 export COMPOSE_APPS_ENV_DIR="$tmp/apps"

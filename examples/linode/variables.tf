@@ -43,8 +43,8 @@ variable "cloud_compose_ssh_keys" {
 
 variable "cloud_compose_source_ref" {
   type        = string
-  default     = "1.0.0"
-  description = "Exact cloud-compose release tag whose canonical rootfs asset is fetched by Linode cloud-init."
+  nullable    = false
+  description = "Required exact cloud-compose release tag whose canonical rootfs asset is fetched by Linode cloud-init. It must match the release containing this example/module source."
 
   validation {
     condition     = can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+$", trimspace(var.cloud_compose_source_ref)))
@@ -54,11 +54,12 @@ variable "cloud_compose_source_ref" {
 
 variable "cloud_compose_source_sha256" {
   type        = string
+  nullable    = false
   description = "SHA-256 of the canonical rootfs asset published for cloud_compose_source_ref."
 
   validation {
-    condition     = can(regex("^[0-9a-fA-F]{64}$", trimspace(var.cloud_compose_source_sha256)))
-    error_message = "cloud_compose_source_sha256 must be a 64-character SHA-256 digest."
+    condition     = can(regex("^[0-9a-f]{64}$", trimspace(var.cloud_compose_source_sha256)))
+    error_message = "cloud_compose_source_sha256 must be a lowercase 64-character SHA-256 digest."
   }
 }
 

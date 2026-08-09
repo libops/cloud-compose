@@ -47,6 +47,8 @@ def assert_runtime_files() -> None:
         RUNTIME_HOME / "up",
         RUNTIME_HOME / "down",
         RUNTIME_HOME / "rollout",
+        RUNTIME_HOME / "default-lifecycle.sh",
+        RUNTIME_HOME / "lifecycle-entrypoint.sh",
         RUNTIME_HOME / "run.sh",
         RUNTIME_HOME / "start-cloud-compose-bootstrap.sh",
         BOOTSTRAP_LIBEXEC / "bootstrap-required.sh",
@@ -63,6 +65,7 @@ def assert_runtime_files() -> None:
     for path in [
         JQ_PROGRAM_DIR / "diagnostics-validate-compose-projects.jq",
         JQ_PROGRAM_DIR / "offhost-validate-manifest.jq",
+        JQ_PROGRAM_DIR / "sitectl-verify-args.jq",
     ]:
         assert path.exists(), path
 
@@ -112,6 +115,11 @@ def assert_runtime_files() -> None:
     assert diagnostics_metadata.st_uid == 0
     assert diagnostics_metadata.st_gid == 0
     assert stat.S_IMODE(diagnostics_metadata.st_mode) == 0o755
+
+    lifecycle_metadata = (RUNTIME_HOME / "default-lifecycle.sh").stat()
+    assert lifecycle_metadata.st_uid == 0
+    assert lifecycle_metadata.st_gid == 0
+    assert stat.S_IMODE(lifecycle_metadata.st_mode) == 0o755
 
     jq_programs = list(JQ_PROGRAM_DIR.glob("*.jq"))
     assert jq_programs

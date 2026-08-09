@@ -65,6 +65,12 @@ empty list disables that phase and is preserved instead of restoring a default.
 Runtime feature switches must be YAML booleans, not quoted strings; ambiguous
 values are rejected before host mutation.
 
+Lifecycle list entries are program selectors, not shell source. Use the
+built-in `/home/cloud-compose/default-lifecycle.sh ACTION`, `true`, `false`, or
+one argument-free root-owned executable immediately below
+`/etc/cloud-compose/lifecycle.d`. Put multi-step logic and quoting inside that
+checked program file.
+
 The provider-neutral disaster-recovery interface is shared with Terraform:
 
 ```yaml

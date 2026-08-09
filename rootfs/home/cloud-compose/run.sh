@@ -17,10 +17,8 @@ run_as_cloud_compose() (
     runuser -u cloud-compose -- env HOME=/home/cloud-compose PATH="$PATH" "$@"
   elif command -v sudo >/dev/null 2>&1; then
     sudo -u cloud-compose env HOME=/home/cloud-compose PATH="$PATH" "$@"
-  elif command -v su >/dev/null 2>&1; then
-    su -s /bin/bash -c "HOME=/home/cloud-compose PATH=$(printf '%q' "$PATH") $(printf '%q ' "$@")" cloud-compose
   else
-    echo "No supported user-switching command found for cloud-compose app init" >&2
+    echo "Neither runuser nor sudo is available for cloud-compose app init" >&2
     return 1
   fi
 )

@@ -3,7 +3,11 @@ Description=Converge Cloud Compose application bootstrap
 Wants=network-online.target
 After=network-online.target
 RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes
-StartLimitIntervalSec=0
+# Three full two-hour activation attempts must all remain inside the rate-limit
+# window; otherwise a repeatedly hung bootstrap could retry forever as the
+# oldest start aged out before the fourth attempt.
+StartLimitIntervalSec=8h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot

@@ -22,7 +22,7 @@ module path and supplies the template:
 
 ```hcl
 module "app" {
-  source = "github.com/libops/cloud-compose//providers/do?ref=1.0.0"
+  source = "github.com/libops/cloud-compose//providers/do?ref=REPLACE_WITH_EXACT_RELEASE"
 
   name     = "cc-wp"
   template = "wp"
@@ -31,12 +31,19 @@ module "app" {
       cloud_compose_keys = var.operator_ssh_keys
     }
   }
+  runtime = {
+    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
+    rootfs_archive_sha256 = var.cloud_compose_rootfs_archive_sha256
+  }
 }
 ```
 
-The examples pin the reviewed `1.0.0` release. Replace that ref only with the
-exact release or full commit your organization has reviewed; omitting `?ref=`
-makes future plans consume a moving module source.
+Replace the source placeholder with an exact release that publishes all three
+canonical rootfs assets, and set the URL and SHA-256 from that same release.
+The runnable DigitalOcean and Linode examples intentionally provide no release
+default. Terraform fetches the adjacent rootfs contract during planning and
+rejects a module/archive mismatch; omitting `?ref=` would make future plans
+consume a moving module source.
 
 ## GCP foundation and application states
 

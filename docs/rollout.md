@@ -28,15 +28,15 @@ module "site" {
   runtime = {
     compose = {
       rollout = [
-        "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-}}\"",
-        "if [ -n \"$TARGET_REF\" ]; then sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --ref \"$TARGET_REF\"; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git; fi",
-        "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
-        "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi",
+        "/home/cloud-compose/default-lifecycle.sh rollout",
       ]
     }
   }
 }
 ```
+
+The `runtime.compose.rollout` entry above is the built-in default and may be
+omitted. It is shown to make the single-program execution boundary explicit.
 
 The example pins the reviewed cloud-compose `1.0.0` release. Replace that ref
 only with an exact reviewed release or full commit. `gcp.rollout.release_url`
@@ -124,9 +124,13 @@ For bin-packed hosts, set `rollout_arg1` to the exact app key from
 `CLOUD_COMPOSE_APP` only for the rollout lifecycle and validates it against the
 manifest before running any command. Omit it to retain the primary-app default.
 
-The generated rollout script runs from the checked-out compose repository after
-sourcing `/home/cloud-compose/profile.sh`. The default contract prefers
-`GIT_REF`, then `GIT_BRANCH`. When either is present, `sitectl deploy --ref`
+The root-owned default lifecycle program runs from the checked-out compose
+repository after the host dispatcher loads the validated app environment. For
+controller-compatible callers that additionally provide `GIT_COMMIT_SHA`, the
+default contract requires an exact lowercase 40-character commit SHA and
+prefers it over `GIT_REF`, then `GIT_BRANCH`. The authenticated rollout service
+currently supplies the latter two fields. When a source selector is present,
+`sitectl deploy --ref`
 fetches that exact remote ref into a dedicated local ref, verifies it resolves
 to a commit, and checks it out detached before invoking the active plugin's
 component lifecycle. This supports branch names, advertised commit IDs, and

@@ -5,6 +5,11 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 prep_script="$repo_root/rootfs/home/cloud-compose/prepare-filesystem.sh"
 persist_script="$repo_root/rootfs/home/cloud-compose/persist-filesystems.sh"
+gcp_filesystem_boot="$repo_root/rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"
+gcp_filesystem_boothook="$repo_root/templates/gcp-filesystem-boothook.sh.tftpl"
+gcp_cloud_init_mime="$repo_root/templates/gcp-cloud-init.mime.tftpl"
+gcp_cloud_init_finalize="$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh"
+linux_cloud_init="$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -593,22 +598,30 @@ fi
 if grep -Eq 'fsck[^\n]*\|\|[^\n]*mkfs|fsck[^\n]*mkfs' "$repo_root/templates/cloud-init.yml"; then
     fail "GCP cloud-init still formats after an fsck failure"
 fi
-grep -Fq 'FILESYSTEM_PREP_SCRIPT_B64' "$repo_root/templates/cloud-init.yml" || \
-    fail "GCP cloud-init does not bootstrap the tested filesystem helper"
+grep -Fq 'FILESYSTEM_PREP_SCRIPT_B64' "$gcp_filesystem_boothook" || \
+    fail "GCP boothook does not bootstrap the tested filesystem helper"
+grep -Fq 'bash "$filesystem_boot"' "$gcp_filesystem_boothook" || \
+    fail "GCP boothook does not invoke the checked filesystem program"
+grep -Fq 'Content-Type: text/cloud-boothook' "$gcp_cloud_init_mime" || \
+    fail "GCP user data does not preserve an early every-boot filesystem phase"
+if grep -Fq '/var/lib/cloud-compose/bootstrap/gcp-filesystem-boot.sh' \
+    "$repo_root/templates/cloud-init.yml"; then
+    fail "GCP cloud-config invokes filesystem preparation late from runcmd"
+fi
 grep -Fq 'bash "$filesystem_prep" /dev/disk/by-id/google-data /mnt/disks/data \' \
-    "$repo_root/templates/cloud-init.yml" ||
+    "$gcp_filesystem_boot" ||
     fail "GCP cloud-init does not request a fresh marker for the data filesystem"
-grep -Fq -- '--publish-fresh-marker ${jsonencode(FRESH_FILESYSTEM_IDENTITY)}' \
-    "$repo_root/templates/cloud-init.yml" ||
+grep -Fq -- '--publish-fresh-marker "$fresh_filesystem_identity"' \
+    "$gcp_filesystem_boot" ||
     fail "GCP cloud-init does not bind the marker to the rendered data-disk identity"
-grep -Fq 'bash "$filesystem_prep" '\''${DATA_DEVICE}'\'' /mnt/disks/data --publish-fresh-marker' \
-    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" ||
+grep -Fq 'bash "$filesystem_prep" "$data_device" /mnt/disks/data --publish-fresh-marker' \
+    "$linux_cloud_init" ||
     fail "Linux VM cloud-init does not request a fresh marker for the data filesystem"
-grep -Fq 'bash /run/cloud-compose-prepare-filesystem /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes' \
-    "$repo_root/templates/cloud-init.yml" ||
+grep -Fq 'bash "$filesystem_prep" /dev/disk/by-id/google-docker-volumes /mnt/disks/volumes' \
+    "$gcp_filesystem_boot" ||
     fail "GCP cloud-init does not prepare the volumes filesystem without a fresh marker"
-grep -Fq 'bash "$filesystem_prep" '\''${VOLUMES_DEVICE}'\'' /mnt/disks/volumes' \
-    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" ||
+grep -Fq 'bash "$filesystem_prep" "$volumes_device" /mnt/disks/volumes' \
+    "$linux_cloud_init" ||
     fail "Linux VM cloud-init does not prepare the volumes filesystem without a fresh marker"
 grep -Fq '(umask 077 && mkdir -- "$marker_dir")' "$prep_script" ||
     fail "the fresh-filesystem marker directory is not created privately"
@@ -623,41 +636,42 @@ grep -Fq -- '-L "$fresh_filesystem_pending_label" -- "$device"' "$prep_script" |
 grep -Fq 'e2label "$device" ""' "$prep_script" ||
     fail "fresh-filesystem pending intent is not cleared after marker publication"
 if grep -Eq '^[[:space:]]*"?\$filesystem_(prep|persist)"?[[:space:]]' \
-    "$repo_root/templates/cloud-init.yml" "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; then
+    "$gcp_filesystem_boot" "$linux_cloud_init"; then
     fail "cloud-init directly executes a temporary helper from potentially noexec /run"
 fi
-for cloud_init_template in \
-    "$repo_root/templates/cloud-init.yml" \
-    "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
-    [[ "$(grep -Fc -- '--publish-fresh-marker' "$cloud_init_template")" == "1" ]] ||
-        fail "cloud-init must publish a fresh marker for the data filesystem only"
-    grep -Fq 'chown root:cloud-compose /mnt/disks/data' "$cloud_init_template" ||
-        fail "cloud-init does not preserve root ownership of the data mount root"
-    grep -Fq 'chmod 1775 /mnt/disks/data' "$cloud_init_template" ||
-        fail "cloud-init does not make the data mount root sticky and group-writable"
-    grep -Fq 'chown cloud-compose:cloud-compose /mnt/disks/volumes' "$cloud_init_template" ||
-        fail "cloud-init does not assign the volumes mount root to cloud-compose"
-    grep -Fq 'chmod 0775 /mnt/disks/volumes' "$cloud_init_template" ||
-        fail "cloud-init does not make the volumes mount root group-writable"
+for filesystem_bootstrap in "$gcp_filesystem_boot" "$linux_cloud_init"; do
+    [[ "$(grep -Fc -- '--publish-fresh-marker' "$filesystem_bootstrap")" == "1" ]] ||
+        fail "$filesystem_bootstrap must publish a fresh marker for the data filesystem only"
     grep -Fq 'for required_mount in /mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volumes; do' \
-        "$cloud_init_template" || fail "cloud-init does not verify every required mount before initialization"
-    grep -Fq 'Required cloud-compose mount is unavailable:' "$cloud_init_template" ||
-        fail "cloud-init mount gate does not report the unavailable path"
-    grep -Fq '  bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
-        "$cloud_init_template" || fail "cloud-init retryable bootstrap startup is outside the fail-closed mount block"
-    marker_reset_line="$(grep -nF '  rm -f /var/lib/cloud-compose/bootstrap-complete' \
-        "$cloud_init_template" | cut -d: -f1)"
-    run_line="$(grep -nF '  bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
-        "$cloud_init_template" | cut -d: -f1)"
+        "$filesystem_bootstrap" || fail "$filesystem_bootstrap does not verify every required mount before initialization"
+    grep -Fq 'Required cloud-compose mount is unavailable:' "$filesystem_bootstrap" ||
+        fail "$filesystem_bootstrap mount gate does not report the unavailable path"
+done
+for bootstrap_finalize in "$gcp_cloud_init_finalize" "$linux_cloud_init"; do
+    grep -Fq 'chown root:cloud-compose /mnt/disks/data' "$bootstrap_finalize" ||
+        fail "$bootstrap_finalize does not preserve root ownership of the data mount root"
+    grep -Fq 'chmod 1775 /mnt/disks/data' "$bootstrap_finalize" ||
+        fail "$bootstrap_finalize does not make the data mount root sticky and group-writable"
+    grep -Fq 'chown cloud-compose:cloud-compose /mnt/disks/volumes' "$bootstrap_finalize" ||
+        fail "$bootstrap_finalize does not assign the volumes mount root to cloud-compose"
+    grep -Fq 'chmod 0775 /mnt/disks/volumes' "$bootstrap_finalize" ||
+        fail "$bootstrap_finalize does not make the volumes mount root group-writable"
+    grep -Fq 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
+        "$bootstrap_finalize" || fail "$bootstrap_finalize does not start the retryable bootstrap service"
+    marker_reset_line="$(grep -nF 'rm -f /var/lib/cloud-compose/bootstrap-complete' \
+        "$bootstrap_finalize" | cut -d: -f1)"
+    run_line="$(grep -nF 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
+        "$bootstrap_finalize" | cut -d: -f1)"
     [[ -n "$marker_reset_line" && -n "$run_line" && "$marker_reset_line" -lt "$run_line" ]] ||
-        fail "cloud-init does not clear stale bootstrap readiness before retryable startup"
+        fail "$bootstrap_finalize does not clear stale bootstrap readiness before retryable startup"
 done
 grep -Fq 'install -m 0600 /dev/null /run/cloud-compose-filesystems-ready' \
-    "$repo_root/templates/cloud-init.yml" || fail "GCP bootcmd does not publish filesystem readiness"
-grep -Fq 'test -f /run/cloud-compose-filesystems-ready || {' \
-    "$repo_root/templates/cloud-init.yml" || fail "GCP runcmd does not require filesystem readiness"
-grep -Fq 'test -f /run/cloud-compose-filesystems-ready || {' \
-    "$repo_root/modules/gcp/main.tf" || fail "GCP archive installation is not gated by filesystem readiness"
+    "$gcp_filesystem_boot" || fail "GCP boot program does not publish filesystem readiness"
+grep -Fq '[[ ! -f /run/cloud-compose-filesystems-ready ]]' \
+    "$gcp_cloud_init_finalize" || fail "GCP finalization does not require filesystem readiness"
+grep -Fq 'fail "Cloud Compose filesystems were not prepared; refusing rootfs installation"' \
+    "$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh" || \
+    fail "GCP archive installation is not gated by filesystem readiness"
 
 persist_tmp="$tmp/persist"
 mkdir -p "$persist_tmp/bin"
@@ -779,11 +793,11 @@ if CLOUD_COMPOSE_FSTAB_PATH="$fstab" \
     fail "filesystem persistence accepted an unsafe device path"
 fi
 
-grep -Fq 'FILESYSTEM_PERSIST_SCRIPT_B64' "$repo_root/templates/cloud-init.yml" || \
-    fail "GCP cloud-init does not bootstrap persistent mount configuration"
-grep -Fq 'FILESYSTEM_PERSIST_SCRIPT_B64' "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" || \
-    fail "Linux VM cloud-init does not bootstrap persistent mount configuration"
-grep -Fq '/var/lib/cloud-compose/mounted-rootfs/mnt/disks' "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" || \
+grep -Fq 'FILESYSTEM_PERSIST_SCRIPT_B64' "$gcp_filesystem_boothook" || \
+    fail "GCP boothook does not bootstrap persistent mount configuration"
+grep -Fq 'bash "$filesystem_persist" "$data_device" "$volumes_device"' "$linux_cloud_init" || \
+    fail "Linux VM cloud-init does not invoke persistent mount configuration"
+grep -Fq '/var/lib/cloud-compose/mounted-rootfs/mnt/disks' "$linux_cloud_init" || \
     fail "Linux VM cloud-init does not copy mounted-root files after mounting durable storage"
 
 do_module="$repo_root/modules/digitalocean/main.tf"

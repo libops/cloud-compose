@@ -243,47 +243,55 @@ if grep -Fq 'rotate-keys' "$repo_root/rootfs/home/cloud-compose/docker-prune.sh"
   fail "provider-neutral Docker prune still invokes GCP key rotation"
 fi
 
-for archive_source in \
-  "$repo_root/modules/linux-vm-runtime/main.tf" \
-  "$repo_root/modules/gcp/main.tf"; do
-  verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
-  extract_line="$(grep -n 'tar --no-same-owner -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
-  normalize_line="$(grep -n 'chown -hR 0:0 -- "\$rootfs_dir"' "$archive_source" | head -n 1 | cut -d: -f1)"
-  copy_line="$(grep -n 'cp -a "\$rootfs_dir"/. /' "$archive_source" | head -n 1 | cut -d: -f1)"
-  [[ -n "$verify_line" && -n "$extract_line" && -n "$normalize_line" && -n "$copy_line" &&
-    "$verify_line" -lt "$extract_line" && "$extract_line" -lt "$normalize_line" &&
-    "$normalize_line" -lt "$copy_line" ]] || \
-    fail "$archive_source does not verify, ownership-safe extract, then normalize the rootfs to root"
-done
+archive_source="$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"
+verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
+members_line="$(grep -n 'validate_rootfs_archive "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+contract_line="$(grep -n 'rootfs archive paths, bytes, or canonical metadata do not match this cloud-compose module source' "$archive_source" | head -n 1 | cut -d: -f1)"
+copy_line="$(grep -n 'cp -a "\$staged_rootfs"/. /' "$archive_source" | head -n 1 | cut -d: -f1)"
+[[ -n "$verify_line" && -n "$members_line" && -n "$extract_line" && -n "$contract_line" && -n "$copy_line" &&
+  "$verify_line" -lt "$members_line" && "$members_line" -lt "$extract_line" &&
+  "$extract_line" -lt "$contract_line" && "$contract_line" -lt "$copy_line" ]] || \
+  fail "$archive_source does not verify archive bytes and canonical rootfs metadata before installation"
+assert_contains "$archive_source" "stat -c '%a:%h:%F'"
+assert_contains "$archive_source" '[[ "$metadata" == "${expected_mode}:1:regular file" ]]'
+assert_contains "$archive_source" '[[ "$require_root_owner" != "true" || "$owner" == "0:0" ]]'
 
 if [[ -n "$(git -C "$repo_root" ls-files 'rootfs/usr/**')" ]]; then
   fail "Cloud Compose-owned rootfs programs still target immutable /usr"
 fi
 for trusted_program in \
   rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh \
+  rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh \
+  rootfs/etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh \
+  rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh \
   rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh \
   rootfs/etc/cloud-compose/libexec/build-cos-make.sh \
   rootfs/etc/cloud-compose/libexec/bootstrap-security.sh \
+  rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh \
+  rootfs/etc/cloud-compose/libexec/rootfs-archive.sh \
+  rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh \
   rootfs/etc/cloud-compose/libexec/run-bootstrap.sh \
   rootfs/etc/cloud-compose/libexec/run-root-program.sh \
-  rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq; do
+  rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq \
+  rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq; do
   [[ -f "$repo_root/$trusted_program" ]] || fail "COS-safe trusted program is missing: $trusted_program"
 done
 
-assert_contains "$repo_root/templates/cloud-init.yml" \
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" \
   '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
-assert_contains "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml" \
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh" \
   '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
 assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
   'chown root:root "$cloud_compose_home"'
 assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
   "0:1:regular file"
-for cloud_init_template in \
-  "$repo_root/templates/cloud-init.yml" \
-  "$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"; do
-  assert_contains "$cloud_init_template" 'install -d -m 0755 -o root -g root /etc/cloud-compose/bin'
-  if grep -Eq '^[[:space:]]*- path: /usr/|install -d[^#]* /usr/local' "$cloud_init_template"; then
-    fail "$cloud_init_template writes Cloud Compose-owned programs beneath immutable /usr"
+for cloud_init_program in \
+  "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" \
+  "$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"; do
+  assert_contains "$cloud_init_program" 'install-diagnostics "$diagnostics_sha256"'
+  if grep -Eq 'install -d[^#]* /usr/local' "$cloud_init_program"; then
+    fail "$cloud_init_program writes Cloud Compose-owned programs beneath immutable /usr"
   fi
 done
 

@@ -83,8 +83,12 @@ variable "tags" {
 
 variable "cloud_compose_source_ref" {
   type        = string
-  default     = "main"
-  description = "cloud-compose Git ref whose rootfs is fetched by providers with metadata size limits."
+  description = "Exact lowercase cloud-compose commit whose source archive is fetched by providers with metadata size limits."
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.cloud_compose_source_ref))
+    error_message = "cloud_compose_source_ref must be an exact lowercase 40-character commit SHA."
+  }
 }
 
 variable "cloud_compose_source_sha256" {
