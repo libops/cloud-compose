@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Cloud Compose MariaDB backups nightly
+Description=Run Cloud Compose local backups and off-host DR handoff nightly
 
 [Timer]
 # 9pm-7am EST, splayed per deployment by systemd's stable random delay.
@@ -8,7 +8,7 @@ Persistent=true
 RandomizedDelaySec=10h
 FixedRandomDelay=true
 AccuracySec=1min
-Unit=cloud-compose-mariadb-backup.service
+Unit=cloud-compose-offhost-backup.service
 
 [Install]
 WantedBy=timers.target

@@ -8,7 +8,7 @@ Type=oneshot
 User=root
 Group=root
 EnvironmentFile=-/home/cloud-compose/.env
-ExecStart=/bin/bash /home/cloud-compose/mount-overlays.sh
+ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh mount-overlays.sh
 RemainAfterExit=yes
 
 [Install]

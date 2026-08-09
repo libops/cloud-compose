@@ -5,6 +5,28 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
 
+_cc_host_init_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_host_init_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_host_init_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_host_init_source _cc_host_init_dir _cc_host_init_installed_home
+if [[ -n "$_cc_host_init_installed_home" &&
+  ( "$_cc_host_init_installed_home" == "/" ||
+    "$_cc_host_init_source" == "${_cc_host_init_installed_home%/}/"* ) ]]; then
+  _cc_host_init_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_host_init_checked_programs="$_cc_host_init_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_host_init_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_host_init_checked_programs"
+cloud_compose_bind_program_dir \
+  "$_cc_host_init_source" \
+  CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+  /etc/cloud-compose/jq \
+  "$_cc_host_init_dir/../../etc/cloud-compose/jq" \
+  gcp-metadata-public-ip.jq \
+  gcp-metadata-private-ip.jq
+
 cleanup() {
   if [ -n "${metadata_file:-}" ]; then
     rm -f "$metadata_file"
@@ -23,9 +45,11 @@ if [ "${CLOUD_COMPOSE_PROVIDER:-}" = "gcp" ]; then
     "http://metadata.google.internal/computeMetadata/v1/?recursive=true" >"$metadata_file"
 
   update_runtime_env_file .env GCP_PUBLIC_IP \
-    "$(jq -er '.instance.networkInterfaces[0].accessConfigs[0].externalIp' "$metadata_file")"
+    "$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/gcp-metadata-public-ip.jq" \
+      "$metadata_file")"
   update_runtime_env_file .env GCP_PRIVATE_IP \
-    "$(jq -er '.instance.networkInterfaces[0].ip' "$metadata_file")"
+    "$(jq -er -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/gcp-metadata-private-ip.jq" \
+      "$metadata_file")"
 fi
 
 if [ "${LIBOPS_INTERNAL_SERVICES_ENABLED:-false}" = "true" ]; then
@@ -42,7 +66,6 @@ chown root:root /home/cloud-compose
 chmod 0755 /home/cloud-compose
 for mutable_dir in \
   /home/cloud-compose/apps \
-  /home/cloud-compose/bin \
   /home/cloud-compose/state \
   /home/cloud-compose/.sitectl \
   /home/cloud-compose/.cache \
@@ -50,15 +73,32 @@ for mutable_dir in \
   /home/cloud-compose/.local; do
   install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"
 done
+if [[ -L /home/cloud-compose/bin || ! -d /home/cloud-compose/bin ||
+  "$(stat -c '%u:%g:%a:%F' -- /home/cloud-compose/bin)" != "0:0:755:directory" ]]; then
+  echo "Managed command directory was not secured by the runtime installer" >&2
+  exit 1
+fi
 
 find /home/cloud-compose -maxdepth 1 -type f -name '*.sh' \
   -exec chown root:root {} + \
   -exec chmod 0755 {} +
 for dispatcher in init up down rollout; do
-  if [ -f "/home/cloud-compose/$dispatcher" ]; then
-    chown root:root "/home/cloud-compose/$dispatcher"
-    chmod 0755 "/home/cloud-compose/$dispatcher"
+  dispatcher_path="/home/cloud-compose/$dispatcher"
+  dispatcher_metadata="$(stat -c '%u:%g:%a:%h:%F' -- "$dispatcher_path")" || {
+    echo "Unable to inspect Cloud Compose lifecycle dispatcher: $dispatcher_path" >&2
+    exit 1
+  }
+  IFS=: read -r dispatcher_uid _ dispatcher_mode dispatcher_links dispatcher_kind \
+    <<<"$dispatcher_metadata"
+  if [[ -L "$dispatcher_path" || ! -f "$dispatcher_path" ||
+    "$dispatcher_uid" != "0" || "$dispatcher_links" != "1" ||
+    "$dispatcher_kind" != "regular file" || ! "$dispatcher_mode" =~ ^[0-7]{3,4}$ ||
+    $((8#$dispatcher_mode & 0022)) -ne 0 ]]; then
+    echo "Unsafe Cloud Compose lifecycle dispatcher: $dispatcher_path" >&2
+    exit 1
   fi
+  chown root:root "$dispatcher_path"
+  chmod 0755 "$dispatcher_path"
 done
 for runtime_input in .env compose-projects.json application-env.json; do
   if [ -f "/home/cloud-compose/$runtime_input" ]; then

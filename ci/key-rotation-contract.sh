@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 

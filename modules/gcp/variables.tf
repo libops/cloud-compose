@@ -262,7 +262,7 @@ variable "docker_compose_branch" {
 variable "docker_compose_init" {
   type = list(string)
   default = [
-    "sitectl config set-context \"$${SITECTL_CONTEXT_NAME}\" --type local --project-dir \"$${DOCKER_COMPOSE_DIR}\" --site \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --plugin \"$${SITECTL_PLUGIN}\" --environment \"$${SITECTL_ENVIRONMENT}\" --project-name \"$${CLOUD_COMPOSE_INSTANCE_NAME}\" --compose-project-name \"$${COMPOSE_PROJECT_NAME}\" --docker-socket /var/run/docker.sock --env-file .env --default"
+    "/home/cloud-compose/default-lifecycle.sh init"
   ]
   nullable    = false
   description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value"
@@ -271,9 +271,7 @@ variable "docker_compose_init" {
 variable "docker_compose_up" {
   type = list(string)
   default = [
-    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" up -d --remove-orphans",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
-    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
+    "/home/cloud-compose/default-lifecycle.sh up"
   ]
   nullable    = false
   description = "Command to start the docker compose project"
@@ -282,7 +280,7 @@ variable "docker_compose_up" {
 variable "docker_compose_down" {
   type = list(string)
   default = [
-    "sitectl compose --context \"$${SITECTL_CONTEXT_NAME}\" down"
+    "/home/cloud-compose/default-lifecycle.sh down"
   ]
   nullable    = false
   description = "Command to stop the docker compose project"
@@ -291,13 +289,10 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "TARGET_REF=\"$${GIT_REF:-$${GIT_BRANCH:-}}\"",
-    "if [ -n \"$TARGET_REF\" ]; then sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --ref \"$TARGET_REF\"; else sitectl deploy --context \"$${SITECTL_CONTEXT_NAME}\" --skip-git; fi",
-    "sitectl healthcheck --context \"$${SITECTL_CONTEXT_NAME}\" --persist",
-    "if [ \"$${SITECTL_ENVIRONMENT}\" != \"production\" ]; then sitectl verify --context \"$${SITECTL_CONTEXT_NAME}\" $${SITECTL_VERIFY_ARGS:-}; fi"
+    "/home/cloud-compose/default-lifecycle.sh rollout"
   ]
   nullable    = false
-  description = "Commands used by rollout triggers. GIT_REF/GIT_BRANCH selects a source ref; without one, sitectl reconciles the current checkout."
+  description = "Commands used by rollout triggers. A validated GIT_COMMIT_SHA takes precedence over GIT_REF/GIT_BRANCH; without one, sitectl reconciles the current checkout."
 }
 
 variable "sitectl_packages" {
@@ -591,7 +586,7 @@ variable "rootfs" {
 variable "rootfs_archive_url" {
   type        = string
   default     = ""
-  description = "Optional HTTPS tar.gz URL containing a rootfs directory to fetch during boot instead of embedding the packaged rootfs. Must be set with rootfs_archive_sha256."
+  description = "Optional immutable HTTPS cloud-compose rootfs release archive to fetch during boot instead of embedding the packaged rootfs. Must be set with rootfs_archive_sha256; planning also requires the adjacent cloud-compose-rootfs.contract.sha256 asset to match this module source."
 
   validation {
     condition = (
@@ -606,6 +601,27 @@ variable "rootfs_archive_sha256" {
   type        = string
   default     = ""
   description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
+}
+
+variable "offhost_backup_required" {
+  type        = bool
+  default     = false
+  description = "Require nightly encrypted off-host coverage and scheduled disposable restore proofs from an operator-owned driver. Same-disk MariaDB dumps are retained but are not disaster recovery."
+}
+
+variable "offhost_backup_driver_path" {
+  type        = string
+  default     = "/etc/cloud-compose/libexec/offhost-backup-driver"
+  description = "Absolute path to the operator-supplied, root-owned provider-neutral DR driver. The driver owns its credentials; do not pass them through Terraform."
+
+  validation {
+    condition = (
+      can(regex("^/[A-Za-z0-9._/+:-]+$", var.offhost_backup_driver_path)) &&
+      !strcontains(var.offhost_backup_driver_path, "//") &&
+      length(regexall("(^|/)\\.\\.?(/|$)", var.offhost_backup_driver_path)) == 0
+    )
+    error_message = "offhost_backup_driver_path must be a safe absolute path without whitespace or dot segments."
+  }
 }
 
 variable "extra_env" {
@@ -645,7 +661,7 @@ variable "runcmd" {
 variable "initcmd" {
   type        = list(string)
   default     = []
-  description = "Commands to run before /home/cloud-compose/run.sh"
+  description = "Commands to run before the root-owned Cloud Compose bootstrap entrypoint"
 }
 
 variable "artifact_registry_repository" {

@@ -1,4 +1,12 @@
 mock_provider "cloudinit" {}
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "20732b7e37bab43eb1b7478305e242f6b3ccced09669d646b05ef656284cfab1\n"
+      status_code   = 200
+    }
+  }
+}
 mock_provider "google" {
   mock_data "google_project" {
     defaults = {
@@ -19,8 +27,6 @@ run "default_template_uses_v1_core" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -29,7 +35,7 @@ run "default_template_uses_v1_core" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl = "v1.0.0"
+      sitectl = "v1.9.1"
     }
     error_message = "The default template must select the released sitectl v1 core."
   }
@@ -52,22 +58,20 @@ run "non_isle_template_uses_v1_release_set" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   }
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.0.0"
-      sitectl-wp = "v1.0.0"
+      sitectl    = "v1.9.1"
+      sitectl-wp = "v2.1.0"
     }
     error_message = "Non-ISLE templates must select their coordinated sitectl v1 release set."
   }
 
   assert {
-    condition     = local.compose.branch == "v1.0.0"
-    error_message = "Non-ISLE templates must retain their stable v1.0.0 template contract."
+    condition     = local.compose.branch == "v1.1.1"
+    error_message = "The WordPress preset must select its stable v1.1.1 template contract."
   }
 }
 
@@ -83,23 +87,21 @@ run "isle_template_uses_v1_release_set" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
   }
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl        = "v1.0.0"
-      sitectl-drupal = "v1.0.0"
-      sitectl-isle   = "v1.0.0"
+      sitectl        = "v1.9.1"
+      sitectl-drupal = "v1.5.0"
+      sitectl-isle   = "v1.6.0"
     }
     error_message = "The ISLE template must select its coordinated sitectl v1 release set by default."
   }
 
   assert {
-    condition     = local.compose.branch == "v1.1.0"
-    error_message = "The ISLE preset must select the stable v1.1.0 template contract."
+    condition     = local.compose.branch == "v1.3.1"
+    error_message = "The ISLE preset must select the stable v1.3.1 template contract."
   }
 
   assert {
@@ -123,8 +125,6 @@ run "explicit_application_environment_overrides_template_defaults" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       extra_env = {
         ISLANDORA_TAG = "6.3.20"
         SITE_LABEL    = "repository"
@@ -154,8 +154,6 @@ run "explicit_package_versions_override_template_defaults" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         package_versions = {
           sitectl      = "v0.40.1"
@@ -168,7 +166,7 @@ run "explicit_package_versions_override_template_defaults" {
   assert {
     condition = local.sitectl.package_versions == {
       sitectl        = "v0.40.1"
-      sitectl-drupal = "v1.0.0"
+      sitectl-drupal = "v1.5.0"
       sitectl-isle   = "v0.19.1"
     }
     error_message = "Explicit per-package selectors must override only their matching template defaults."
@@ -187,8 +185,6 @@ run "custom_package_set_filters_template_versions" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
@@ -200,7 +196,7 @@ run "custom_package_set_filters_template_versions" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.0.0"
+      sitectl    = "v1.9.1"
       sitectl-wp = "v0.6.1"
     }
     error_message = "Template selectors for packages omitted by a custom package set must not reach the runtime."
@@ -219,8 +215,6 @@ run "explicit_core_only_package_set_disables_template_plugins" {
       project_number = "123456789"
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl"]
       }
@@ -229,7 +223,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.sitectl.packages == tolist(["sitectl"]) && local.sitectl.package_versions == {
-      sitectl = "v1.0.0"
+      sitectl = "v1.9.1"
     }
     error_message = "An explicit core-only package set must not be mistaken for an omitted template package selection."
   }

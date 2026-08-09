@@ -42,7 +42,8 @@
   'sitectl': runtime.get('sitectl', {}),
   'docker': runtime.get('docker', {}),
   'managed_runtime': runtime.get('managed_runtime', {}),
-  'vault': runtime.get('vault', {})
+  'vault': runtime.get('vault', {}),
+  'disaster_recovery': runtime.get('disaster_recovery', {})
 } %}
 {% for section_name, section_value in runtime_sections.items() %}
 {% if section_value is not mapping %}
@@ -54,6 +55,7 @@
 {% set docker = runtime_sections.docker if runtime_sections.docker is mapping else {} %}
 {% set managed = runtime_sections.managed_runtime if runtime_sections.managed_runtime is mapping else {} %}
 {% set vault = runtime_sections.vault if runtime_sections.vault is mapping else {} %}
+{% set disaster_recovery = runtime_sections.disaster_recovery if runtime_sections.disaster_recovery is mapping else {} %}
 {% set raw_rollout_service = runtime.get('rollout', {}) %}
 {% if raw_rollout_service is mapping %}
 {% set rollout_service = raw_rollout_service %}
@@ -115,6 +117,11 @@
 {% set reload_systemd = cc.get('reload_systemd', True) %}
 {% set run_bootstrap = cc.get('run_bootstrap', True) %}
 {% set force_bootstrap = cc.get('force_bootstrap', False) %}
+{% set bootstrap_wait_seconds = cc.get('bootstrap_wait_seconds', 10800) %}
+{% if bootstrap_wait_seconds is boolean or bootstrap_wait_seconds is not number or bootstrap_wait_seconds != bootstrap_wait_seconds | int or bootstrap_wait_seconds < 1 or bootstrap_wait_seconds > 43200 %}
+{% set ignored = invalid_runtime_inputs.append('bootstrap_wait_seconds must be a whole number from 1 through 43200') %}
+{% set bootstrap_wait_seconds = 10800 %}
+{% endif %}
 {% set raw_template_name = cc.get('template', '') %}
 {% if raw_template_name is string %}
 {% set template_name = raw_template_name | lower | trim %}
@@ -140,6 +147,14 @@
 {% endif %}
 {% if vault.get('agent_enabled', False) %}
 {% set ignored = invalid_runtime_inputs.append('Vault Agent is currently supported only by Terraform providers; set vault.agent_enabled=false for Salt') %}
+{% endif %}
+{% set offhost_backup_required = disaster_recovery.get('required', False) %}
+{% set offhost_backup_driver = disaster_recovery.get('driver_path', '/etc/cloud-compose/libexec/offhost-backup-driver') %}
+{% if offhost_backup_required is not boolean %}
+{% set ignored = invalid_runtime_inputs.append('runtime.disaster_recovery.required must be a boolean') %}
+{% endif %}
+{% if offhost_backup_driver is not string or not (offhost_backup_driver is match('^/[A-Za-z0-9._/+:-]+$')) or '//' in offhost_backup_driver or '/./' in offhost_backup_driver or '/../' in offhost_backup_driver or offhost_backup_driver.endswith('/.') or offhost_backup_driver.endswith('/..') %}
+{% set ignored = invalid_runtime_inputs.append('runtime.disaster_recovery.driver_path must be a safe absolute path without whitespace or dot segments') %}
 {% endif %}
 {% set rollout_enabled = rollout_service.get('enabled', False) %}
 {% set rollout_port = rollout_service.get('port', 8081) %}
@@ -199,21 +214,16 @@
   'upload_timeout': ''
 } %}
 {% set default_init = [
-  'sitectl config set-context "${SITECTL_CONTEXT_NAME}" --type local --project-dir "${DOCKER_COMPOSE_DIR}" --site "${CLOUD_COMPOSE_INSTANCE_NAME}" --plugin "${SITECTL_PLUGIN}" --environment "${SITECTL_ENVIRONMENT}" --project-name "${CLOUD_COMPOSE_INSTANCE_NAME}" --compose-project-name "${COMPOSE_PROJECT_NAME}" --docker-socket /var/run/docker.sock --env-file .env --default'
+  '/home/cloud-compose/default-lifecycle.sh init'
 ] %}
 {% set default_up = [
-  'sitectl compose --context "${SITECTL_CONTEXT_NAME}" up -d --remove-orphans',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
-  'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
+  '/home/cloud-compose/default-lifecycle.sh up'
 ] %}
 {% set default_down = [
-  'sitectl compose --context "${SITECTL_CONTEXT_NAME}" down'
+  '/home/cloud-compose/default-lifecycle.sh down'
 ] %}
 {% set default_rollout = [
-  'TARGET_REF="${GIT_REF:-${GIT_BRANCH:-}}"',
-  'if [ -n "$TARGET_REF" ]; then sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --ref "$TARGET_REF"; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --skip-git; fi',
-  'sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist',
-  'if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi'
+  '/home/cloud-compose/default-lifecycle.sh rollout'
 ] %}
 {% set lifecycle_defaults = {
   'init': default_init,
@@ -464,6 +474,8 @@
   'CLOUD_COMPOSE_INSTANCE_NAME': name,
   'CLOUD_COMPOSE_APPS': compose_projects.keys() | list | join(' '),
   'CLOUD_COMPOSE_PRIMARY_APP': primary_key,
+  'CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED': 'true' if offhost_backup_required is sameas true else 'false',
+  'CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER': offhost_backup_driver,
   'COMPOSE_PROJECTS_FILE': home ~ '/compose-projects.json',
   'COMPOSE_PROJECT_NAME': primary_project.get('compose_project_name', compose_project_name),
   'COMPOSE_BIND_PORT': primary_project.get('ingress_port', ingress_port),
@@ -646,6 +658,21 @@ cloud-compose-rootfs:
     - require:
       - user: cloud-compose-user
 
+cloud-compose-privileged-program-directories:
+  file.directory:
+    - names:
+      - {{ home | json }}
+      - /etc/cloud-compose
+      - /etc/cloud-compose/awk
+      - /etc/cloud-compose/bin
+      - /etc/cloud-compose/jq
+      - /etc/cloud-compose/libexec
+    - user: root
+    - group: root
+    - mode: '0755'
+    - require:
+      - file: cloud-compose-rootfs
+
 cloud-compose-lifecycle-lock:
   cmd.run:
     - name: systemd-tmpfiles --create /etc/tmpfiles.d/cloud-compose.conf
@@ -661,25 +688,47 @@ cloud-compose-lifecycle-lock:
 
 cloud-compose-rootfs-script-modes:
   cmd.run:
-    - name: find /home/cloud-compose -type f -name '*.sh' -exec chmod 0755 {} +
-    - unless: test -z "$(find /home/cloud-compose -type f -name '*.sh' ! -perm -u=x -print -quit)"
+    - name: find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' -exec chown root:root {} + -exec chmod 0755 {} +
+    - unless: test -z "$(find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' \( ! -user root -o ! -group root -o ! -perm 0755 \) -print -quit)"
     - require:
       - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
+cloud-compose-checked-program-resolver:
+  file.managed:
+    - name: /etc/cloud-compose/libexec/checked-programs.bash
+    - source: salt://rootfs/etc/cloud-compose/libexec/checked-programs.bash
+    - user: root
+    - group: root
+    - mode: '0644'
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
+cloud-compose-rootfs-jq-modes:
+  cmd.run:
+    - name: find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' -exec chown root:root {} + -exec chmod 0644 {} +
+    - unless: test -z "$(find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
+
+cloud-compose-rootfs-awk-modes:
+  cmd.run:
+    - name: find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' -exec chown root:root {} + -exec chmod 0644 {} +
+    - unless: test -z "$(find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
+    - require:
+      - file: cloud-compose-rootfs
+      - file: cloud-compose-privileged-program-directories
 
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
 cloud-compose-lifecycle-{{ lifecycle }}:
   file.managed:
     - name: {{ (home ~ '/' ~ lifecycle) | json }}
+    - source: salt://rootfs/home/cloud-compose/lifecycle-entrypoint.sh
     - user: root
     - group: {{ group | json }}
     - mode: '0750'
-    - contents: |
-        #!/usr/bin/env bash
-
-        set -eou pipefail
-
-        source /home/cloud-compose/profile.sh
-        exec bash /home/cloud-compose/compose-dispatch.sh "{{ lifecycle }}"
     - require:
       - file: cloud-compose-rootfs
 {% endfor %}
@@ -741,6 +790,24 @@ cloud-compose-managed-runtime-artifacts:
     - require:
       - file: cloud-compose-rootfs
 
+{% if run_bootstrap is sameas true %}
+cloud-compose-bootstrap-paths-hardened:
+  cmd.run:
+    - name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
+    - require:
+      - file: cloud-compose-env
+      - file: cloud-compose-application-env
+      - file: cloud-compose-project-manifest
+      - file: cloud-compose-managed-runtime-artifacts
+      - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
+      - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+      - file: cloud-compose-lifecycle-{{ lifecycle }}
+{% endfor %}
+{% endif %}
+
 {% if reload_systemd %}
 cloud-compose-systemd-reload:
   module.run:
@@ -752,10 +819,22 @@ cloud-compose-systemd-reload:
 {% if rollout_enabled is sameas true %}
 cloud-compose-rollout-service:
   cmd.run:
-    - name: bash /home/cloud-compose/deploy-rollout.sh
+    - name: bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh
     - require:
       - file: cloud-compose-env
+      - file: cloud-compose-application-env
+      - file: cloud-compose-project-manifest
+      - file: cloud-compose-managed-runtime-artifacts
       - file: cloud-compose-rootfs
+      - cmd: cloud-compose-lifecycle-lock
+      - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
+      - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
+      - file: cloud-compose-lifecycle-init
+      - file: cloud-compose-lifecycle-up
+      - file: cloud-compose-lifecycle-down
+      - file: cloud-compose-lifecycle-rollout
 {% if reload_systemd %}
       - module: cloud-compose-systemd-reload
 {% endif %}
@@ -764,7 +843,7 @@ cloud-compose-rollout-service:
 {% if force_bootstrap is sameas true %}
 cloud-compose-clear-bootstrap-marker:
   file.absent:
-    - name: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
+    - name: /var/lib/cloud-compose/bootstrap-complete
     - require:
       - cmd: cloud-compose-host-inputs-valid
 {% endif %}
@@ -772,8 +851,10 @@ cloud-compose-clear-bootstrap-marker:
 {% if run_bootstrap is sameas true %}
 cloud-compose-bootstrap:
   cmd.run:
-    - name: bash {{ (home ~ '/start-cloud-compose-bootstrap.sh') | json }}
-    - creates: {{ (home ~ '/.cloud-compose-bootstrap-complete') | json }}
+    - name: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+    - env:
+        CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS: {{ (bootstrap_wait_seconds | string) | json }}
+    - unless: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
     - require:
 {% if install_packages %}
       - service: cloud-compose-docker
@@ -782,6 +863,17 @@ cloud-compose-bootstrap:
       - file: cloud-compose-application-env
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
+      - cmd: cloud-compose-rootfs-script-modes
+      - file: cloud-compose-checked-program-resolver
+      - cmd: cloud-compose-rootfs-jq-modes
+      - cmd: cloud-compose-rootfs-awk-modes
+      - cmd: cloud-compose-bootstrap-paths-hardened
+{% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
+      - file: cloud-compose-lifecycle-{{ lifecycle }}
+{% endfor %}
+{% if force_bootstrap is sameas true %}
+      - file: cloud-compose-clear-bootstrap-marker
+{% endif %}
 {% if compose_projects %}
       - file: cloud-compose-project-dirs
 {% endif %}

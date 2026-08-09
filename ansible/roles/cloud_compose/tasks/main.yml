@@ -33,7 +33,13 @@
       - cloud_compose_managed_runtime_enabled is boolean
       - cloud_compose_internal_services_enabled is boolean
       - cloud_compose_internal_services_auto_update is boolean
-    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, and cloud_compose_dedicated_host_acknowledged=true before it can own Docker and host runtime configuration."
+      - cloud_compose_bootstrap_wait_seconds is number
+      - cloud_compose_bootstrap_wait_seconds is not boolean
+      - (cloud_compose_bootstrap_wait_seconds | int) == cloud_compose_bootstrap_wait_seconds
+      - (cloud_compose_bootstrap_wait_seconds | int) >= 1
+      - (cloud_compose_bootstrap_wait_seconds | int) <= 43200
+      - (cloud_compose_bootstrap_timeout | int) > (cloud_compose_bootstrap_wait_seconds | int)
+    fail_msg: "The adapter requires an onprem provider, a runtime/extra_env map, a name matching ^[a-z][a-z0-9-]*$, cloud_compose_dedicated_host_acknowledged=true, and a bootstrap async timeout longer than the 1-43200 second service wait."
 
 - name: Require safe cloud-compose environment entries
   ansible.builtin.assert:
@@ -55,6 +61,7 @@
     _cc_sitectl: "{{ cloud_compose_runtime.sitectl | default({}) }}"
     _cc_managed: "{{ cloud_compose_runtime.managed_runtime | default({}) }}"
     _cc_vault: "{{ cloud_compose_runtime.vault | default({}) }}"
+    _cc_disaster_recovery: "{{ cloud_compose_runtime.disaster_recovery | default({}) }}"
     _cc_rollout_service: "{{ cloud_compose_default_rollout_service | combine(cloud_compose_runtime.rollout | default({}), recursive=True) }}"
     _cc_extra_env: "{{ cloud_compose_runtime.extra_env | default(cloud_compose_extra_env) }}"
 
@@ -65,6 +72,7 @@
       - _cc_sitectl is mapping
       - _cc_managed is mapping
       - _cc_vault is mapping
+      - _cc_disaster_recovery is mapping
       - (cloud_compose_runtime.rollout | default({})) is mapping
       - (_cc_compose.ingress | default({})) is mapping
       - (_cc_compose.projects | default({})) is mapping
@@ -79,7 +87,12 @@
       - (_cc_managed.internal_services_auto_update | default(cloud_compose_internal_services_auto_update)) is boolean
       - (_cc_vault.agent_enabled | default(false)) is boolean
       - not (_cc_vault.agent_enabled | default(false))
-    fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, and Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible)."
+      - (_cc_disaster_recovery.required | default(false)) is boolean
+      - (_cc_disaster_recovery.driver_path | default('/etc/cloud-compose/libexec/offhost-backup-driver')) is string
+      - (_cc_disaster_recovery.driver_path | default('/etc/cloud-compose/libexec/offhost-backup-driver')) is match('^/[A-Za-z0-9._/+:-]+$')
+      - "'//' not in (_cc_disaster_recovery.driver_path | default('/etc/cloud-compose/libexec/offhost-backup-driver'))"
+      - (_cc_disaster_recovery.driver_path | default('/etc/cloud-compose/libexec/offhost-backup-driver') | regex_search('(^|/)\\.\\.?(/|$)')) is none
+    fail_msg: "runtime sections must be maps, runtime feature switches must be booleans, template must name a supported app, Vault Agent is currently supported only by Terraform providers (set vault.agent_enabled=false for Ansible), and disaster_recovery.driver_path must be a safe absolute path without whitespace or dot segments."
 
 - name: Require safe rollout service settings
   ansible.builtin.assert:
@@ -136,6 +149,8 @@
     _cc_down_commands: "{{ _cc_compose.down | default(cloud_compose_default_down) }}"
     _cc_rollout_commands: "{{ _cc_compose.rollout | default(cloud_compose_default_rollout) }}"
     _cc_internal_services_enabled: "{{ _cc_managed.internal_services_enabled | default(cloud_compose_internal_services_enabled) }}"
+    _cc_offhost_backup_required: "{{ _cc_disaster_recovery.required | default(false) }}"
+    _cc_offhost_backup_driver: "{{ _cc_disaster_recovery.driver_path | default('/etc/cloud-compose/libexec/offhost-backup-driver') }}"
 
 - name: Reject GCP-only internal services on an on-prem host
   ansible.builtin.assert:
@@ -398,6 +413,8 @@
       CLOUD_COMPOSE_INSTANCE_NAME: "{{ cloud_compose_name }}"
       CLOUD_COMPOSE_APPS: "{{ _cc_compose_projects.keys() | list | join(' ') }}"
       CLOUD_COMPOSE_PRIMARY_APP: "{{ _cc_primary_key }}"
+      CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED: "{{ _cc_offhost_backup_required | ternary('true', 'false') }}"
+      CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER: "{{ _cc_offhost_backup_driver }}"
       COMPOSE_PROJECTS_FILE: "{{ cloud_compose_home }}/compose-projects.json"
       COMPOSE_PROJECT_NAME: "{{ _cc_primary_project.compose_project_name }}"
       COMPOSE_BIND_PORT: "{{ _cc_primary_project.ingress_port }}"
@@ -503,6 +520,21 @@
     dest: /
     mode: preserve
 
+- name: Secure Cloud Compose privileged program directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ cloud_compose_home }}"
+    - /etc/cloud-compose
+    - /etc/cloud-compose/awk
+    - /etc/cloud-compose/bin
+    - /etc/cloud-compose/jq
+    - /etc/cloud-compose/libexec
+
 - name: Inspect cloud-compose lifecycle lock directory
   ansible.builtin.stat:
     path: /run/lock/cloud-compose
@@ -532,33 +564,73 @@
       (cloud_compose_lifecycle_lock_file.stat.mode | default('')) == '0660'
     )
 
-- name: Find cloud-compose shell scripts
+- name: Find top-level cloud-compose control scripts
   ansible.builtin.find:
-    paths: "{{ cloud_compose_home }}"
+    paths:
+      - "{{ cloud_compose_home }}"
+      - /etc/cloud-compose/bin
+      - /etc/cloud-compose/libexec
     patterns: "*.sh"
-    recurse: true
+    recurse: false
     file_type: file
   register: cloud_compose_shell_scripts
 
-- name: Make cloud-compose shell scripts executable
+- name: Make cloud-compose control scripts root-owned and executable
   ansible.builtin.file:
     path: "{{ item.path }}"
+    owner: root
+    group: root
     mode: "0755"
   loop: "{{ cloud_compose_shell_scripts.files }}"
 
+- name: Make checked Cloud Compose program resolver root-controlled
+  ansible.builtin.file:
+    path: /etc/cloud-compose/libexec/checked-programs.bash
+    state: file
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Find checked-in Cloud Compose jq programs
+  ansible.builtin.find:
+    paths: /etc/cloud-compose/jq
+    patterns: "*.jq"
+    recurse: false
+    file_type: file
+  register: cloud_compose_jq_programs
+
+- name: Make checked-in Cloud Compose jq programs root-controlled
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ cloud_compose_jq_programs.files }}"
+
+- name: Find checked-in Cloud Compose awk programs
+  ansible.builtin.find:
+    paths: /etc/cloud-compose/awk
+    patterns: "*.awk"
+    recurse: false
+    file_type: file
+  register: cloud_compose_awk_programs
+
+- name: Make checked-in Cloud Compose awk programs root-controlled
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ cloud_compose_awk_programs.files }}"
+
 - name: Write cloud-compose lifecycle dispatchers
   ansible.builtin.copy:
+    src: /home/cloud-compose/lifecycle-entrypoint.sh
     dest: "{{ cloud_compose_home }}/{{ item }}"
+    remote_src: true
     owner: root
     group: "{{ cloud_compose_group }}"
     mode: "0750"
-    content: |
-      #!/usr/bin/env bash
-
-      set -eou pipefail
-
-      source /home/cloud-compose/profile.sh
-      exec bash /home/cloud-compose/compose-dispatch.sh "{{ item }}"
   loop:
     - init
     - up
@@ -599,6 +671,11 @@
     mode: "0640"
   no_log: true
 
+- name: Harden trusted cloud-compose bootstrap paths
+  ansible.builtin.command:
+    cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
+  when: cloud_compose_run_bootstrap | bool
+
 - name: Reload systemd units
   ansible.builtin.systemd:
     daemon_reload: true
@@ -606,19 +683,30 @@
 
 - name: Install and start authenticated rollout service
   ansible.builtin.command:
-    cmd: bash "{{ cloud_compose_home }}/deploy-rollout.sh"
+    cmd: bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh
   when: _cc_rollout_service.enabled | bool
 
 - name: Clear cloud-compose bootstrap marker
   ansible.builtin.file:
-    path: "{{ cloud_compose_home }}/.cloud-compose-bootstrap-complete"
+    path: /var/lib/cloud-compose/bootstrap-complete
     state: absent
   when: cloud_compose_force_bootstrap | bool
 
+- name: Inspect validated cloud-compose bootstrap readiness
+  ansible.builtin.command:
+    cmd: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
+  register: cloud_compose_bootstrap_readiness
+  changed_when: false
+  failed_when: false
+  when: cloud_compose_run_bootstrap | bool
+
 - name: Bootstrap cloud-compose runtime
   ansible.builtin.command:
-    cmd: bash "{{ cloud_compose_home }}/start-cloud-compose-bootstrap.sh"
-    creates: "{{ cloud_compose_home }}/.cloud-compose-bootstrap-complete"
+    cmd: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
   async: "{{ cloud_compose_bootstrap_timeout }}"
   poll: "{{ cloud_compose_bootstrap_poll_interval }}"
-  when: cloud_compose_run_bootstrap | bool
+  environment:
+    CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS: "{{ cloud_compose_bootstrap_wait_seconds | int }}"
+  when:
+    - cloud_compose_run_bootstrap | bool
+    - (cloud_compose_bootstrap_readiness.rc | default(1)) != 0

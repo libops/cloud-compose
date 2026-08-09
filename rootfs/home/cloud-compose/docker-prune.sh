@@ -2,8 +2,27 @@
 
 set -euo pipefail
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-profile_path="${CLOUD_COMPOSE_PROFILE_PATH:-$script_dir/profile.sh}"
+_cc_docker_prune_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_docker_prune_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_docker_prune_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_docker_prune_source _cc_docker_prune_dir _cc_docker_prune_installed_home
+if [[ -n "$_cc_docker_prune_installed_home" &&
+  ( "$_cc_docker_prune_installed_home" == "/" ||
+    "$_cc_docker_prune_source" == "${_cc_docker_prune_installed_home%/}/"* ) ]]; then
+  _cc_docker_prune_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+  _cc_docker_prune_checked_programs="$_cc_docker_prune_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_docker_prune_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_docker_prune_checked_programs"
+cloud_compose_bind_source_program \
+  "$_cc_docker_prune_source" \
+  CLOUD_COMPOSE_PROFILE_PATH \
+  /home/cloud-compose/profile.sh \
+  "$_cc_docker_prune_dir/profile.sh"
+profile_path="$CLOUD_COMPOSE_PROFILE_PATH"
+readonly profile_path
 
 # shellcheck disable=SC1090
 source "$profile_path"

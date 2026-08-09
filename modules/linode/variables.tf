@@ -88,7 +88,14 @@ variable "runtime" {
     rootfs                = optional(string, "")
     rootfs_archive_url    = optional(string, "")
     rootfs_archive_sha256 = optional(string, "")
-    users                 = optional(map(list(string)), {})
+    # Internal hosted-smoke escape hatch. Public provider entrypoints must not expose it.
+    rootfs_test_source_archive_prefix = optional(string, "")
+    users                             = optional(map(list(string)), {})
+
+    disaster_recovery = optional(object({
+      required    = optional(bool, false)
+      driver_path = optional(string, "/etc/cloud-compose/libexec/offhost-backup-driver")
+    }), {})
 
     compose = optional(object({
       primary      = optional(string, "")
@@ -196,6 +203,15 @@ variable "runtime" {
       (trimspace(var.runtime.rootfs_archive_sha256) == "" || can(regex("^[0-9a-fA-F]{64}$", trimspace(var.runtime.rootfs_archive_sha256))))
     )
     error_message = "runtime.rootfs_archive_url and a 64-character runtime.rootfs_archive_sha256 must be supplied together."
+  }
+
+  validation {
+    condition = (
+      can(regex("^/[A-Za-z0-9._/+:-]+$", var.runtime.disaster_recovery.driver_path)) &&
+      !strcontains(var.runtime.disaster_recovery.driver_path, "//") &&
+      length(regexall("(^|/)\\.\\.?(/|$)", var.runtime.disaster_recovery.driver_path)) == 0
+    )
+    error_message = "runtime.disaster_recovery.driver_path must be a safe absolute path without whitespace or dot segments."
   }
 
   validation {

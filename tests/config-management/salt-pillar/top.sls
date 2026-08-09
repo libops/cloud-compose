@@ -29,6 +29,8 @@ base:
     - invalid-template
   'invalid-vault':
     - invalid-vault
+  'invalid-disaster-recovery':
+    - invalid-disaster-recovery
   'invalid-package':
     - invalid-package
   'invalid-host-ack':

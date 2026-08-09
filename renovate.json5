@@ -6,6 +6,32 @@
   customManagers: [
     {
       customType: 'regex',
+      description: 'Propose reviewed sitectl package promotions for application presets',
+      managerFilePatterns: [
+        '/^templates/apps\.json$/',
+      ],
+      matchStrings: [
+        '"(?<depName>sitectl(?:-[a-z0-9-]+)?)"\\s*:\\s*"(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"',
+      ],
+      datasourceTemplate: 'github-releases',
+      packageNameTemplate: 'libops/{{{depName}}}',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      description: 'Propose reviewed Compose-template promotions for application presets',
+      managerFilePatterns: [
+        '/^templates/apps\.json$/',
+      ],
+      matchStrings: [
+        '"repo"\\s*:\\s*"https://github\\.com/libops/(?<depName>[a-z0-9-]+)(?:\\.git)?"\\s*,\\s*"branch"\\s*:\\s*"(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"',
+      ],
+      datasourceTemplate: 'github-tags',
+      packageNameTemplate: 'libops/{{{depName}}}',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
       description: 'Update Docker Compose and Buildx Terraform defaults',
       managerFilePatterns: [
         '/(^|/)variables\\.tf$/',

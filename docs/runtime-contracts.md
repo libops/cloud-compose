@@ -138,16 +138,29 @@ remote branch moves. The deployed commit for every app is recorded at
 `/home/cloud-compose/state/<app>.deployed-head`, including branch/tag
 deployments, so operators can compare desired and observed source state.
 
+`sitectl` component reconciliation can derive tracked runtime configuration
+from `.libops/site.yaml`. After a successful initialization or rollout,
+cloud-compose records the exact binary Git-diff fingerprint at
+`/home/cloud-compose/state/<app>.managed-diff`. Service starts accept that
+derived state only while its fingerprint is unchanged. A source update or
+rollout restores the committed tree only after the current diff matches the
+recorded value, then derives a new fingerprint after success. Partial
+reconciliation and operator edits still fail closed; institution-specific
+source changes must be committed in the downstream repository.
+
 Use a full commit for reproducible production rollouts. A commit pin fixes the
 repository contents but does not prove who authored them; protect the selected
 repository and review/sign commits according to your downstream governance.
 
 First boot runs through `cloud-compose-bootstrap.service`. Both that bootstrap
-and `cloud-compose.service` retry failures after 30 seconds, so a transient
-registry, Vault, or Compose failure converges without an operator restarting
-cloud-init. Application initialization is serialized by the normal lifecycle
-lock and recorded for the current boot before the app starts; a bootstrap retry
-reuses that successful initialization instead of repeating it. Durable
+and `cloud-compose.service` retry transient failures after 30 seconds, with a
+three-attempt systemd start limit. A terminal unit failure stops the caller's
+wait immediately; a five-minute heartbeat records the unit state during a long
+but healthy convergence. An operator can inspect the failure and start the
+unit again to open a new bounded retry window. Application initialization is
+serialized by the normal lifecycle lock and recorded for the current boot
+before the app starts; a bootstrap retry reuses that successful initialization
+instead of repeating it. Durable
 readiness is published only after the Compose `up` unit reaches its successful
 oneshot state. The cloud-init caller waits for that result, so configured
 post-initialization commands retain their ordering. Inspect the bounded system
@@ -156,6 +169,62 @@ with `systemctl status cloud-compose-bootstrap cloud-compose`. Bootstrap output
 uses a fixed `info` priority and has no unit-specific Fluent Bit input, so raw
 bootstrap output is not forwarded to Cloud Logging; systemd's own service
 failures remain available to the existing warning-level collector.
+Root systemd jobs enter through `/etc/cloud-compose/libexec`, validate the
+root-owned home scripts and control inputs, and only then execute their
+allowlisted `/home/cloud-compose` program. The privileged entrypoints,
+diagnostics command, and checked-in `jq` and AWK programs live below
+`/etc/cloud-compose/{libexec,bin,jq,awk}` because COS permits cloud-init to rebuild
+that stateless tree while its `/usr` filesystem is immutable. Application
+services retain their unprivileged execution model. Compose diagnostics run as
+the application account and select the verified plugin copy below the
+executable data disk explicitly; they do not fall back to the compatibility
+copy below COS's `noexec` `/home` mount.
+
+An installed script resolved below `/home/cloud-compose` always uses the fixed
+`/etc/cloud-compose/jq` and `/etc/cloud-compose/awk` programs. Environment
+overrides for those programs, the shared profile, key-rotation entrypoint, or
+any other sourced runtime helper are rejected in installed mode. Repository
+and CI fixtures may select checked programs only while the owning script resolves
+outside the installed home. Before an installed program is consumed, its
+canonical root-owned parent chain must contain no symlink or group/world-writable
+directory. The only accepted logical alias is the operating-system-owned
+`/home -> /var/home` link used by Fedora CoreOS. The program itself must be a
+root-owned, single-link, non-writable regular file. Configuration-management
+adapters make `/home/cloud-compose` root-owned immediately after copying rootfs,
+before any root execution; mutable application state remains in its explicitly
+account-owned child/data paths. A checked directory binding validates every
+direct `jq` or AWK program in that installed directory, so adding a new filter
+cannot bypass per-file ownership, link, and mode checks. Production rootfs shell
+scripts invoke `jq` and AWK only with checked `-f` program files; the static CI
+contract rejects embedded filters so review and integrity checks cannot be
+bypassed by a later one-line program.
+
+Terraform and cloud-init are transport and orchestration boundaries, not the
+home of bootstrap implementations. The GCP and provider-neutral templates
+transfer checked-in programs from `rootfs/etc/cloud-compose/libexec` and invoke
+them by path with data-only arguments. GCP packages its checked filesystem
+program in a `text/cloud-boothook` MIME part so durable mounts are validated at
+the original early, every-boot phase before cloud-config writes files or starts
+services. Archive-mode Linux user data separately transports the small current
+bootstrap driver and verifies its Terraform-rendered SHA-256 before execution;
+filesystem helpers and the rest of the runtime still come from the verified
+rootfs archive. This preserves metadata headroom without requiring an older
+rootfs archive to contain the new driver. Files destined for `/mnt/disks` are
+staged until the checked-in filesystem program has mounted and validated the
+durable disks. GCP `initcmd` and `runcmd` values are likewise written as
+root-controlled program files before they are sourced at their documented
+points in the bootstrap sequence. Keep substantive shell, Python, `jq`, and
+similar programs in reviewed files; do not interpolate them into Terraform
+heredocs, cloud-init command strings, Compose commands, or configuration-
+management task bodies. The early filesystem path stages its checked-in fstab
+AWK program from the same Terraform source or already verified rootfs archive,
+requires an unlinked root-owned mode-0600 file, and invokes it as data with
+`awk -f` before the full stateless rootfs is available.
+
+GCP compresses checked bootstrap programs before carrying them in user-data and
+enforces a 240 KiB plan-time budget. This leaves explicit headroom below the
+provider's 256 KiB metadata-item limit; larger custom inputs must use the
+verified rootfs archive path or be reduced before a VM can be replaced.
 
 ## Sitectl
 
@@ -176,12 +245,35 @@ package list before validation. Terraform, Ansible, and Salt serialize their
 resolved map as `SITECTL_PACKAGE_VERSIONS` JSON and the privileged installer
 validates it again before downloading anything. Per-project package versions
 are not supported because projects on one host share the same binaries.
+`/home/cloud-compose/bin` is reserved for generated managed-tool symlinks. They
+target the root-owned managed binary directory and normally comprise `sitectl`,
+its plugins, and the verified static GNU Make build required by Container-
+Optimized OS. During an upgrade from the former application-owned directory,
+the installer closes the directory to root and rejects any other inherited
+command or target rather than carrying an untrusted PATH entry forward.
 
 `sitectl_verify_args` remains a real argument list. The host stores it as JSON
 and appends each value through an argv-aware wrapper when a lifecycle command
 invokes `sitectl verify`; spaces in one value never become additional arguments.
 Newlines, carriage returns, and NUL bytes are rejected instead of being flattened
 into an ambiguous shell scalar.
+
+Each configured lifecycle list value names an independent checked program; it
+is not parsed as shell source. The built-in `init`, `up`, `down`, and `rollout`
+defaults each contain exactly `/home/cloud-compose/default-lifecycle.sh ACTION`,
+where `ACTION` matches the lifecycle field. A custom entry must be one
+argument-free, root-controlled program immediately below
+`/etc/cloud-compose/lifecycle.d`; pass data through the documented lifecycle
+environment. `true` and `false` remain explicit no-op and failure sentinels.
+Multi-step work, state such as local variables or traps, and any quoting belong
+inside that reviewed program file. The constrained executor invokes its argv
+without evaluating a manifest value as shell source. Custom programs retain
+direct execution. After the same root-owner, link-count, parent-directory, and
+mode checks, the built-in script is opened as
+`/bin/bash -- /home/cloud-compose/default-lifecycle.sh ACTION`; this fixed
+interpreter path keeps the built-in lifecycle usable on Container-Optimized OS,
+where `/home` is deliberately mounted `noexec`, without turning the manifest
+entry into a shell command string.
 
 ## Vault
 
@@ -328,7 +420,9 @@ release versions and the Alpine tag/digest pair; review those changes as
 supply-chain updates rather than accepting an unpinned replacement. The image
 and its network-fetched package build scripts execute only after the metadata
 firewall is installed and use the bridge network, so they cannot inherit the
-host network's root exemption.
+host network's root exemption. The build itself is a checked-in shell program
+mounted read-only into the container and invoked by path, keeping the audited
+program out of cloud-init and Docker command arguments.
 
 The GCP COS VM image name is a reviewed manual pin. Renovate has no built-in
 GCP Compute image-family datasource, and the shared LibOps preset does not add
@@ -652,18 +746,41 @@ All Terraform entrypoints, including GCP, DigitalOcean, and Linode, support the
 same verified rootfs archive contract. When `runtime.rootfs_archive_url` is
 used, it must be an HTTPS URL without whitespace and
 `runtime.rootfs_archive_sha256` is mandatory with a 64-character SHA-256
-digest. Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer,
-downloads to a temporary path, and verifies the complete file before extracting
-its `rootfs` directory. The GCP path stages
-the caller's packaged rootfs overlay and reapplies it after the archive, so
-consumer overrides still win. Use an immutable archive URL; a moving branch and
-a pinned checksum intentionally fail as soon as the branch content changes.
+digest. Terraform derives the adjacent
+`cloud-compose-rootfs.contract.sha256` URL and reads it during planning. That
+sidecar must contain exactly the canonical contract digest for the module's
+checked-in `rootfs`: every directory, file path, file byte, root ownership,
+mode, and single-link file topology. A missing, malformed, older, or otherwise
+mismatched sidecar rejects the plan before Terraform can replace a VM.
+
+Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer, downloads to
+a root-only temporary path, verifies the complete archive checksum, rejects
+links and unsupported filesystem objects, and re-verifies the same canonical
+rootfs contract before copying anything onto the host. Packaged directories are
+root-owned mode `0755`; checked `*.sh` programs are mode `0755`; other files are
+mode `0644`; regular files must have one link. The GCP path stages the caller's
+packaged rootfs overlay and reapplies it after the archive, so consumer
+overrides still win. A single checked-in archive program implements download,
+verification, and installation for every Terraform provider rather than
+duplicating provider-specific shell bodies. Use the immutable assets from the
+same release as the Terraform module. Keeping an older archive while advancing
+the module fails safely during planning and leaves the existing workload
+untouched.
+
+Each release publishes three assets:
+`cloud-compose-rootfs.tar.gz`, its archive-byte `.sha256`, and
+`cloud-compose-rootfs.contract.sha256`. The release workflow downloads the
+published assets again, validates the archive bytes and canonical tree, and
+does not complete its release gate until all three agree. Downstream catalogs
+or automation must promote a cloud-compose release only after the
+`Verify rootfs release assets` job is green.
 
 ## Backups
 
-`cloud-compose-mariadb-backup.timer` runs nightly between 9pm and 7am EST. It
-uses a fixed randomized delay so deployments spread out across that window while
-keeping a stable schedule on each VM. The timer executes:
+`cloud-compose-mariadb-backup.timer` runs the local-backup and off-host handoff
+flow nightly between 9pm and 7am EST. It uses a fixed randomized delay so
+deployments spread out across that window while keeping a stable schedule on
+each VM. The unprivileged local phase executes:
 
 ```bash
 sitectl mariadb backup --context "$SITECTL_CONTEXT_NAME" --gzip --output "$path"
@@ -684,13 +801,24 @@ service exits non-zero after attempting all of them. Dumps older than
 `MARIADB_BACKUP_RETENTION_DAYS` (14 by default) are pruned from each validated
 app directory so they cannot fill the shared data disk indefinitely.
 
-Local dumps remain on the same failure-domain disk as application data.
-Downstream operators must still define reviewed encrypted off-host retention
-and restore tests. GCP production enables crash-consistent scheduled disk
-snapshots by default; `guest_flush = false` is deliberate because the logical
-dump supplies the application-consistent recovery artifact. DigitalOcean and
-Linode boot-disk backup toggles do not include attached volumes; see the
-provider guide before claiming disaster-recovery coverage.
+Local dumps remain on the same failure-domain disk as application data and are
+never disaster recovery. Set `runtime.disaster_recovery.required = true` only
+after installing the operator-owned root driver. The root handoff runs after
+the local service, including when the daily dump already exists, and requires a
+strict atomic receipt proving encrypted off-host coverage of each app's logical
+database, checkout/bind files, named volumes, and resolved service-mount
+topology. A weekly timer requires a challenge-bound proof that the driver
+restored all three coverage classes into a disposable recovery environment,
+verified integrity, and destroyed that environment. Storage-vendor settings
+and credentials stay behind the driver and never enter Terraform, cloud-init,
+the host environment, or logs. The complete interface and receipt schemas are
+in [Disaster recovery](disaster-recovery.md).
+
+GCP production enables crash-consistent scheduled disk snapshots by default;
+`guest_flush = false` is deliberate because the logical dump supplies the
+application-consistent database artifact. DigitalOcean and Linode boot-disk
+backup toggles do not include attached volumes. None of those provider-local
+copies replace the independent driver receipt and restore proof.
 
 Terraform owns the attached data and Docker-volume disks. A normal
 `terraform destroy` deletes them; GCP production snapshots are retained, but
@@ -839,10 +967,10 @@ deploy the same
 `5058610fddc7267ace92d65a5c49713dce570ac3`; an early exact checkout bridges
 the legacy runtime's branch-only clone behavior without following a moving
 branch. Its `gcp.cloud_init.initcmd` disables both generations of the
-internal-service timer after cloud-init writes the units but before
-`/home/cloud-compose/run.sh` starts the potentially long bootstrap, so the
-disposable VM cannot suspend itself. The runner checks the units again after
-each boot.
+internal-service timer after cloud-init writes the units but before the
+root-owned `/etc/cloud-compose/libexec/run-bootstrap.sh` entrypoint
+starts the potentially long bootstrap, so the disposable VM cannot suspend
+itself. The runner checks the units again after each boot.
 Only the ephemeral runner key is authorized, and SSH is limited to that
 runner's public IPv4 `/32`.
 
@@ -902,11 +1030,19 @@ convention:
 | --- | --- | --- |
 | DigitalOcean create/test/destroy | `cloud-smoke-digitalocean` | `DIGITALOCEAN_TOKEN` |
 | Linode create/test/destroy | `cloud-smoke-linode` | `LINODE_TOKEN` |
-| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` |
+| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE`, and optional fresh-smoke overrides `GCLOUD_FRESH_REGION` and `GCLOUD_FRESH_ZONE` |
 | GCP major-version upgrade | `cloud-smoke-gcp` | the GCP values above plus `GCLOUD_NETWORK_PROJECT_ID`, `GCLOUD_NETWORK_NAME`, `GCLOUD_SUBNETWORK_NAME`, `GCLOUD_POWER_START_ROLE`, and `GCLOUD_POWER_SUSPEND_ROLE` |
 | DigitalOcean fallback deletion | `cloud-smoke-cleanup-digitalocean` | a distinct cleanup-only `DIGITALOCEAN_TOKEN` |
 | Linode fallback deletion | `cloud-smoke-cleanup-linode` | a distinct cleanup-only `LINODE_TOKEN` |
-| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` |
+| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE`, plus any `GCLOUD_FRESH_REGION` and `GCLOUD_FRESH_ZONE` overrides used by the smoke environment |
+
+When `GCLOUD_ZONE` is set, it must belong to `GCLOUD_REGION`. Those values keep
+the historical major-upgrade smoke aligned with its persistent subnet. A fresh
+smoke can use a different location by setting `GCLOUD_FRESH_REGION` and
+`GCLOUD_FRESH_ZONE`; the latter must belong to the former. Mirror both location
+pairs in `cloud-smoke-gcp` and `cloud-smoke-cleanup-gcp`. The fallback first
+sweeps the upgrade region, then also sweeps the fresh-smoke region when it is
+different, so region-scoped Cloud Run resources cannot be stranded.
 
 Configure required reviewers and prevent self-review on the three
 `cloud-smoke-*` environments. Permit only the same-repository feature branches
@@ -933,6 +1069,13 @@ trusted and provider-job checkouts set `persist-credentials: false`.
 Pull-request smoke jobs also build one binary before apply and reuse that exact
 workspace binary from their `always()` cleanup step. Shell remains responsible
 for Terraform, SSH, cloud-init, diagnostics, and host-runtime black-box checks.
+The application smoke stages its checked-in lifecycle contract in a private,
+strictly validated directory on the executable data disk, so its fake `sitectl`
+program remains executable on COS hosts whose temporary filesystems are
+`noexec`. The smoke driver opens that checked-in contract through fixed
+`/bin/bash`; the contract rejects a missing, redirected, or unreadable lifecycle
+target without using an execute-access probe that fails on COS's `noexec`
+`/home`. The contract is removed immediately after the check.
 No privileged fallback executes a pull-request binary or downloads one as an
 artifact. The fallback runs
 automatically after a failed, cancelled, or timed-out smoke workflow, including

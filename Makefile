@@ -1,4 +1,4 @@
-.PHONY: lint lint-check actionlint shell-lint runtime-config-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract sitectl-version-contract go-fmt-check go-vet go-contracts template-version-contract rollout-parity-contract rootfs-package-contract host-runtime-security cos-jq-portability-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract artifact-install-contract config-management-smoke cloud-compose-ci
+.PHONY: lint lint-check actionlint shell-lint runtime-config-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract disaster-recovery-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract sitectl-version-contract go-fmt-check go-vet go-contracts template-version-contract rollout-parity-contract rootfs-package-contract host-runtime-security inline-data-program-contract cos-jq-portability-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract artifact-install-contract config-management-smoke cloud-compose-ci
 .PHONY: terraform-fmt terraform-fmt-check terraform-validate terraform-validate-contract terraform-lint-check terraform-docs terraform-docs-check
 .PHONY: config-management-cloud-smoke config-management-cloud-smoke-ansible-drupal config-management-cloud-smoke-salt-drupal
 .PHONY: destroy-config-management-cloud-smoke destroy-config-management-cloud-smoke-ansible-drupal destroy-config-management-cloud-smoke-salt-drupal
@@ -16,9 +16,9 @@ export CLOUD_COMPOSE_CI_BIN
 GO_MODULE_FILES := $(wildcard go.mod go.sum)
 GO_SOURCES := $(shell find cmd internal -type f -name '*.go')
 
-lint: terraform-fmt actionlint shell-lint host-runtime-security cos-jq-portability-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract artifact-install-contract terraform-validate terraform-docs-check
+lint: terraform-fmt actionlint shell-lint host-runtime-security inline-data-program-contract cos-jq-portability-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract disaster-recovery-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract artifact-install-contract terraform-validate terraform-docs-check
 
-lint-check: terraform-fmt-check actionlint shell-lint host-runtime-security cos-jq-portability-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract artifact-install-contract terraform-validate terraform-docs-check
+lint-check: terraform-fmt-check actionlint shell-lint host-runtime-security inline-data-program-contract cos-jq-portability-contract application-env-contract compose-runtime-contract app-filesystem-convergence-contract backup-contract disaster-recovery-contract overlay-contract filesystem-prep-contract key-rotation-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract bootstrap-recovery-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract rootfs-package-contract artifact-install-contract terraform-validate terraform-docs-check
 
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
@@ -57,6 +57,9 @@ app-filesystem-convergence-contract:
 
 backup-contract:
 	bash ci/backup-contract.sh
+
+disaster-recovery-contract:
+	bash ci/disaster-recovery-contract.sh
 
 overlay-contract:
 	bash ci/overlay-contract.sh
@@ -101,6 +104,9 @@ rootfs-package-contract:
 
 host-runtime-security:
 	bash ci/host-runtime-security.sh
+
+inline-data-program-contract:
+	bash ci/inline-data-program-contract.sh
 
 cos-jq-portability-contract:
 	bash ci/cos-jq-portability-contract.sh

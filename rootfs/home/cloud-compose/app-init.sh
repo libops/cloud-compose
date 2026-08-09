@@ -31,5 +31,6 @@ for app in "${apps[@]}"; do
   update_compose_env COMPOSE_BIND_PORT "$COMPOSE_BIND_PORT"
   run_compose_app_lifecycle "$app" init
   configure_sitectl_app_features "$app"
+  record_compose_managed_diff "$app"
   popd >/dev/null
 done

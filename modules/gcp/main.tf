@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.0"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.6"
+    }
     time = {
       source  = "hashicorp/time"
       version = "~> 0.14"
@@ -22,6 +26,8 @@ locals {
   additional_rootfs           = var.rootfs != "" ? var.rootfs : ""
   rootfs_archive_url          = trimspace(var.rootfs_archive_url)
   rootfs_archive_sha256       = lower(trimspace(var.rootfs_archive_sha256))
+  rootfs_archive_asset_url    = split("#", split("?", local.rootfs_archive_url)[0])[0]
+  rootfs_contract_sidecar_url = local.rootfs_archive_url == "" ? "" : replace(local.rootfs_archive_asset_url, "/[^/]+$/", "cloud-compose-rootfs.contract.sha256")
   rootfs_overlay_staging_path = "/var/lib/cloud-compose/rootfs-overlay"
   project_number              = tostring(data.google_project.service.number)
 
@@ -210,8 +216,21 @@ locals {
   selected_subnetwork_project_matches = local.network_project_id == local.subnetwork_project_id
   selected_subnetwork_region_matches  = local.subnetwork_region == var.region
 
-  # Archive mode fetches the packaged base rootfs at boot. A consumer-provided
-  # rootfs is staged separately and applied after extraction so it still wins.
+  # Archive mode fetches the packaged base rootfs at boot. A content contract
+  # binds that archive to this exact module source before anything is copied.
+  rootfs_contract_files = sort(tolist(fileset(local.rootFs, "**")))
+  rootfs_contract_directories = sort(distinct(flatten([
+    for file in local.rootfs_contract_files : dirname(file) == "." ? [] : [
+      for index in range(length(split("/", dirname(file)))) :
+      join("/", slice(split("/", dirname(file)), 0, index + 1))
+    ]
+  ])))
+  rootfs_contract_sha256 = sha256(join("", [
+    for entry in concat(
+      [for directory in local.rootfs_contract_directories : "d\t0:0:755\t${directory}\n"],
+      [for file in local.rootfs_contract_files : "f\t${filesha256("${local.rootFs}/${file}")}\t0:0:${endswith(file, ".sh") ? "755" : "644"}\t${file}\n"],
+    ) : entry
+  ]))
   base_files = local.rootfs_archive_url == "" ? fileset(local.rootFs, "**") : []
 
   # Get files from additional rootfs if path is provided
@@ -227,16 +246,21 @@ locals {
     },
     {
       for file in local.additional_files : file => {
-        destination = local.rootfs_archive_url == "" ? "/${file}" : "${local.rootfs_overlay_staging_path}/${file}"
+        destination = local.rootfs_archive_url != "" ? "${local.rootfs_overlay_staging_path}/${file}" : "/${file}"
         source      = "${local.additional_rootfs}/${file}"
       }
     }
   )
+  rootfs_file_permissions = {
+    for file in setunion(local.base_files, local.additional_files) :
+    file => endswith(file, ".sh") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
+  }
 
   write_files_content = join("\n", [
     for file, config in local.all_files : <<-EOT
       - path: ${jsonencode(config.destination)}
-        permissions: ${jsonencode(endswith(file, ".sh") ? "0755" : "0644")}
+        owner: "root:root"
+        permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(config.source)))}
 EOT
@@ -244,45 +268,41 @@ EOT
   docker_compose_scripts = join("\n", [
     for name in ["init", "up", "down", "rollout"] : <<-EOT
       - path: "/home/cloud-compose/${name}"
+        owner: "root:root"
         permissions: "0755"
         encoding: gzip+base64
-        content: ${jsonencode(base64gzip(<<-EOS
-          #!/usr/bin/env bash
-
-          set -eou pipefail
-
-          source /home/cloud-compose/profile.sh
-          exec bash /home/cloud-compose/compose-dispatch.sh "${name}"
-        EOS
-))}
+        content: ${base64gzip(file("${local.rootFs}/home/cloud-compose/lifecycle-entrypoint.sh"))}
 EOT
-])
-compose_projects_file = <<-EOT
+  ])
+  compose_projects_file = <<-EOT
     - path: "/home/cloud-compose/compose-projects.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(local.validated_compose_projects)))}
 EOT
-managed_runtime_artifact_lines = [
-  for artifact in module.managed_artifacts.artifacts : join("\t", [
-    artifact.name,
-    artifact.url,
-    artifact.sha256,
-    artifact.path,
-    try(artifact.mode, "0755"),
-    try(artifact.owner, "root"),
-    try(artifact.group, "root"),
-    try(artifact.restart, ""),
-  ])
-]
-managed_runtime_artifacts_file = <<-EOT
+  managed_runtime_artifact_lines = [
+    for artifact in module.managed_artifacts.artifacts : join("\t", [
+      artifact.name,
+      artifact.url,
+      artifact.sha256,
+      artifact.path,
+      try(artifact.mode, "0755"),
+      try(artifact.owner, "root"),
+      try(artifact.group, "root"),
+      try(artifact.restart, ""),
+    ])
+  ]
+  managed_runtime_artifacts_content = length(local.managed_runtime_artifact_lines) == 0 ? "\n" : "${join("\n", local.managed_runtime_artifact_lines)}\n"
+  managed_runtime_artifacts_file    = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
-      content: ${jsonencode(base64gzip(join("\n", local.managed_runtime_artifact_lines)))}
+      content: ${jsonencode(base64gzip(local.managed_runtime_artifacts_content))}
 EOT
-vault_agent_template_stanzas = join("\n", [
-  for template in var.vault_agent_templates : <<-EOT
+  vault_agent_template_stanzas = join("\n", [
+    for template in var.vault_agent_templates : <<-EOT
       template {
         destination = ${jsonencode(template.destination)}
         contents = <<EOH
@@ -294,8 +314,8 @@ vault_agent_template_stanzas = join("\n", [
       %{endif}
       }
     EOT
-])
-vault_agent_auto_auth_gcp  = <<-EOT
+  ])
+  vault_agent_auto_auth_gcp  = <<-EOT
     auto_auth {
       method "gcp" {
         mount_path = ${jsonencode(var.vault_gcp_auth_mount_path)}
@@ -314,14 +334,14 @@ vault_agent_auto_auth_gcp  = <<-EOT
       }
     }
   EOT
-vault_agent_auto_auth      = var.vault_auth_method == "gcp-iam" ? local.vault_agent_auto_auth_gcp : trimspace(var.vault_agent_additional_config)
-vault_agent_env_content    = <<-EOT
+  vault_agent_auto_auth      = var.vault_auth_method == "gcp-iam" ? local.vault_agent_auto_auth_gcp : trimspace(var.vault_agent_additional_config)
+  vault_agent_env_content    = <<-EOT
     VAULT_ADDR=${trimspace(var.vault_addr)}
     VAULT_NAMESPACE=${trimspace(var.vault_namespace)}
     VAULT_ROLE=${trimspace(var.vault_role)}
     VAULT_AUTH_METHOD=${var.vault_auth_method}
   EOT
-vault_agent_config_content = <<-EOT
+  vault_agent_config_content = <<-EOT
     vault {
       address = ${jsonencode(trimspace(var.vault_addr))}
 %{if trimspace(var.vault_namespace) != ""}
@@ -333,7 +353,7 @@ vault_agent_config_content = <<-EOT
 
     ${indent(4, local.vault_agent_template_stanzas)}
   EOT
-vault_agent_files_raw      = <<-EOT
+  vault_agent_files_raw      = <<-EOT
     - path: "/etc/default/vault-agent"
       permissions: "0600"
       encoding: gzip+base64
@@ -343,167 +363,167 @@ vault_agent_files_raw      = <<-EOT
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.vault_agent_config_content))}
   EOT
-vault_agent_files          = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? local.vault_agent_files_raw : ""
-rollout_env = var.rollout_enabled ? {
-  ROLLOUT_ENABLED         = "true"
-  ROLLOUT_DOWNLOAD_URL    = trimspace(var.rollout_release_url)
-  ROLLOUT_DOWNLOAD_SHA256 = trimspace(var.rollout_release_sha256)
-  ROLLOUT_PORT            = tostring(var.rollout_port)
-  ROLLOUT_JWKS_URI        = trimspace(var.rollout_jwks_uri)
-  ROLLOUT_JWT_AUD         = trimspace(var.rollout_jwt_audience)
-  ROLLOUT_CUSTOM_CLAIMS   = trimspace(var.rollout_custom_claims)
-  ROLLOUT_CMD             = "/bin/bash"
-  ROLLOUT_ARGS            = "/home/cloud-compose/rollout"
-  ROLLOUT_LOCK_FILE       = "/mnt/disks/data/rollout.lock"
-  } : {
-  ROLLOUT_ENABLED = "false"
-}
-fresh_filesystem_env = {
-  CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}"
-}
-host_env = merge({
-  HOME                                 = "/home/cloud-compose"
-  GCP_PROJECT                          = var.project_id
-  GCP_PROJECT_NUMBER                   = local.project_number
-  GCP_INSTANCE_NAME                    = var.name
-  CLOUD_COMPOSE_INSTANCE_NAME          = var.name
-  GCP_REGION                           = var.region
-  GCP_ZONE                             = var.zone
-  CLOUD_COMPOSE_PROVIDER               = "gcp"
-  CLOUD_COMPOSE_APPS                   = join(" ", keys(local.compose_projects))
-  CLOUD_COMPOSE_PRIMARY_APP            = local.primary_compose_project_key
-  COMPOSE_PROJECTS_FILE                = "/home/cloud-compose/compose-projects.json"
-  COMPOSE_PROJECT_NAME                 = local.primary_compose_project.compose_project_name
-  COMPOSE_BIND_PORT                    = tostring(local.primary_compose_project.ingress_port)
-  DOCKER_COMPOSE_DIR                   = local.primary_compose_project.project_dir
-  DOCKER_COMPOSE_REPO                  = local.primary_compose_project.docker_compose_repo
-  DOCKER_COMPOSE_BRANCH                = local.primary_compose_project.docker_compose_branch
-  DOCKER_COMPOSE_VERSION               = var.docker_compose_version
-  DOCKER_BUILDX_VERSION                = var.docker_buildx_version
-  DOCKER_VOLUME_OVERLAYS               = join(" ", var.volume_names)
-  SITECTL_PACKAGES                     = join(" ", module.sitectl_runtime.packages)
-  SITECTL_VERSION                      = var.sitectl_version
-  SITECTL_PACKAGE_VERSIONS             = jsonencode(module.sitectl_runtime.package_versions)
-  SITECTL_CONTEXT_NAME                 = local.primary_compose_project.sitectl_context_name
-  SITECTL_PLUGIN                       = local.primary_compose_project.sitectl_plugin
-  SITECTL_ENVIRONMENT                  = local.primary_compose_project.sitectl_environment
-  PRODUCTION                           = tostring(var.production)
-  SITECTL_VERIFY_ARGS                  = join(" ", local.primary_compose_project.sitectl_verify_args)
-  GCP_APP_SERVICE_ACCOUNT_EMAIL        = local.app_service_account_email
-  GCP_APP_SERVICE_ACCOUNT_MANAGED      = tostring(local.app_service_account_managed)
-  GCP_APP_CREDENTIALS_ENABLED          = tostring(local.app_credentials_enabled)
-  POWER_MANAGEMENT_ENABLED             = tostring(var.power_management_enabled)
-  COMPOSE_PROFILES                     = local.internal_services_compose_profiles
-  VAULT_ADDR                           = trimspace(var.vault_addr)
-  VAULT_NAMESPACE                      = trimspace(var.vault_namespace)
-  VAULT_ROLE                           = trimspace(var.vault_role)
-  VAULT_AGENT_ENABLED                  = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
-  VAULT_AUTH_METHOD                    = var.vault_auth_method
-  VAULT_AGENT_TOKEN_PATH               = var.vault_agent_token_path
-  LIBOPS_MANAGED_RUNTIME_ENABLED       = tostring(var.libops_managed_runtime_enabled)
-  LIBOPS_INTERNAL_SERVICES_ENABLED     = tostring(local.internal_services_enabled)
-  LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE = tostring(local.internal_services_enabled && var.libops_internal_services_auto_update)
-}, local.fresh_filesystem_env, local.rollout_env)
-env_file_content             = <<-EOT
+  vault_agent_files          = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? local.vault_agent_files_raw : ""
+  rollout_env = var.rollout_enabled ? {
+    ROLLOUT_ENABLED         = "true"
+    ROLLOUT_DOWNLOAD_URL    = trimspace(var.rollout_release_url)
+    ROLLOUT_DOWNLOAD_SHA256 = trimspace(var.rollout_release_sha256)
+    ROLLOUT_PORT            = tostring(var.rollout_port)
+    ROLLOUT_JWKS_URI        = trimspace(var.rollout_jwks_uri)
+    ROLLOUT_JWT_AUD         = trimspace(var.rollout_jwt_audience)
+    ROLLOUT_CUSTOM_CLAIMS   = trimspace(var.rollout_custom_claims)
+    ROLLOUT_CMD             = "/bin/bash"
+    ROLLOUT_ARGS            = "/home/cloud-compose/rollout"
+    ROLLOUT_LOCK_FILE       = "/mnt/disks/data/rollout.lock"
+    } : {
+    ROLLOUT_ENABLED = "false"
+  }
+  fresh_filesystem_env = {
+    CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}"
+  }
+  host_env = merge({
+    HOME                                  = "/home/cloud-compose"
+    GCP_PROJECT                           = var.project_id
+    GCP_PROJECT_NUMBER                    = local.project_number
+    GCP_INSTANCE_NAME                     = var.name
+    CLOUD_COMPOSE_INSTANCE_NAME           = var.name
+    GCP_REGION                            = var.region
+    GCP_ZONE                              = var.zone
+    CLOUD_COMPOSE_PROVIDER                = "gcp"
+    CLOUD_COMPOSE_APPS                    = join(" ", keys(local.compose_projects))
+    CLOUD_COMPOSE_PRIMARY_APP             = local.primary_compose_project_key
+    CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED = tostring(var.offhost_backup_required)
+    CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER   = var.offhost_backup_driver_path
+    COMPOSE_PROJECTS_FILE                 = "/home/cloud-compose/compose-projects.json"
+    COMPOSE_PROJECT_NAME                  = local.primary_compose_project.compose_project_name
+    COMPOSE_BIND_PORT                     = tostring(local.primary_compose_project.ingress_port)
+    DOCKER_COMPOSE_DIR                    = local.primary_compose_project.project_dir
+    DOCKER_COMPOSE_REPO                   = local.primary_compose_project.docker_compose_repo
+    DOCKER_COMPOSE_BRANCH                 = local.primary_compose_project.docker_compose_branch
+    DOCKER_COMPOSE_VERSION                = var.docker_compose_version
+    DOCKER_BUILDX_VERSION                 = var.docker_buildx_version
+    DOCKER_VOLUME_OVERLAYS                = join(" ", var.volume_names)
+    SITECTL_PACKAGES                      = join(" ", module.sitectl_runtime.packages)
+    SITECTL_VERSION                       = var.sitectl_version
+    SITECTL_PACKAGE_VERSIONS              = jsonencode(module.sitectl_runtime.package_versions)
+    SITECTL_CONTEXT_NAME                  = local.primary_compose_project.sitectl_context_name
+    SITECTL_PLUGIN                        = local.primary_compose_project.sitectl_plugin
+    SITECTL_ENVIRONMENT                   = local.primary_compose_project.sitectl_environment
+    PRODUCTION                            = tostring(var.production)
+    SITECTL_VERIFY_ARGS                   = join(" ", local.primary_compose_project.sitectl_verify_args)
+    GCP_APP_SERVICE_ACCOUNT_EMAIL         = local.app_service_account_email
+    GCP_APP_SERVICE_ACCOUNT_MANAGED       = tostring(local.app_service_account_managed)
+    GCP_APP_CREDENTIALS_ENABLED           = tostring(local.app_credentials_enabled)
+    POWER_MANAGEMENT_ENABLED              = tostring(var.power_management_enabled)
+    COMPOSE_PROFILES                      = local.internal_services_compose_profiles
+    VAULT_ADDR                            = trimspace(var.vault_addr)
+    VAULT_NAMESPACE                       = trimspace(var.vault_namespace)
+    VAULT_ROLE                            = trimspace(var.vault_role)
+    VAULT_AGENT_ENABLED                   = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
+    VAULT_AUTH_METHOD                     = var.vault_auth_method
+    VAULT_AGENT_TOKEN_PATH                = var.vault_agent_token_path
+    LIBOPS_MANAGED_RUNTIME_ENABLED        = tostring(var.libops_managed_runtime_enabled)
+    LIBOPS_INTERNAL_SERVICES_ENABLED      = tostring(local.internal_services_enabled)
+    LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE  = tostring(local.internal_services_enabled && var.libops_internal_services_auto_update)
+  }, local.fresh_filesystem_env, local.rollout_env)
+  env_file_content             = <<-EOT
     - path: "/home/cloud-compose/.env"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(module.runtime_env.content))}
 EOT
-application_env_file_content = <<-EOT
+  application_env_file_content = <<-EOT
     - path: "/home/cloud-compose/application-env.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}
 EOT
-rootfs_archive_command_raw   = <<-EOT
-    - |
-      set -eu
-      test -f /run/cloud-compose-filesystems-ready || {
-        echo "Cloud Compose filesystems were not prepared; refusing rootfs installation" >&2
-        exit 1
-      }
-      archive_url="$(printf '%s' '${base64encode(local.rootfs_archive_url)}' | base64 -d)"
-      archive_sha256=${jsonencode(local.rootfs_archive_sha256)}
-      overlay_dir=${jsonencode(local.rootfs_overlay_staging_path)}
-      case "$archive_url" in
-        https://*) ;;
-        *) echo "rootfs archive URL must use HTTPS" >&2; exit 1 ;;
-      esac
-      case "$archive_url" in
-        *[[:space:]]*) echo "rootfs archive URL must not contain whitespace" >&2; exit 1 ;;
-      esac
-      tmp="$(mktemp -d)"
-      trap 'rm -rf "$tmp"' EXIT
-      curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-        --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 900 \
-        --connect-timeout 10 --max-time 300 -o "$tmp/rootfs.tar.gz" -- "$archive_url"
-      if ! command -v sha256sum >/dev/null 2>&1; then
-        echo "sha256sum is required to verify $archive_url" >&2
-        exit 1
-      fi
-      printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
-      tar -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
-      rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
-      if [ -z "$rootfs_dir" ]; then
-        echo "rootfs directory not found in $archive_url" >&2
-        exit 1
-      fi
-      cp -a "$rootfs_dir"/. /
-      if [ -d "$overlay_dir" ]; then
-        cp -a "$overlay_dir"/. /
-        rm -rf "$overlay_dir"
-      fi
-  EOT
-rootfs_archive_command       = local.rootfs_archive_url != "" ? local.rootfs_archive_command_raw : ""
-use_overlay                  = length(var.volume_names) > 0
-prod_disk_url                = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
-rollout_runcmd = var.rollout_enabled ? [
-  "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1",
-] : []
-cloud_init_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
-  FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
-  FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
-  FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",
-  WRITE_FILES_CONTENT            = local.write_files_content,
-  DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts,
-  COMPOSE_PROJECTS_FILE          = local.compose_projects_file,
-  ENV_FILE_CONTENT               = local.env_file_content,
-  APPLICATION_ENV_FILE_CONTENT   = local.application_env_file_content,
-  VAULT_AGENT_FILES              = local.vault_agent_files,
-  MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file,
-  ROOTFS_ARCHIVE_COMMAND         = local.rootfs_archive_command,
-  USE_OVERLAY                    = local.use_overlay,
-  DOCKER_VOLUME_OVERLAYS         = var.volume_names,
-  CLOUD_COMPOSE_SSH_KEYS         = try(var.users["cloud-compose"], []),
-  SSH_USERS                      = { for username, ssh_keys in var.users : username => ssh_keys if username != "cloud-compose" },
-  ADDITIONAL_INITCMD             = var.initcmd,
-  ADDITIONAL_RUNCMD              = concat(local.rollout_runcmd, var.runcmd),
-})
+  initcmd_content              = length(var.initcmd) > 0 ? "${join("\n", var.initcmd)}\n" : ""
+  runcmd_content               = length(var.runcmd) > 0 ? "${join("\n", var.runcmd)}\n" : ""
+  post_bootstrap_required      = var.rollout_enabled || length(var.runcmd) > 0
+  use_overlay                  = length(var.volume_names) > 0
+  prod_disk_url                = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
+  gcp_filesystem_boothook = templatefile("${path.module}/../../templates/gcp-filesystem-boothook.sh.tftpl", {
+    FILESYSTEM_PREP_SCRIPT_B64     = base64gzip(file("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh")),
+    FILESYSTEM_PERSIST_SCRIPT_B64  = base64gzip(file("${local.rootFs}/home/cloud-compose/persist-filesystems.sh")),
+    FSTAB_RECONCILE_AWK_B64        = base64gzip(file("${local.rootFs}/etc/cloud-compose/awk/reconcile-fstab.awk")),
+    GCP_FILESYSTEM_BOOT_SCRIPT_B64 = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-filesystem-boot.sh")),
+    FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",
+    USE_OVERLAY                    = local.use_overlay,
+  })
+  cloud_config_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
+    ROOTFS_ARCHIVE_SCRIPT_B64          = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/rootfs-archive.sh")),
+    GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64 = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh")),
+    GCP_CLOUD_INIT_POST_SCRIPT_B64     = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh")),
+    DIAGNOSTICS_SCRIPT_B64             = base64gzip(file("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")),
+    DIAGNOSTICS_SCRIPT_SHA256          = filesha256("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"),
+    INIT_COMMANDS_B64                  = base64encode(local.initcmd_content),
+    RUNCMD_B64                         = base64encode(local.runcmd_content),
+    WRITE_FILES_CONTENT                = local.write_files_content,
+    DOCKER_COMPOSE_SCRIPTS             = local.docker_compose_scripts,
+    COMPOSE_PROJECTS_FILE              = local.compose_projects_file,
+    ENV_FILE_CONTENT                   = local.env_file_content,
+    APPLICATION_ENV_FILE_CONTENT       = local.application_env_file_content,
+    VAULT_AGENT_FILES                  = local.vault_agent_files,
+    MANAGED_RUNTIME_ARTIFACTS_FILE     = local.managed_runtime_artifacts_file,
+    ROOTFS_ARCHIVE_ENABLED             = local.rootfs_archive_url != "",
+    ROOTFS_ARCHIVE_URL_B64             = base64encode(local.rootfs_archive_url),
+    ROOTFS_ARCHIVE_SHA256              = local.rootfs_archive_sha256,
+    ROOTFS_CONTRACT_SHA256             = local.rootfs_contract_sha256,
+    ROOTFS_OVERLAY_DIR                 = local.rootfs_overlay_staging_path,
+    ROLLOUT_ENABLED                    = tostring(var.rollout_enabled),
+    POST_BOOTSTRAP_REQUIRED            = local.post_bootstrap_required,
+    CLOUD_COMPOSE_SSH_KEYS             = try(var.users["cloud-compose"], []),
+    SSH_USERS                          = { for username, ssh_keys in var.users : username => ssh_keys if username != "cloud-compose" },
+  })
+  cloud_init_yaml = templatefile("${path.module}/../../templates/gcp-cloud-init.mime.tftpl", {
+    FILESYSTEM_BOOTHOOK = local.gcp_filesystem_boothook,
+    CLOUD_CONFIG        = local.cloud_config_yaml,
+  })
 
-vm_service_account_email = var.service_account_email != "" ? data.google_service_account.vm[0].email : google_service_account.cloud-compose[0].email
-vm_service_account_id    = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].id
-vm_service_account_name  = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].name
+  vm_service_account_email = var.service_account_email != "" ? data.google_service_account.vm[0].email : google_service_account.cloud-compose[0].email
+  vm_service_account_id    = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].id
+  vm_service_account_name  = var.service_account_email != "" ? data.google_service_account.vm[0].name : google_service_account.cloud-compose[0].name
 
-app_service_account_email   = var.app_service_account_email != "" ? data.google_service_account.app[0].email : google_service_account.app[0].email
-app_service_account_id      = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].id
-app_service_account_name    = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].name
-app_service_account_managed = var.app_service_account_email == ""
+  app_service_account_email   = var.app_service_account_email != "" ? data.google_service_account.app[0].email : google_service_account.app[0].email
+  app_service_account_id      = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].id
+  app_service_account_name    = var.app_service_account_email != "" ? data.google_service_account.app[0].name : google_service_account.app[0].name
+  app_service_account_managed = var.app_service_account_email == ""
 
-app_credentials_enabled            = var.app_credentials_enabled
-internal_services_enabled          = var.libops_internal_services_enabled || var.power_management_enabled
-internal_services_compose_profiles = var.power_management_enabled ? "lightsout" : ""
-# Production snapshots are crash-consistent (`guest_flush = false`). MariaDB
-# logical dumps run before the snapshot window and provide application-level
-# consistency without coupling disk snapshots to a guest-agent implementation.
-scheduled_snapshots_enabled = var.production && var.run_snapshots
-# have prod snapshot begin near the initial run so non-prod overlays can
-# discover a production snapshot; non-production plans avoid snapshot resources.
-snapshot_start_time = local.scheduled_snapshots_enabled ? formatdate("h:00", time_static.snapshot_time_static[0].rfc3339) : "00:00"
+  app_credentials_enabled            = var.app_credentials_enabled
+  internal_services_enabled          = var.libops_internal_services_enabled || var.power_management_enabled
+  internal_services_compose_profiles = var.power_management_enabled ? "lightsout" : ""
+  # Production snapshots are crash-consistent (`guest_flush = false`). MariaDB
+  # logical dumps run before the snapshot window and provide application-level
+  # consistency without coupling disk snapshots to a guest-agent implementation.
+  scheduled_snapshots_enabled = var.production && var.run_snapshots
+  # have prod snapshot begin near the initial run so non-prod overlays can
+  # discover a production snapshot; non-production plans avoid snapshot resources.
+  snapshot_start_time = local.scheduled_snapshots_enabled ? formatdate("h:00", time_static.snapshot_time_static[0].rfc3339) : "00:00"
 }
 
 data "google_project" "service" {
   project_id = var.project_id
+}
+
+data "http" "rootfs_contract" {
+  count = local.rootfs_archive_url != "" ? 1 : 0
+
+  url                = local.rootfs_contract_sidecar_url
+  request_timeout_ms = 30000
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9a-f]{64}\\n?$", self.response_body)) &&
+        trimspace(self.response_body) == local.rootfs_contract_sha256
+      )
+      error_message = "The immutable rootfs release sidecar must contain exactly this module source's canonical rootfs contract digest. Publish or select a matching archive before replacing a VM."
+    }
+  }
 }
 
 data "google_service_account" "vm" {
@@ -856,6 +876,10 @@ resource "google_compute_instance" "cloud-compose" {
 
   lifecycle {
     precondition {
+      condition     = length(data.cloudinit_config.ci.part[0].content) <= 245760
+      error_message = "GCP user-data must stay within a 240 KiB review budget so the 256 KiB metadata-item limit retains bootstrap headroom. Select a verified rootfs archive or reduce unusually large runtime inputs."
+    }
+    precondition {
       condition     = var.project_number == "" || var.project_number == local.project_number
       error_message = "project_number does not match the number derived from project_id; omit the deprecated assertion or correct it."
     }
@@ -913,6 +937,13 @@ resource "google_compute_instance" "cloud-compose" {
         (local.rootfs_archive_sha256 == "" || can(regex("^[0-9a-f]{64}$", local.rootfs_archive_sha256)))
       )
       error_message = "rootfs_archive_url and a 64-character rootfs_archive_sha256 must be supplied together."
+    }
+    precondition {
+      condition = (
+        local.rootfs_archive_url == "" ||
+        trimspace(try(data.http.rootfs_contract[0].response_body, "")) == local.rootfs_contract_sha256
+      )
+      error_message = "The rootfs archive release contract must match this module before a VM is replaced."
     }
     precondition {
       condition     = contains(keys(local.compose_projects), local.primary_compose_project_key)

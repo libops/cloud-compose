@@ -51,6 +51,7 @@ verify_lifecycle_lock_contract() {
   local lock_dir=/run/lock/cloud-compose
   local lock_file="$lock_dir/lifecycle.lock"
   local profile=/home/cloud-compose/profile.sh
+  local fixture=/work/ci/fixtures/config-management-lifecycle-lock.sh
   local ready=/tmp/cloud-compose-lifecycle-lock-ready
   local holder_pid contention_status passwd_sha
 
@@ -62,14 +63,7 @@ verify_lifecycle_lock_contract() {
 
   rm -f -- "$ready"
   CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c '
-      set -euo pipefail
-      source "$1"
-      acquire_cloud_compose_lifecycle_lock root-first-contract
-      touch "$2"
-      sleep 3
-      release_cloud_compose_lifecycle_lock
-    ' _ "$profile" "$ready" &
+    "$fixture" hold "$profile" "$ready" &
   holder_pid=$!
   for _ in {1..50}; do
     [[ -e "$ready" ]] && break
@@ -82,10 +76,7 @@ verify_lifecycle_lock_contract() {
     HOME=/home/cloud-compose \
     CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
     CLOUD_COMPOSE_LIFECYCLE_LOCK_TIMEOUT_SECONDS=1 \
-    bash -c '
-      source "$1"
-      acquire_cloud_compose_lifecycle_lock contention-contract
-    ' _ "$profile" >/dev/null 2>&1
+    "$fixture" contend "$profile" >/dev/null 2>&1
   contention_status=$?
   set -e
   [[ "$contention_status" -ne 0 ]]
@@ -94,20 +85,13 @@ verify_lifecycle_lock_contract() {
   runuser -u cloud-compose -- env \
     HOME=/home/cloud-compose \
     CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c '
-      set -euo pipefail
-      source "$1"
-      (
-        acquire_cloud_compose_lifecycle_lock subshell-contract
-        release_cloud_compose_lifecycle_lock
-      )
-    ' _ "$profile"
+    "$fixture" subshell "$profile"
 
   passwd_sha="$(sha256sum /etc/passwd)"
   mv -- "$lock_file" "${lock_file}.real"
   ln -s /etc/passwd "$lock_file"
   if CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    bash -c 'source "$1"; acquire_cloud_compose_lifecycle_lock symlink-contract' _ "$profile" \
+    "$fixture" reject-symlink "$profile" \
       >/dev/null 2>&1; then
     echo "Lifecycle lock accepted a symbolic-link target" >&2
     exit 1
@@ -141,6 +125,7 @@ ansible_invalid_cases=(
   invalid-primary
   invalid-template
   invalid-vault
+  invalid-disaster-recovery
   invalid-package
   invalid-host-ack
   invalid-project-dir-root
@@ -180,13 +165,20 @@ run_invalid_ansible_case() {
     echo "Ansible accepted invalid settings from ${invalid_case}.yml" >&2
     exit 1
   fi
-  grep -Fq -- "$expected" "$log"
-  [[ "$(stat -c '%u:%g:%a' /)" == "$root_before" ]]
-  [[ "$(stat -c '%u:%g:%a' /etc)" == "$etc_before" ]]
-  [[ "$(getent passwd cloud-compose || true)" == "$passwd_before" ]]
-  [[ "$(getent group cloud-compose || true)" == "$group_before" ]]
-  [[ ! -e /home/cloud-compose ]]
-  [[ ! -e /mnt/disks/volumes ]]
+  if ! grep -Fq -- "$expected" "$log"; then
+    echo "Ansible invalid case ${invalid_case} did not report: ${expected}" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  if [[ "$(stat -c '%u:%g:%a' /)" != "$root_before" ||
+    "$(stat -c '%u:%g:%a' /etc)" != "$etc_before" ||
+    "$(getent passwd cloud-compose || true)" != "$passwd_before" ||
+    "$(getent group cloud-compose || true)" != "$group_before" ||
+    -e /home/cloud-compose || -e /mnt/disks/volumes ]]; then
+    echo "Ansible invalid case ${invalid_case} mutated host state before rejection" >&2
+    cat "$log" >&2
+    exit 1
+  fi
   if [[ "$invalid_case" == "invalid-project-dir-symlink" ]]; then
     grep -Fxq 'must-not-change' /tmp/cloud-compose-symlink-target/sentinel
     [[ -L /mnt/disks/data/escape ]]
@@ -206,6 +198,7 @@ run_invalid_ansible_case invalid-internal-services 'internal-services stack is G
 run_invalid_ansible_case invalid-primary 'compose.primary must match'
 run_invalid_ansible_case invalid-template 'template must name a supported app'
 run_invalid_ansible_case invalid-vault 'Vault Agent is currently supported only by Terraform'
+run_invalid_ansible_case invalid-disaster-recovery 'driver_path must be a safe absolute path'
 run_invalid_ansible_case invalid-package 'sitectl packages must use valid release package names'
 run_invalid_ansible_case invalid-host-ack 'dedicated_host_acknowledged=true'
 run_invalid_ansible_case invalid-project-dir-root 'project_dir must be a normalized non-root absolute path'
@@ -227,97 +220,7 @@ ansible-playbook \
 
 verify_lifecycle_lock_contract
 
-python - <<'PY'
-import json
-import grp
-import os
-import stat
-import subprocess
-from pathlib import Path
-
-def load_runtime_env(path):
-    result = subprocess.run(
-        [
-            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
-            "bash", "--noprofile", "--norc", "-c",
-            "source /home/cloud-compose/profile.sh; env -0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return {
-        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
-        for entry in result.stdout.split(b"\0") if b"=" in entry
-    }
-
-env = load_runtime_env(Path("/home/cloud-compose/.env"))
-application_env = json.loads(Path("/home/cloud-compose/application-env.json").read_text())
-
-projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
-project = projects["isle-prod"]
-
-assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["DOCKER_COMPOSE_DIR"] == "/mnt/disks/data/libops/isle/isle-prod"
-assert env["DOCKER_COMPOSE_REPO"] == "https://github.com/libops/isle"
-assert env["SITECTL_PLUGIN"] == "isle"
-assert "sitectl-isle" in env["SITECTL_PACKAGES"].split()
-assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-    "sitectl": "v1.0.0",
-    "sitectl-drupal": "v1.0.0",
-    "sitectl-isle": "v1.0.0",
-}
-assert project["docker_compose_repo"] == "https://github.com/libops/isle"
-assert project["project_dir"] == "/mnt/disks/data/libops/isle/isle-prod"
-assert project["ingress"]["domain"] == "isle.example.edu"
-assert project["sitectl_plugin"] == "isle"
-assert project["init_commands"] == []
-assert project["up_commands"] == []
-assert project["down_commands"] == ["app-down-command"]
-assert project["rollout_commands"] == ["global-rollout-command"]
-assert Path("/mnt/disks/data/libops/isle/isle-prod").is_dir()
-assert "BASH_ENV" not in env
-assert "LD_PRELOAD" not in env
-assert "PORT" not in env
-assert application_env["BASH_ENV"] == "/tmp/cloud-compose-ansible-untrusted-bash-env"
-assert application_env["LD_PRELOAD"] == "/tmp/cloud-compose-ansible-untrusted-preload.so"
-assert application_env["PORT"] == "9999"
-assert application_env["CONTRACT_BACKTICKS"] == "`touch /tmp/cloud-compose-ansible-backtick-injection`"
-assert application_env["CONTRACT_BACKSLASH"] == "a\\path\\ends\\"
-assert application_env["CONTRACT_COMMAND_SUB"] == "$(touch /tmp/cloud-compose-ansible-command-injection)"
-assert application_env["CONTRACT_DOLLARS"] == "$HOME ${HOME}"
-assert application_env["CONTRACT_QUOTES"] == 'a "double" and a single quote: O\'Reilly'
-assert application_env["CONTRACT_WHITESPACE"] == "  leading and trailing  "
-assert application_env["CONTRACT_MULTILINE"] == "line one\nline two"
-assert not Path("/tmp/cloud-compose-ansible-backtick-injection").exists()
-assert not Path("/tmp/cloud-compose-ansible-command-injection").exists()
-
-for path in [
-    "/home/cloud-compose/init",
-    "/home/cloud-compose/up",
-    "/home/cloud-compose/down",
-    "/home/cloud-compose/rollout",
-    "/home/cloud-compose/run.sh",
-    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
-]:
-    assert Path(path).exists(), path
-    assert os.access(path, os.X_OK), path
-
-cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
-for path, expected_mode in {
-    "/home/cloud-compose/init": 0o750,
-    "/home/cloud-compose/up": 0o750,
-    "/home/cloud-compose/down": 0o750,
-    "/home/cloud-compose/rollout": 0o750,
-    "/home/cloud-compose/.env": 0o640,
-    "/home/cloud-compose/application-env.json": 0o640,
-    "/home/cloud-compose/compose-projects.json": 0o640,
-    "/home/cloud-compose/managed-runtime-artifacts.tsv": 0o640,
-}.items():
-    metadata = Path(path).stat()
-    assert metadata.st_uid == 0, (path, metadata.st_uid)
-    assert metadata.st_gid == cloud_compose_gid, (path, metadata.st_gid)
-    assert stat.S_IMODE(metadata.st_mode) == expected_mode, (path, oct(stat.S_IMODE(metadata.st_mode)))
-PY
+python /work/ci/config-management-smoke-assert.py ansible-runtime
 
 rm -rf /home/cloud-compose /mnt/disks
 
@@ -379,135 +282,17 @@ run_salt_case() {
     --config-dir=/tmp/salt/etc \
     --out=json \
     state.apply cloud-compose >/tmp/cloud-compose-salt-noop.json
-  python - <<'PY'
-import json
-from pathlib import Path
-
-states = json.loads(Path("/tmp/cloud-compose-salt-noop.json").read_text())["local"]
-lock_states = [
-    state for state_id, state in states.items()
-    if "|-cloud-compose-lifecycle-lock_|-" in state_id
-]
-assert len(lock_states) == 1, lock_states
-assert lock_states[0]["result"] is True, lock_states[0]
-assert lock_states[0]["changes"] == {}, lock_states[0]
-PY
+  python /work/ci/config-management-smoke-assert.py salt-noop
 
   python -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
-  python - "$expected_name" "$expected_repo" "$expected_plugin" "$expected_package" "$expected_domain" "$expected_project_dir" "$expected_compose_project_name" <<'PY'
-import json
-import grp
-import os
-import stat
-import subprocess
-import sys
-from pathlib import Path
-
-expected_name, expected_repo, expected_plugin, expected_package, expected_domain, expected_project_dir, expected_compose_project_name = sys.argv[1:]
-
-def load_runtime_env(path):
-    result = subprocess.run(
-        [
-            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
-            "bash", "--noprofile", "--norc", "-c",
-            "source /home/cloud-compose/profile.sh; env -0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return {
-        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
-        for entry in result.stdout.split(b"\0") if b"=" in entry
-    }
-
-env = load_runtime_env(Path("/home/cloud-compose/.env"))
-application_env = json.loads(Path("/home/cloud-compose/application-env.json").read_text())
-
-projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
-project = projects[expected_name]
-artifact_manifest = Path("/home/cloud-compose/managed-runtime-artifacts.tsv").read_text()
-
-assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["CLOUD_COMPOSE_APPS"] == expected_name
-assert env["CLOUD_COMPOSE_PRIMARY_APP"] == expected_name
-assert env["DOCKER_COMPOSE_DIR"] == expected_project_dir
-assert env["DOCKER_COMPOSE_REPO"] == expected_repo
-assert env["COMPOSE_PROJECT_NAME"] == expected_compose_project_name, (
-    env["COMPOSE_PROJECT_NAME"], expected_compose_project_name
-)
-assert env["SITECTL_PLUGIN"] == expected_plugin
-assert expected_package in env["SITECTL_PACKAGES"].split()
-assert project["docker_compose_repo"] == expected_repo
-assert project["project_dir"] == expected_project_dir
-assert project["compose_project_name"] == expected_compose_project_name, (
-    project["compose_project_name"], expected_compose_project_name
-)
-assert project["sitectl_plugin"] == expected_plugin
-assert project["ingress"]["domain"] == expected_domain
-assert Path(expected_project_dir).is_dir()
-
-if expected_name == "wp-prod":
-    assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v1.0.0",
-        "sitectl-wp": "v1.0.0",
-    }
-    assert "BASH_ENV" not in env
-    assert "LD_PRELOAD" not in env
-    assert "PORT" not in env
-    assert application_env["BASH_ENV"] == "/tmp/cloud-compose-salt-untrusted-bash-env"
-    assert application_env["LD_PRELOAD"] == "/tmp/cloud-compose-salt-untrusted-preload.so"
-    assert application_env["PORT"] == "9999"
-    assert application_env["CONTRACT_BACKTICKS"] == "`touch /tmp/cloud-compose-salt-backtick-injection`"
-    assert application_env["CONTRACT_BACKSLASH"] == "a\\path\\ends\\"
-    assert application_env["CONTRACT_COMMAND_SUB"] == "$(touch /tmp/cloud-compose-salt-command-injection)"
-    assert application_env["CONTRACT_DOLLARS"] == "$HOME ${HOME}"
-    assert application_env["CONTRACT_QUOTES"] == 'a "double" and a single quote: O\'Reilly'
-    assert application_env["CONTRACT_WHITESPACE"] == "  leading and trailing  "
-    assert application_env["CONTRACT_MULTILINE"] == "line one\nline two"
-    assert env["LIBOPS_MANAGED_RUNTIME_ENABLED"] == "false"
-    assert env["LIBOPS_INTERNAL_SERVICES_ENABLED"] == "false"
-    assert env["LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE"] == "false"
-    assert project["init_commands"] == []
-    assert project["up_commands"] == []
-    assert project["down_commands"] == ["app-down-command"]
-    assert project["rollout_commands"] == ["global-rollout-command"]
-    assert "contract-agent\thttps://example.invalid/contract-agent\t" in artifact_manifest
-    assert "\t/usr/local/bin/contract-agent\t0750\troot\troot\tcloud-compose.service" in artifact_manifest
-    assert not Path("/tmp/cloud-compose-salt-backtick-injection").exists()
-    assert not Path("/tmp/cloud-compose-salt-command-injection").exists()
-elif expected_name == "drupal-prod":
-    assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-        "sitectl": "v1.0.0",
-        "sitectl-drupal": "v1.0.0",
-    }
-
-for path in [
-    "/home/cloud-compose/init",
-    "/home/cloud-compose/up",
-    "/home/cloud-compose/down",
-    "/home/cloud-compose/rollout",
-    "/home/cloud-compose/run.sh",
-    "/home/cloud-compose/start-cloud-compose-bootstrap.sh",
-]:
-    assert Path(path).exists(), path
-    assert os.access(path, os.X_OK), path
-
-cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
-for path, expected_mode in {
-    "/home/cloud-compose/init": 0o750,
-    "/home/cloud-compose/up": 0o750,
-    "/home/cloud-compose/down": 0o750,
-    "/home/cloud-compose/rollout": 0o750,
-    "/home/cloud-compose/.env": 0o640,
-    "/home/cloud-compose/application-env.json": 0o640,
-    "/home/cloud-compose/compose-projects.json": 0o640,
-    "/home/cloud-compose/managed-runtime-artifacts.tsv": 0o640,
-}.items():
-    metadata = Path(path).stat()
-    assert metadata.st_uid == 0, (path, metadata.st_uid)
-    assert metadata.st_gid == cloud_compose_gid, (path, metadata.st_gid)
-    assert stat.S_IMODE(metadata.st_mode) == expected_mode, (path, oct(stat.S_IMODE(metadata.st_mode)))
-PY
+  python /work/ci/config-management-smoke-assert.py salt-runtime \
+    "$expected_name" \
+    "$expected_repo" \
+    "$expected_plugin" \
+    "$expected_package" \
+    "$expected_domain" \
+    "$expected_project_dir" \
+    "$expected_compose_project_name"
 }
 
 run_salt_case \
@@ -518,7 +303,7 @@ run_salt_case \
   sitectl-wp \
   wp.example.edu \
   /mnt/disks/data/libops/wp.git/wp-prod \
-  libops-wp-v1-0-0
+  libops-wp-v1-1-1
 
 run_salt_case \
   drupal-prod \
@@ -528,7 +313,7 @@ run_salt_case \
   sitectl-drupal \
   drupal.example.edu \
   /mnt/disks/data/libops/drupal.git/drupal-prod \
-  libops-drupal-v1-0-0
+  libops-drupal-v1-2-1
 
 run_invalid_salt_case() {
   local invalid_case="$1" expected="$2"
@@ -581,6 +366,7 @@ run_invalid_salt_case invalid-internal-services 'internal-services stack is GCP-
 run_invalid_salt_case invalid-primary 'compose.primary must match'
 run_invalid_salt_case invalid-template 'template must name a supported cloud-compose app'
 run_invalid_salt_case invalid-vault 'Vault Agent is currently supported only by Terraform'
+run_invalid_salt_case invalid-disaster-recovery 'driver_path must be a safe absolute path'
 run_invalid_salt_case invalid-package 'invalid installed package'
 run_invalid_salt_case invalid-host-ack 'dedicated_host_acknowledged=true'
 run_invalid_salt_case invalid-project-dir-root 'project_dir must be a normalized non-root absolute path'

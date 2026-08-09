@@ -102,13 +102,14 @@ nightly MariaDB dumps under `/mnt/disks/data/backups` are useful for logical
 recovery, but they live on the same data volume and are not disaster recovery.
 Also, `terraform destroy` intentionally deletes both managed volumes.
 
-Before production, establish an independently owned offsite policy for both
-volumes (provider volume snapshots where available, or encrypted export to
-separate object storage/account), define retention separately from this
-application state, and test a restore into disposable new volumes. A restore is
-complete only after the Compose projects start, `sitectl healthcheck` passes,
-and representative files plus database records are verified. Do not enable a
-boot-disk backup toggle and record the application as protected.
+Before production, install an operator-owned driver and set
+`runtime.disaster_recovery.required = true`. The provider-neutral handoff
+requires encrypted off-host coverage for the logical database, application
+files, and complete Compose volume topology, then schedules restore tests into
+a disposable recovery environment. The exact driver and proof contract is in
+[Disaster recovery](disaster-recovery.md). Retention and credentials remain
+operator-owned. Do not enable a boot-disk backup toggle and record the
+application as protected.
 
 Fedora CoreOS should use the CoreOS installer path. Debian and Ubuntu should use
 the apt installer path. Both paths install the same minimum runtime surface:
@@ -261,7 +262,7 @@ repo, `sitectl` plugin, and plugin package defaults:
 
 ```hcl
 module "wp" {
-  source = "github.com/libops/cloud-compose//providers/do?ref=1.0.0"
+  source = "github.com/libops/cloud-compose//providers/do?ref=REPLACE_WITH_EXACT_RELEASE"
 
   name     = "cc-wp"
   template = "wp"
@@ -272,18 +273,20 @@ module "wp" {
     }
   }
   runtime = {
-    rootfs_archive_url    = "https://github.com/libops/cloud-compose/releases/download/1.0.0/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
     rootfs_archive_sha256 = var.cloud_compose_rootfs_sha256
   }
 }
 ```
 
-The `1.0.0` ref is intentional. Replace it only with an exact reviewed release
-or full commit. DigitalOcean limits Droplet `user_data` to 64 KiB, and the full
-managed runtime no longer fits safely inline. Use the integrity-pinned archive
-pair shown above; Terraform rejects an oversized inline payload before calling
-the Droplet API. The default DigitalOcean SSH firewall sources include the
-public internet; production callers should set
+Replace the source placeholder with the exact reviewed release that supplied
+`cloud_compose_rootfs_archive_url` and its SHA-256. The runnable example leaves
+both release inputs required because older releases do not publish the adjacent
+contract now required at plan time. DigitalOcean limits Droplet `user_data` to
+64 KiB, and the full managed runtime no longer fits safely inline. Terraform
+rejects both an oversized inline payload and a mismatched module/archive before
+calling the Droplet API. The default DigitalOcean SSH firewall sources include
+the public internet; production callers should set
 `digitalocean.firewall.ssh_source_addresses` to institutional or operator
 CIDRs instead of inheriting that default.
 
@@ -312,7 +315,7 @@ before extracting any archive content.
 
 ```hcl
 module "drupal" {
-  source = "github.com/libops/cloud-compose//providers/linode?ref=1.0.0"
+  source = "github.com/libops/cloud-compose//providers/linode?ref=REPLACE_WITH_EXACT_RELEASE"
 
   name     = "cc-drupal"
   template = "drupal"
@@ -326,7 +329,7 @@ module "drupal" {
     }
   }
   runtime = {
-    rootfs_archive_url    = "https://github.com/libops/cloud-compose/releases/download/1.0.0/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
     rootfs_archive_sha256 = var.cloud_compose_rootfs_sha256
   }
 }
@@ -334,13 +337,18 @@ module "drupal" {
 
 Linode also defaults SSH ingress to the public internet. Set
 `linode.firewall.ssh_source_ipv4` and `ssh_source_ipv6` to reviewed operator
-CIDRs. Replace the `1.0.0` module ref only with an exact release or full commit
-your organization has reviewed.
+CIDRs. Replace the source placeholder only with the exact reviewed release that
+supplied the rootfs archive URL and checksum. The runnable example intentionally
+has no release default.
 
-Use the canonical `cloud-compose-rootfs.tar.gz` and adjacent `.sha256` release
-assets. They are built reproducibly from the tagged `rootfs/` tree; GitHub's
-generated repository source archives are not a stable long-term checksum
-boundary because GitHub may regenerate their outer compression. CI may use a
-commit archive only within the same run while testing an unreleased commit.
-Download the release asset through the same URL consumers will use and verify
-its published checksum before planning the deployment.
+Use the canonical `cloud-compose-rootfs.tar.gz`, adjacent archive `.sha256`,
+and `cloud-compose-rootfs.contract.sha256` release assets. They are built
+reproducibly from the tagged `rootfs/` tree. Terraform fetches the contract
+sidecar while planning and rejects an archive from a different module release
+before changing a VM; boot independently verifies both the pinned archive
+bytes and the canonical rootfs contract. GitHub's generated repository source
+archives are not a stable long-term checksum boundary because GitHub may
+regenerate their outer compression. CI may use a commit archive only within the
+same run while testing an unreleased commit. Promote a release only after its
+`Verify rootfs release assets` job is green, then use the exact release asset
+URL and published archive checksum in the deployment.

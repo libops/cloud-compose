@@ -63,6 +63,7 @@ extra_javascript:
 nav:
   - Home: index.md
   - Runtime contracts: runtime-contracts.md
+  - Disaster recovery: disaster-recovery.md
   - Managed runtime: managed-runtime.md
   - Rollout API: rollout.md
   - DigitalOcean and Linode: non-gcp-providers.md

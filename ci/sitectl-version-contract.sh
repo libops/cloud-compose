@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 runtime_script="$repo_root/rootfs/home/cloud-compose/libops-managed-runtime.sh"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/cloud-compose-sitectl-versions.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -42,6 +43,53 @@ CLOUD_COMPOSE_PROFILE_PATH="$tmp/profile.sh" \
         test "$(stat -c "%a" "$TMP_DIR")" = 700
         test "$(stat -c "%a" "$PACKAGE_STATE_DIR")" = 700
         test "$(stat -c "%a" "$ARTIFACT_STATE_DIR")" = 700
+        test "$(stat -c "%a" "$PUBLISHED_BIN_DIR")" = 755
+        test "$(stat -c "%u:%g" "$STATE_DIR")" = "$(id -u):$(id -g)"
+        test "$(stat -c "%u:%g" "$PUBLISHED_BIN_DIR")" = "$(id -u):$(id -g)"
+
+        touch "$PUBLISHED_BIN_DIR/docker"
+        if mkdirs; then
+            echo "managed runtime accepted an unmanaged published command" >&2
+            exit 1
+        fi
+        rm -f "$PUBLISHED_BIN_DIR/docker"
+
+        touch "$BIN_DIR/make"
+        ln -s "$BIN_DIR/make" "$PUBLISHED_BIN_DIR/make"
+        mkdirs
+        rm -f "$PUBLISHED_BIN_DIR/make"
+        ln -s "$2/unsafe-make" "$PUBLISHED_BIN_DIR/make"
+        if mkdirs; then
+            echo "managed runtime accepted an unsafe published Make target" >&2
+            exit 1
+        fi
+        rm -f "$PUBLISHED_BIN_DIR/make"
+
+        unsafe_target="$2/unsafe-target"
+        unsafe_state="$2/unsafe-state"
+        mkdir -p "$unsafe_target"
+        ln -s "$unsafe_target" "$unsafe_state"
+        STATE_DIR="$unsafe_state"
+        BIN_DIR="$STATE_DIR/bin"
+        TMP_DIR="$STATE_DIR/tmp"
+        PACKAGE_STATE_DIR="$STATE_DIR/packages"
+        ARTIFACT_STATE_DIR="$STATE_DIR/artifacts"
+        if mkdirs; then
+            echo "managed runtime accepted a redirected state directory" >&2
+            exit 1
+        fi
+
+        unsafe_state="$2/unsafe-writable-state"
+        mkdir -m 0775 "$unsafe_state"
+        STATE_DIR="$unsafe_state"
+        BIN_DIR="$STATE_DIR/bin"
+        TMP_DIR="$STATE_DIR/tmp"
+        PACKAGE_STATE_DIR="$STATE_DIR/packages"
+        ARTIFACT_STATE_DIR="$STATE_DIR/artifacts"
+        if mkdirs; then
+            echo "managed runtime accepted group-writable state" >&2
+            exit 1
+        fi
     ' cloud-compose-sitectl-modes "$runtime_script" "$tmp"
 
 run_contract() {

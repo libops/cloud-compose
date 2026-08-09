@@ -11,10 +11,7 @@ import (
 )
 
 var expectedRollout = []string{
-	`TARGET_REF="${GIT_REF:-${GIT_BRANCH:-}}"`,
-	`if [ -n "$TARGET_REF" ]; then sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --ref "$TARGET_REF"; else sitectl deploy --context "${SITECTL_CONTEXT_NAME}" --skip-git; fi`,
-	`sitectl healthcheck --context "${SITECTL_CONTEXT_NAME}" --persist`,
-	`if [ "${SITECTL_ENVIRONMENT}" != "production" ]; then sitectl verify --context "${SITECTL_CONTEXT_NAME}" ${SITECTL_VERIFY_ARGS:-}; fi`,
+	`/home/cloud-compose/default-lifecycle.sh rollout`,
 }
 
 type rolloutSource struct {

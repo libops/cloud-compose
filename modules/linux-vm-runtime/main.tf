@@ -1,8 +1,12 @@
 locals {
-  rootfs                = "${path.module}/../../rootfs"
-  additional_rootfs     = var.rootfs != "" ? var.rootfs : ""
-  rootfs_archive_url    = trimspace(var.rootfs_archive_url)
-  rootfs_archive_sha256 = lower(trimspace(var.rootfs_archive_sha256))
+  rootfs                            = "${path.module}/../../rootfs"
+  additional_rootfs                 = var.rootfs != "" ? var.rootfs : ""
+  rootfs_archive_url                = trimspace(var.rootfs_archive_url)
+  rootfs_archive_sha256             = lower(trimspace(var.rootfs_archive_sha256))
+  rootfs_test_source_archive_prefix = trimspace(var.rootfs_test_source_archive_prefix)
+  rootfs_archive_asset_url          = split("#", split("?", local.rootfs_archive_url)[0])[0]
+  rootfs_contract_sidecar_url       = local.rootfs_archive_url == "" || local.rootfs_test_source_archive_prefix != "" ? "" : replace(local.rootfs_archive_asset_url, "/[^/]+$/", "cloud-compose-rootfs.contract.sha256")
+  rootfs_overlay_staging_path       = "/var/lib/cloud-compose/rootfs-overlay"
 
   single_compose_project = {
     (var.name) = {
@@ -82,27 +86,35 @@ locals {
     flatten([for _, app in local.compose_projects : app.sitectl_packages])
   ))
 
-  base_files                = local.rootfs_archive_url == "" ? fileset(local.rootfs, "**") : []
-  additional_files          = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
-  embedded_additional_files = local.rootfs_archive_url == "" ? local.additional_files : []
+  rootfs_contract_files = sort(tolist(fileset(local.rootfs, "**")))
+  rootfs_contract_directories = sort(distinct(flatten([
+    for file in local.rootfs_contract_files : dirname(file) == "." ? [] : [
+      for index in range(length(split("/", dirname(file)))) :
+      join("/", slice(split("/", dirname(file)), 0, index + 1))
+    ]
+  ])))
+  rootfs_contract_sha256 = sha256(join("", [
+    for entry in concat(
+      [for directory in local.rootfs_contract_directories : "d\t0:0:755\t${directory}\n"],
+      [for file in local.rootfs_contract_files : "f\t${filesha256("${local.rootfs}/${file}")}\t0:0:${endswith(file, ".sh") ? "755" : "644"}\t${file}\n"],
+    ) : entry
+  ]))
+  base_files       = local.rootfs_archive_url == "" ? fileset(local.rootfs, "**") : []
+  additional_files = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
   all_files = merge(
     { for file in local.base_files : file => "${local.rootfs}/${file}" },
-    { for file in local.embedded_additional_files : file => "${local.additional_rootfs}/${file}" }
+    { for file in local.additional_files : file => "${local.additional_rootfs}/${file}" }
   )
-
-  archive_additional_rootfs_commands = join("\n", [
-    for file in local.additional_files : <<-EOT
-      destination="$(printf '%s' '${base64encode("/${file}")}' | base64 -d)"
-      install -d "$(dirname "$destination")"
-      printf '%s' '${filebase64("${local.additional_rootfs}/${file}")}' | base64 -d >"$destination"
-      chmod ${endswith(file, ".sh") ? "0755" : "0644"} "$destination"
-    EOT
-  ])
+  rootfs_file_permissions = {
+    for file in setunion(local.base_files, local.additional_files) :
+    file => endswith(file, ".sh") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
+  }
 
   write_files_content = join("\n", [
     for file, fullpath in local.all_files : <<-EOT
-      - path: ${jsonencode(startswith(file, "mnt/disks/") ? "/var/lib/cloud-compose/mounted-rootfs/${file}" : "/${file}")}
-        permissions: ${jsonencode(endswith(file, ".sh") ? "0755" : "0644")}
+      - path: ${jsonencode(local.rootfs_archive_url != "" ? "${local.rootfs_overlay_staging_path}/${file}" : startswith(file, "mnt/disks/") ? "/var/lib/cloud-compose/mounted-rootfs/${file}" : "/${file}")}
+        owner: "root:root"
+        permissions: ${jsonencode(local.rootfs_file_permissions[file])}
         encoding: gzip+base64
         content: ${jsonencode(base64gzip(file(fullpath)))}
 EOT
@@ -111,50 +123,45 @@ EOT
   docker_compose_scripts = join("\n", [
     for name in ["init", "up", "down", "rollout"] : <<-EOT
       - path: "/home/cloud-compose/${name}"
+        owner: "root:root"
         permissions: "0755"
-        encoding: gzip+base64
-        content: ${jsonencode(base64gzip(<<-EOS
-          #!/usr/bin/env bash
-
-          set -eou pipefail
-
-          source /home/cloud-compose/profile.sh
-          exec bash /home/cloud-compose/compose-dispatch.sh "${name}"
-        EOS
-))}
+        encoding: b64
+        content: ${filebase64("${local.rootfs}/home/cloud-compose/lifecycle-entrypoint.sh")}
 EOT
-])
+  ])
 
-compose_projects_content = jsonencode(local.validated_compose_projects)
-compose_projects_file    = <<-EOT
+  compose_projects_content = jsonencode(local.validated_compose_projects)
+  compose_projects_file    = <<-EOT
     - path: "/home/cloud-compose/compose-projects.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.compose_projects_content))}
 EOT
 
-managed_runtime_artifact_lines = [
-  for artifact in module.managed_artifacts.artifacts : join("\t", [
-    artifact.name,
-    artifact.url,
-    artifact.sha256,
-    artifact.path,
-    try(artifact.mode, "0755"),
-    try(artifact.owner, "root"),
-    try(artifact.group, "root"),
-    try(artifact.restart, ""),
-  ])
-]
-managed_runtime_artifacts_content = join("\n", local.managed_runtime_artifact_lines)
-managed_runtime_artifacts_file    = <<-EOT
+  managed_runtime_artifact_lines = [
+    for artifact in module.managed_artifacts.artifacts : join("\t", [
+      artifact.name,
+      artifact.url,
+      artifact.sha256,
+      artifact.path,
+      try(artifact.mode, "0755"),
+      try(artifact.owner, "root"),
+      try(artifact.group, "root"),
+      try(artifact.restart, ""),
+    ])
+  ]
+  managed_runtime_artifacts_content = length(local.managed_runtime_artifact_lines) == 0 ? "\n" : "${join("\n", local.managed_runtime_artifact_lines)}\n"
+  managed_runtime_artifacts_file    = <<-EOT
     - path: "/home/cloud-compose/managed-runtime-artifacts.tsv"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.managed_runtime_artifacts_content))}
 EOT
 
-vault_agent_template_stanzas = join("\n", [
-  for template in var.vault_agent_templates : <<-EOT
+  vault_agent_template_stanzas = join("\n", [
+    for template in var.vault_agent_templates : <<-EOT
       template {
         destination = ${jsonencode(template.destination)}
         contents = <<EOH
@@ -166,15 +173,15 @@ vault_agent_template_stanzas = join("\n", [
       %{endif}
       }
     EOT
-])
-vault_agent_auto_auth      = trimspace(var.vault_agent_additional_config)
-vault_agent_env_content    = <<-EOT
+  ])
+  vault_agent_auto_auth      = trimspace(var.vault_agent_additional_config)
+  vault_agent_env_content    = <<-EOT
     VAULT_ADDR=${trimspace(var.vault_addr)}
     VAULT_NAMESPACE=${trimspace(var.vault_namespace)}
     VAULT_ROLE=${trimspace(var.vault_role)}
     VAULT_AUTH_METHOD=${var.vault_auth_method}
   EOT
-vault_agent_config_content = <<-EOT
+  vault_agent_config_content = <<-EOT
     vault {
       address = ${jsonencode(trimspace(var.vault_addr))}
 %{if trimspace(var.vault_namespace) != ""}
@@ -186,7 +193,7 @@ vault_agent_config_content = <<-EOT
 
     ${indent(4, local.vault_agent_template_stanzas)}
   EOT
-vault_agent_files_raw      = <<-EOT
+  vault_agent_files_raw      = <<-EOT
     - path: "/etc/default/vault-agent"
       permissions: "0600"
       encoding: gzip+base64
@@ -196,158 +203,119 @@ vault_agent_files_raw      = <<-EOT
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(local.vault_agent_config_content))}
   EOT
-vault_agent_files          = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? local.vault_agent_files_raw : ""
+  vault_agent_files          = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? local.vault_agent_files_raw : ""
 
-host_env = {
-  HOME                                 = "/home/cloud-compose"
-  CLOUD_COMPOSE_PROVIDER               = var.provider_name
-  CLOUD_COMPOSE_INSTANCE_NAME          = var.name
-  CLOUD_COMPOSE_APPS                   = join(" ", keys(local.compose_projects))
-  CLOUD_COMPOSE_PRIMARY_APP            = local.primary_compose_project_key
-  COMPOSE_PROJECTS_FILE                = "/home/cloud-compose/compose-projects.json"
-  COMPOSE_PROJECT_NAME                 = local.primary_compose_project.compose_project_name
-  COMPOSE_BIND_PORT                    = tostring(local.primary_compose_project.ingress_port)
-  DOCKER_COMPOSE_DIR                   = local.primary_compose_project.project_dir
-  DOCKER_COMPOSE_REPO                  = local.primary_compose_project.docker_compose_repo
-  DOCKER_COMPOSE_BRANCH                = local.primary_compose_project.docker_compose_branch
-  DOCKER_COMPOSE_VERSION               = var.docker_compose_version
-  DOCKER_BUILDX_VERSION                = var.docker_buildx_version
-  GCP_PROJECT                          = ""
-  GCP_PROJECT_NUMBER                   = ""
-  GCP_INSTANCE_NAME                    = var.name
-  GCP_REGION                           = var.region
-  GCP_ZONE                             = var.zone != "" ? var.zone : var.region
-  GCP_APP_SERVICE_ACCOUNT_EMAIL        = ""
-  GCP_APP_CREDENTIALS_ENABLED          = "false"
-  SITECTL_PACKAGES                     = join(" ", module.sitectl_runtime.packages)
-  SITECTL_VERSION                      = var.sitectl_version
-  SITECTL_PACKAGE_VERSIONS             = jsonencode(module.sitectl_runtime.package_versions)
-  SITECTL_CONTEXT_NAME                 = local.primary_compose_project.sitectl_context_name
-  SITECTL_PLUGIN                       = local.primary_compose_project.sitectl_plugin
-  SITECTL_ENVIRONMENT                  = local.primary_compose_project.sitectl_environment
-  SITECTL_VERIFY_ARGS                  = join(" ", local.primary_compose_project.sitectl_verify_args)
-  POWER_MANAGEMENT_ENABLED             = "false"
-  COMPOSE_PROFILES                     = ""
-  VAULT_ADDR                           = trimspace(var.vault_addr)
-  VAULT_NAMESPACE                      = trimspace(var.vault_namespace)
-  VAULT_ROLE                           = trimspace(var.vault_role)
-  VAULT_AGENT_ENABLED                  = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
-  VAULT_AUTH_METHOD                    = var.vault_auth_method
-  ROLLOUT_ENABLED                      = tostring(var.rollout_enabled)
-  ROLLOUT_DOWNLOAD_URL                 = trimspace(var.rollout_release_url)
-  ROLLOUT_DOWNLOAD_SHA256              = trimspace(var.rollout_release_sha256)
-  ROLLOUT_PORT                         = tostring(var.rollout_port)
-  ROLLOUT_JWKS_URI                     = trimspace(var.rollout_jwks_uri)
-  ROLLOUT_JWT_AUD                      = trimspace(var.rollout_jwt_audience)
-  ROLLOUT_CUSTOM_CLAIMS                = trimspace(var.rollout_custom_claims)
-  ROLLOUT_CMD                          = "/bin/bash"
-  ROLLOUT_ARGS                         = "/home/cloud-compose/rollout"
-  ROLLOUT_LOCK_FILE                    = "/mnt/disks/data/rollout.lock"
-  VAULT_AGENT_TOKEN_PATH               = var.vault_agent_token_path
-  LIBOPS_MANAGED_RUNTIME_ENABLED       = tostring(var.libops_managed_runtime_enabled)
-  LIBOPS_INTERNAL_SERVICES_ENABLED     = tostring(var.libops_internal_services_enabled)
-  LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE = tostring(var.libops_internal_services_auto_update)
-  INTERNAL_SERVICES_COMPOSE_PROFILES   = ""
-}
+  host_env = {
+    HOME                                  = "/home/cloud-compose"
+    CLOUD_COMPOSE_PROVIDER                = var.provider_name
+    CLOUD_COMPOSE_INSTANCE_NAME           = var.name
+    CLOUD_COMPOSE_APPS                    = join(" ", keys(local.compose_projects))
+    CLOUD_COMPOSE_PRIMARY_APP             = local.primary_compose_project_key
+    CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED = tostring(var.offhost_backup_required)
+    CLOUD_COMPOSE_OFFHOST_BACKUP_DRIVER   = var.offhost_backup_driver_path
+    COMPOSE_PROJECTS_FILE                 = "/home/cloud-compose/compose-projects.json"
+    COMPOSE_PROJECT_NAME                  = local.primary_compose_project.compose_project_name
+    COMPOSE_BIND_PORT                     = tostring(local.primary_compose_project.ingress_port)
+    DOCKER_COMPOSE_DIR                    = local.primary_compose_project.project_dir
+    DOCKER_COMPOSE_REPO                   = local.primary_compose_project.docker_compose_repo
+    DOCKER_COMPOSE_BRANCH                 = local.primary_compose_project.docker_compose_branch
+    DOCKER_COMPOSE_VERSION                = var.docker_compose_version
+    DOCKER_BUILDX_VERSION                 = var.docker_buildx_version
+    GCP_PROJECT                           = ""
+    GCP_PROJECT_NUMBER                    = ""
+    GCP_INSTANCE_NAME                     = var.name
+    GCP_REGION                            = var.region
+    GCP_ZONE                              = var.zone != "" ? var.zone : var.region
+    GCP_APP_SERVICE_ACCOUNT_EMAIL         = ""
+    GCP_APP_CREDENTIALS_ENABLED           = "false"
+    SITECTL_PACKAGES                      = join(" ", module.sitectl_runtime.packages)
+    SITECTL_VERSION                       = var.sitectl_version
+    SITECTL_PACKAGE_VERSIONS              = jsonencode(module.sitectl_runtime.package_versions)
+    SITECTL_CONTEXT_NAME                  = local.primary_compose_project.sitectl_context_name
+    SITECTL_PLUGIN                        = local.primary_compose_project.sitectl_plugin
+    SITECTL_ENVIRONMENT                   = local.primary_compose_project.sitectl_environment
+    SITECTL_VERIFY_ARGS                   = join(" ", local.primary_compose_project.sitectl_verify_args)
+    POWER_MANAGEMENT_ENABLED              = "false"
+    COMPOSE_PROFILES                      = ""
+    VAULT_ADDR                            = trimspace(var.vault_addr)
+    VAULT_NAMESPACE                       = trimspace(var.vault_namespace)
+    VAULT_ROLE                            = trimspace(var.vault_role)
+    VAULT_AGENT_ENABLED                   = var.vault_agent_enabled && trimspace(var.vault_addr) != "" ? "true" : "false"
+    VAULT_AUTH_METHOD                     = var.vault_auth_method
+    ROLLOUT_ENABLED                       = tostring(var.rollout_enabled)
+    ROLLOUT_DOWNLOAD_URL                  = trimspace(var.rollout_release_url)
+    ROLLOUT_DOWNLOAD_SHA256               = trimspace(var.rollout_release_sha256)
+    ROLLOUT_PORT                          = tostring(var.rollout_port)
+    ROLLOUT_JWKS_URI                      = trimspace(var.rollout_jwks_uri)
+    ROLLOUT_JWT_AUD                       = trimspace(var.rollout_jwt_audience)
+    ROLLOUT_CUSTOM_CLAIMS                 = trimspace(var.rollout_custom_claims)
+    ROLLOUT_CMD                           = "/bin/bash"
+    ROLLOUT_ARGS                          = "/home/cloud-compose/rollout"
+    ROLLOUT_LOCK_FILE                     = "/mnt/disks/data/rollout.lock"
+    VAULT_AGENT_TOKEN_PATH                = var.vault_agent_token_path
+    LIBOPS_MANAGED_RUNTIME_ENABLED        = tostring(var.libops_managed_runtime_enabled)
+    LIBOPS_INTERNAL_SERVICES_ENABLED      = tostring(var.libops_internal_services_enabled)
+    LIBOPS_INTERNAL_SERVICES_AUTO_UPDATE  = tostring(var.libops_internal_services_auto_update)
+    INTERNAL_SERVICES_COMPOSE_PROFILES    = ""
+  }
 
-env_file_content = <<-EOT
+  env_file_content = <<-EOT
     - path: "/home/cloud-compose/.env"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(module.runtime_env.content))}
   EOT
 
-application_env_file_content = <<-EOT
+  application_env_file_content = <<-EOT
     - path: "/home/cloud-compose/application-env.json"
+      owner: "root:root"
       permissions: "0640"
       encoding: gzip+base64
       content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}
   EOT
+  cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
+    CLOUD_COMPOSE_SSH_KEYS            = var.cloud_compose_ssh_keys
+    SSH_USERS                         = var.ssh_users
+    ROOTFS_ARCHIVE_SCRIPT_B64         = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/rootfs-archive.sh"))
+    LINUX_CLOUD_INIT_SCRIPT_B64       = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"))
+    LINUX_CLOUD_INIT_SCRIPT_SHA256    = filesha256("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh")
+    DIAGNOSTICS_SCRIPT_B64            = base64gzip(file("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"))
+    DIAGNOSTICS_SCRIPT_SHA256         = filesha256("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")
+    DATA_DEVICE                       = var.data_device
+    VOLUMES_DEVICE                    = var.volumes_device
+    WRITE_FILES_CONTENT               = local.write_files_content
+    DOCKER_COMPOSE_SCRIPTS            = local.docker_compose_scripts
+    COMPOSE_PROJECTS_FILE             = local.compose_projects_file
+    ENV_FILE_CONTENT                  = local.env_file_content
+    APPLICATION_ENV_FILE_CONTENT      = local.application_env_file_content
+    VAULT_AGENT_FILES                 = local.vault_agent_files
+    MANAGED_RUNTIME_ARTIFACTS_FILE    = local.managed_runtime_artifacts_file
+    ROLLOUT_ENABLED                   = tostring(var.rollout_enabled)
+    ROOTFS_ARCHIVE_ENABLED            = local.rootfs_archive_url != ""
+    ROOTFS_ARCHIVE_URL_B64            = base64encode(local.rootfs_archive_url)
+    ROOTFS_ARCHIVE_SHA256             = local.rootfs_archive_sha256
+    ROOTFS_CONTRACT_SHA256            = local.rootfs_contract_sha256
+    ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX = local.rootfs_test_source_archive_prefix
+  })
+}
 
-rootfs_archive_prepare_command_raw = <<-EOT
-    archive_url_b64='${base64encode(local.rootfs_archive_url)}'
-    archive_url="$(printf '%s' "$archive_url_b64" | base64 -d)"
-    archive_sha256='${local.rootfs_archive_sha256}'
-    case "$archive_url" in
-      https://*) ;;
-      *) echo "rootfs archive URL must use HTTPS" >&2; exit 1 ;;
-    esac
-    case "$archive_url" in
-      *[[:space:]]*) echo "rootfs archive URL must not contain whitespace" >&2; exit 1 ;;
-    esac
-    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
-      if command -v apt-get >/dev/null 2>&1; then
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update
-        apt-get install -y ca-certificates curl tar
-      elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y ca-certificates curl tar
-      elif command -v rpm-ostree >/dev/null 2>&1; then
-        rpm-ostree install --apply-live ca-certificates curl tar
-      else
-        echo "No supported package manager found to install curl and tar" >&2
-        exit 1
-      fi
-    fi
-    for required_command in curl tar sha256sum; do
-      if ! command -v "$required_command" >/dev/null 2>&1; then
-        echo "$required_command is required to install the verified rootfs archive" >&2
-        exit 1
-      fi
-    done
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
-    curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-      --retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 900 \
-      --connect-timeout 10 --max-time 300 -o "$tmp/rootfs.tar.gz" -- "$archive_url"
-    printf '%s  %s\n' "$archive_sha256" "$tmp/rootfs.tar.gz" | sha256sum -c -
-    tar -xzf "$tmp/rootfs.tar.gz" -C "$tmp"
-    rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"
-    if [ -z "$rootfs_dir" ] || [ ! -d "$rootfs_dir" ]; then
-      echo "rootfs directory not found in verified archive $archive_url" >&2
-      exit 1
-    fi
-    filesystem_prep_source="$rootfs_dir/home/cloud-compose/prepare-filesystem.sh"
-    filesystem_persist_source="$rootfs_dir/home/cloud-compose/persist-filesystems.sh"
-    if [ ! -f "$filesystem_prep_source" ] || [ ! -f "$filesystem_persist_source" ]; then
-      echo "verified rootfs archive is missing filesystem preparation scripts" >&2
-      exit 1
-    fi
-    install -m 0600 -- "$filesystem_prep_source" "$filesystem_prep"
-    install -m 0600 -- "$filesystem_persist_source" "$filesystem_persist"
-  EOT
+data "http" "rootfs_contract" {
+  count = local.rootfs_archive_url != "" && local.rootfs_test_source_archive_prefix == "" ? 1 : 0
 
-rootfs_archive_install_command_raw = <<-EOT
-    if [ -z "$${rootfs_dir:-}" ] || [ ! -d "$rootfs_dir" ]; then
-      echo "verified rootfs directory is unavailable during installation" >&2
-      exit 1
-    fi
-    cp -a "$rootfs_dir"/. /
-  EOT
+  url                = local.rootfs_contract_sidecar_url
+  request_timeout_ms = 30000
 
-rootfs_archive_prepare_command = local.rootfs_archive_url != "" ? local.rootfs_archive_prepare_command_raw : ""
-rootfs_archive_install_command = local.rootfs_archive_url != "" ? local.rootfs_archive_install_command_raw : ""
-
-cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
-  CLOUD_COMPOSE_SSH_KEYS         = var.cloud_compose_ssh_keys
-  SSH_USERS                      = var.ssh_users
-  DATA_DEVICE                    = var.data_device
-  VOLUMES_DEVICE                 = var.volumes_device
-  WRITE_FILES_CONTENT            = local.write_files_content
-  DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts
-  COMPOSE_PROJECTS_FILE          = local.compose_projects_file
-  ENV_FILE_CONTENT               = local.env_file_content
-  APPLICATION_ENV_FILE_CONTENT   = local.application_env_file_content
-  VAULT_AGENT_FILES              = local.vault_agent_files
-  MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file
-  ROLLOUT_RUNCMD                 = var.rollout_enabled ? "bash /home/cloud-compose/deploy-rollout.sh >> /home/cloud-compose/run.log 2>&1" : ""
-  ROOTFS_ARCHIVE_ENABLED         = local.rootfs_archive_url != ""
-  ROOTFS_ARCHIVE_PREPARE_COMMAND = local.rootfs_archive_prepare_command
-  ROOTFS_ARCHIVE_INSTALL_COMMAND = local.rootfs_archive_install_command
-  ARCHIVE_ADDITIONAL_ROOTFS      = local.archive_additional_rootfs_commands
-  FILESYSTEM_PREP_SCRIPT_B64     = local.rootfs_archive_url == "" ? filebase64("${local.rootfs}/home/cloud-compose/prepare-filesystem.sh") : ""
-  FILESYSTEM_PERSIST_SCRIPT_B64  = local.rootfs_archive_url == "" ? filebase64("${local.rootfs}/home/cloud-compose/persist-filesystems.sh") : ""
-})
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9a-f]{64}\\n?$", self.response_body)) &&
+        trimspace(self.response_body) == local.rootfs_contract_sha256
+      )
+      error_message = "The immutable rootfs release sidecar must contain exactly this module source's canonical rootfs contract digest. Publish or select a matching archive before replacing a VM."
+    }
+  }
 }
 
 module "sitectl_runtime" {

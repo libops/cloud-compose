@@ -17,10 +17,8 @@ run_as_cloud_compose() (
     runuser -u cloud-compose -- env HOME=/home/cloud-compose PATH="$PATH" "$@"
   elif command -v sudo >/dev/null 2>&1; then
     sudo -u cloud-compose env HOME=/home/cloud-compose PATH="$PATH" "$@"
-  elif command -v su >/dev/null 2>&1; then
-    su -s /bin/bash -c "HOME=/home/cloud-compose PATH=$(printf '%q' "$PATH") $(printf '%q ' "$@")" cloud-compose
   else
-    echo "No supported user-switching command found for cloud-compose app init" >&2
+    echo "Neither runuser nor sudo is available for cloud-compose app init" >&2
     return 1
   fi
 )
@@ -32,7 +30,7 @@ runtime_enabled() {
   esac
 }
 
-durable_bootstrap_marker="/home/cloud-compose/.cloud-compose-bootstrap-complete"
+durable_bootstrap_marker="/var/lib/cloud-compose/bootstrap-complete"
 current_boot_app_init_marker="/run/cloud-compose-app-init-complete"
 fresh_filesystem_marker="${CLOUD_COMPOSE_FRESH_FILESYSTEM_MARKER:-/mnt/disks/data/.cloud-compose/fresh-filesystem}"
 fresh_filesystem_identity="${CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY:-fresh}"
@@ -113,4 +111,9 @@ else
   systemctl disable --now cloud-compose-docker-prune.timer cloud-compose-docker-prune.service >/dev/null 2>&1 || true
 fi
 systemctl enable --now cloud-compose-mariadb-backup.timer
+if runtime_enabled "${CLOUD_COMPOSE_OFFHOST_BACKUP_REQUIRED:-false}"; then
+  systemctl enable --now cloud-compose-restore-test.timer
+else
+  systemctl disable --now cloud-compose-restore-test.timer cloud-compose-restore-test.service >/dev/null 2>&1 || true
+fi
 cloud_compose_publish_marker "$durable_bootstrap_marker"

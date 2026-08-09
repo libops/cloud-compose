@@ -3,6 +3,14 @@ mock_provider "linode" {}
 run "custom_package_set_merges_only_applicable_template_versions" {
   command = plan
 
+  override_data {
+    target = module.linode.module.runtime.data.http.rootfs_contract[0]
+    values = {
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      status_code   = 200
+    }
+  }
+
   variables {
     name     = "template-versions"
     template = "isle"
@@ -12,7 +20,7 @@ run "custom_package_set_merges_only_applicable_template_versions" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
@@ -33,8 +41,8 @@ run "custom_package_set_merges_only_applicable_template_versions" {
   }
 
   assert {
-    condition     = local.runtime.compose.branch == "v1.1.0"
-    error_message = "The Linode entrypoint must inherit the ISLE v1.1.0 template branch when no override is supplied."
+    condition     = local.runtime.compose.branch == "v1.3.1"
+    error_message = "The Linode entrypoint must inherit the ISLE v1.3.1 template branch when no override is supplied."
   }
 
   assert {
@@ -46,6 +54,14 @@ run "custom_package_set_merges_only_applicable_template_versions" {
 run "explicit_core_only_package_set_disables_template_plugins" {
   command = plan
 
+  override_data {
+    target = module.linode.module.runtime.data.http.rootfs_contract[0]
+    values = {
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      status_code   = 200
+    }
+  }
+
   variables {
     name     = "template-versions"
     template = "isle"
@@ -55,7 +71,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz"
+      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
       rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = []
@@ -65,7 +81,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v1.0.0"
+      sitectl = "v1.9.1"
     }
     error_message = "The Linode entrypoint must preserve an explicit core-only package set."
   }

@@ -1,4 +1,12 @@
 mock_provider "cloudinit" {}
+mock_provider "http" {
+  mock_data "http" {
+    defaults = {
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      status_code   = 200
+    }
+  }
+}
 mock_provider "google" {
   mock_resource "google_compute_disk" {
     override_during = plan
@@ -90,10 +98,28 @@ run "disables_privileged_services_by_default" {
       local.host_env.CLOUD_COMPOSE_FRESH_FILESYSTEM_IDENTITY == "v1:gcp-disk-id:987654321012345678" &&
       strcontains(
         local.cloud_init_yaml,
-        "--publish-fresh-marker \"v1:gcp-disk-id:987654321012345678\"",
-      )
+        jsonencode("v1:gcp-disk-id:987654321012345678"),
+      ) &&
+      strcontains(
+        local.cloud_init_yaml,
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh")),
+      ) &&
+      strcontains(
+        local.cloud_init_yaml,
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/awk/reconcile-fstab.awk")),
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/jq/compose-validate-projects.jq\"",
+      ) &&
+      strcontains(local.cloud_init_yaml, "Content-Type: text/cloud-boothook")
     )
-    error_message = "GCP cloud-init and the root runtime environment must carry the same immutable data-disk identity."
+    error_message = "GCP's early every-boot filesystem programs and root runtime environment must carry the same immutable data-disk identity and checked fstab reconciler."
+  }
+
+  assert {
+    condition     = length(data.cloudinit_config.ci.part[0].content) <= 245760
+    error_message = "The default GCP user-data must preserve headroom below the provider's metadata-item limit."
   }
 
   assert {
@@ -535,13 +561,14 @@ run "renders_verified_archive_before_downstream_overlay" {
   command = plan
 
   variables {
-    name                  = "gcp-contract"
-    project_id            = "test-project"
-    project_number        = "123456789"
-    docker_compose_repo   = "https://github.com/libops/wp.git"
-    rootfs                = "testdata/rootfs"
-    rootfs_archive_url    = "https://example.invalid/cloud-compose.tar.gz?literal=$(id)"
-    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    name                       = "gcp-contract"
+    project_id                 = "test-project"
+    project_number             = "123456789"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    rootfs_archive_url         = "https://example.invalid/cloud-compose.tar.gz?literal=$(id)"
+    rootfs_archive_sha256      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
     extra_env = {
       NGINX_CLIENT_MAX_BODY_SIZE = "512m"
       PHP_UPLOAD_MAX_FILESIZE    = "512M"
@@ -550,21 +577,34 @@ run "renders_verified_archive_before_downstream_overlay" {
     }
   }
 
-  assert {
-    condition = (
-      strcontains(local.cloud_init_yaml, "sha256sum -c -") &&
-      strcontains(local.cloud_init_yaml, base64encode(var.rootfs_archive_url)) &&
-      !strcontains(local.cloud_init_yaml, var.rootfs_archive_url)
-    )
-    error_message = "The GCP archive URL must be transported as literal base64 data and verified before extraction."
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      status_code   = 200
+    }
   }
 
   assert {
-    condition = can(regex(
-      "(?s)cp -a \\\"\\$rootfs_dir\\\"/\\. /.*cp -a \\\"\\$overlay_dir\\\"/\\. /",
-      local.cloud_init_yaml,
-    ))
-    error_message = "The consumer rootfs overlay must be applied after the verified base archive."
+    condition = (
+      strcontains(
+        local.cloud_init_yaml,
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/libexec/rootfs-archive.sh")),
+      ) &&
+      strcontains(local.cloud_init_yaml, local.rootfs_contract_sha256) &&
+      data.http.rootfs_contract[0].url == "https://example.invalid/cloud-compose-rootfs.contract.sha256" &&
+      strcontains(local.cloud_init_yaml, base64encode(var.rootfs_archive_url)) &&
+      !strcontains(local.cloud_init_yaml, var.rootfs_archive_url)
+    )
+    error_message = "The GCP archive program must be transferred as a checked file and receive literal URL data plus the exact module rootfs contract."
+  }
+
+  assert {
+    condition = (
+      strcontains(local.cloud_config_yaml, "runcmd:\n- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install") &&
+      strcontains(local.cloud_config_yaml, "\n- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh")
+    )
+    error_message = "The verified base archive and downstream overlay must be installed before GCP application initialization."
   }
 
   assert {
@@ -580,6 +620,73 @@ run "renders_verified_archive_before_downstream_overlay" {
       )
     )
     error_message = "The downstream overlay and isolated application environment data must be present in cloud-init."
+  }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/var/lib/cloud-compose/rootfs-overlay/etc/cloud-compose-overlay-marker\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
+      )
+    )
+    error_message = "Archive-backed GCP overlays must make only the configured off-host backup driver executable."
+  }
+}
+
+run "rejects_rootfs_release_from_another_module_version" {
+  command = plan
+
+  variables {
+    name                  = "gcp-contract"
+    project_id            = "test-project"
+    docker_compose_repo   = "https://github.com/libops/wp.git"
+    rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
+    rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "0000000000000000000000000000000000000000000000000000000000000000\n"
+      status_code   = 200
+    }
+  }
+
+  expect_failures = [data.http.rootfs_contract[0]]
+}
+
+run "renders_embedded_offhost_backup_driver_executable" {
+  command = plan
+
+  variables {
+    name                       = "gcp-embedded-driver"
+    project_id                 = "test-project"
+    project_number             = "123456789"
+    docker_compose_repo        = "https://github.com/libops/wp.git"
+    rootfs                     = "testdata/rootfs"
+    offhost_backup_driver_path = "/etc/cloud-compose/libexec/custom-offhost-driver"
+  }
+
+  assert {
+    condition = (
+      local.rootfs_file_permissions["etc/cloud-compose/libexec/custom-offhost-driver"] == "0755" &&
+      local.rootfs_file_permissions["etc/cloud-compose-overlay-marker"] == "0644" &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose/libexec/custom-offhost-driver\"\n  owner: \"root:root\"\n  permissions: \"0755\"",
+      ) &&
+      strcontains(
+        local.write_files_content,
+        "- path: \"/etc/cloud-compose-overlay-marker\"\n  owner: \"root:root\"\n  permissions: \"0644\"",
+      )
+    )
+    error_message = "Embedded GCP overlays must make only the configured off-host backup driver executable."
   }
 }
 
@@ -651,7 +758,16 @@ run "rejects_archive_without_checksum" {
     project_id          = "test-project"
     project_number      = "123456789"
     docker_compose_repo = "https://github.com/libops/wp.git"
+    rootfs              = "testdata/rootfs"
     rootfs_archive_url  = "https://example.invalid/cloud-compose.tar.gz"
+  }
+
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      status_code   = 200
+    }
   }
 
   expect_failures = [google_compute_instance.cloud-compose]

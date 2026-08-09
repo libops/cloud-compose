@@ -161,13 +161,15 @@ module "gcp" {
   overlay_source_instance = local.gcp_overlay.source_instance
   volume_names            = local.gcp_overlay.volume_names
 
-  users                 = local.runtime.users
-  rootfs                = local.runtime.rootfs
-  rootfs_archive_url    = local.runtime.rootfs_archive_url
-  rootfs_archive_sha256 = local.runtime.rootfs_archive_sha256
-  extra_env             = local.runtime.extra_env
-  runcmd                = local.gcp_cloud_init.runcmd
-  initcmd               = local.gcp_cloud_init.initcmd
+  users                      = local.runtime.users
+  rootfs                     = local.runtime.rootfs
+  rootfs_archive_url         = local.runtime.rootfs_archive_url
+  rootfs_archive_sha256      = local.runtime.rootfs_archive_sha256
+  offhost_backup_required    = local.runtime.disaster_recovery.required
+  offhost_backup_driver_path = local.runtime.disaster_recovery.driver_path
+  extra_env                  = local.runtime.extra_env
+  runcmd                     = local.gcp_cloud_init.runcmd
+  initcmd                    = local.gcp_cloud_init.initcmd
 
   artifact_registry_repository = local.gcp_artifact_registry.repository
   artifact_registry_location   = local.gcp_artifact_registry.location

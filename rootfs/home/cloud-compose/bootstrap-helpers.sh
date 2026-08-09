@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 
 cloud_compose_marker_exists() {
-    local marker="$1"
+    local marker="$1" marker_size payload
 
-    [[ -f "$marker" && ! -L "$marker" ]]
+    [[ -f "$marker" && ! -L "$marker" ]] || return 1
+    if [[ "$marker" == "/var/lib/cloud-compose/bootstrap-complete" ]]; then
+        [[ "$(stat -c '%u:%g:%a:%F' -- "$(dirname -- "$marker")")" == "0:0:755:directory" &&
+            "$(stat -c '%u:%g:%a:%h:%F' -- "$marker")" == "0:0:644:1:regular file" ]] || return 1
+        marker_size="$(stat -c '%s' -- "$marker")" || return 1
+        [[ "$marker_size" == "6" ]] || return 1
+        IFS= read -r payload <"$marker" || return 1
+        [[ "$payload" == "ready" ]]
+    fi
 }
 
 cloud_compose_should_run_app_init() {
@@ -23,12 +31,25 @@ cloud_compose_publish_marker() (
         echo "Unsafe Cloud Compose marker directory: $marker_dir" >&2
         return 1
     fi
+    if [[ "$marker" == "/var/lib/cloud-compose/bootstrap-complete" &&
+        ( "$EUID" != "0" ||
+          "$(stat -c '%u:%g:%a:%F' -- "$marker_dir")" != "0:0:755:directory" ) ]]; then
+        echo "Durable Cloud Compose readiness requires a root-owned state directory" >&2
+        return 1
+    fi
 
     umask 022
     tmp_marker="$(mktemp "${marker}.tmp.XXXXXXXXXX")" || return 1
     if ! printf 'ready\n' >"$tmp_marker" ||
-        ! chmod 0644 "$tmp_marker" ||
-        ! mv -fT -- "$tmp_marker" "$marker"; then
+        ! chmod 0644 "$tmp_marker"; then
+        rm -f -- "$tmp_marker"
+        return 1
+    fi
+    if ((EUID == 0)) && ! chown 0:0 "$tmp_marker"; then
+        rm -f -- "$tmp_marker"
+        return 1
+    fi
+    if ! mv -fT -- "$tmp_marker" "$marker"; then
         rm -f -- "$tmp_marker"
         return 1
     fi
@@ -121,6 +142,7 @@ cloud_compose_wait_for_oneshot() {
     local unit="$1"
     local timeout_seconds="$2"
     local poll_seconds="${CLOUD_COMPOSE_SYSTEMD_POLL_SECONDS:-2}"
+    local heartbeat_seconds="${CLOUD_COMPOSE_SYSTEMD_HEARTBEAT_SECONDS:-300}"
     local elapsed=0 active_state load_state
 
     cloud_compose_validate_systemd_unit "$unit" || return
@@ -132,6 +154,11 @@ cloud_compose_wait_for_oneshot() {
     if [[ ! "$poll_seconds" =~ ^[1-9][0-9]{0,2}$ ]] ||
         ((10#$poll_seconds > 300)); then
         echo "CLOUD_COMPOSE_SYSTEMD_POLL_SECONDS must be from 1 through 300 seconds" >&2
+        return 2
+    fi
+    if [[ ! "$heartbeat_seconds" =~ ^[1-9][0-9]{0,3}$ ]] ||
+        ((10#$heartbeat_seconds > 3600)); then
+        echo "CLOUD_COMPOSE_SYSTEMD_HEARTBEAT_SECONDS must be from 1 through 3600 seconds" >&2
         return 2
     fi
 
@@ -146,8 +173,19 @@ cloud_compose_wait_for_oneshot() {
         if [[ "$active_state" == "active" ]]; then
             return 0
         fi
+        if [[ "$active_state" == "failed" ]]; then
+            echo "Cloud Compose systemd unit reached a terminal failed state: $unit" >&2
+            systemctl status --no-pager --full -- "$unit" >&2 || true
+            return 1
+        fi
         sleep "$poll_seconds"
         elapsed=$((elapsed + 10#$poll_seconds))
+        if ((elapsed % 10#$heartbeat_seconds < 10#$poll_seconds)); then
+            echo "Still waiting for $unit after ${elapsed}s (active state: $active_state)" >&2
+            systemctl show --no-pager \
+                --property=ActiveState,SubState,Result,NRestarts,ExecMainCode,ExecMainStatus \
+                -- "$unit" >&2 || true
+        fi
     done
 
     echo "Timed out waiting ${timeout_seconds}s for $unit to become active" >&2

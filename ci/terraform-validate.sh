@@ -31,13 +31,13 @@ validate_public_provider_graph() {
 
   case "$rel" in
     . | providers/gcp)
-      expected_sources=$'hashicorp/cloudinit\nhashicorp/google\nhashicorp/time'
+      expected_sources=$'hashicorp/cloudinit\nhashicorp/google\nhashicorp/http\nhashicorp/time'
       ;;
     providers/do)
-      expected_sources='digitalocean/digitalocean'
+      expected_sources=$'digitalocean/digitalocean\nhashicorp/http'
       ;;
     providers/linode)
-      expected_sources='linode/linode'
+      expected_sources=$'hashicorp/http\nlinode/linode'
       ;;
     *)
       return 0

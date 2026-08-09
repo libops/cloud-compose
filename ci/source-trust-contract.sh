@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -59,6 +60,8 @@ export COMPOSE_PROJECTS_FILE="$projects_file"
 export COMPOSE_APPS_ENV_DIR="$tmp/apps"
 export COMPOSE_APPS_STATE_DIR="$tmp/state"
 export CLOUD_COMPOSE_DATA_ROOT="$tmp"
+export CLOUD_COMPOSE_LIFECYCLE_PROGRAM_DIR="$repo_root/ci/fixtures"
+readonly source_trust_rollout_program="$repo_root/ci/fixtures/source-trust-rollout.sh"
 
 retry_until_success() {
   "$@"
@@ -66,6 +69,9 @@ retry_until_success() {
 
 # shellcheck disable=SC1091
 source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
+export CLOUD_COMPOSE_TEST_LIFECYCLE_EXECUTOR="$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh"
+# shellcheck disable=SC1091
+source "$repo_root/ci/fixtures/checked-lifecycle-executor.sh"
 
 pinned_checkout="$tmp/pinned"
 write_project pinned "$commit_one" "$pinned_checkout"
@@ -135,34 +141,33 @@ git -C "$source_repo" commit -m feature >/dev/null
 feature_commit="$(git -C "$source_repo" rev-parse HEAD)"
 git -C "$source_repo" push origin feature >/dev/null
 git -C "$source_repo" checkout main >/dev/null
-jq '.branch.rollout_commands = [
-      "git fetch -- origin feature",
-      "git checkout --detach FETCH_HEAD"
-    ] | .branch.up_commands = ["true"]' \
+jq --arg rollout_program "$source_trust_rollout_program" \
+  '.branch.rollout_commands = [$rollout_program] | .branch.up_commands = ["true"]' \
   "$projects_file" >"$projects_file.tmp"
 mv "$projects_file.tmp" "$projects_file"
+export SOURCE_TRUST_ROLLOUT_REF=feature
 run_compose_app_lifecycle branch rollout
 assert_head "$branch_checkout" "$feature_commit"
 [[ "$(<"$COMPOSE_APPS_STATE_DIR/branch.deployed-head")" == "$feature_commit" ]] || \
   fail "feature rollout HEAD was not recorded"
 run_compose_app_lifecycle branch up
 assert_head "$branch_checkout" "$feature_commit"
-jq '.branch.rollout_commands = [
-      "git fetch -- origin main",
-      "git checkout --detach FETCH_HEAD"
-    ]' "$projects_file" >"$projects_file.tmp"
+jq --arg rollout_program "$source_trust_rollout_program" \
+  '.branch.rollout_commands = [$rollout_program]' \
+  "$projects_file" >"$projects_file.tmp"
 mv "$projects_file.tmp" "$projects_file"
+export SOURCE_TRUST_ROLLOUT_REF=main
 run_compose_app_lifecycle branch rollout
 assert_head "$branch_checkout" "$commit_four"
 
 # Full bootstrap/source preparation may restore the configured baseline after
 # a recorded rollout. It must not grant the same reset authority to an
 # unrecorded local-ahead commit.
-jq '.branch.rollout_commands = [
-      "git fetch -- origin feature",
-      "git checkout --detach FETCH_HEAD"
-    ]' "$projects_file" >"$projects_file.tmp"
+jq --arg rollout_program "$source_trust_rollout_program" \
+  '.branch.rollout_commands = [$rollout_program]' \
+  "$projects_file" >"$projects_file.tmp"
 mv "$projects_file.tmp" "$projects_file"
+export SOURCE_TRUST_ROLLOUT_REF=feature
 run_compose_app_lifecycle branch rollout
 assert_head "$branch_checkout" "$feature_commit"
 clone_or_update_compose_app branch
@@ -205,6 +210,29 @@ fi
 rm -f -- "$tag_checkout/compose.override.yaml"
 clone_or_update_compose_app tag
 assert_head "$tag_checkout" "$commit_one"
+
+# A successful sitectl reconciliation may intentionally derive tracked runtime
+# configuration from the untracked desired-state document. Accept only the
+# exact recorded diff, reject any later mutation, and restore the committed
+# source before a source move.
+printf 'managed\n' >"$tag_checkout/version.txt"
+pushd "$tag_checkout" >/dev/null
+record_compose_managed_diff tag
+verify_clean_compose_checkout tag
+printf 'unexpected\n' >>version.txt
+if verify_clean_compose_checkout tag >/dev/null 2>&1; then
+  fail "recorded managed Compose state accepted a different tracked change"
+fi
+printf 'managed\n' >version.txt
+restore_recorded_compose_managed_diff tag
+popd >/dev/null
+[[ "$(<"$tag_checkout/version.txt")" == "one" ]] || \
+  fail "recorded managed Compose state was not restored to committed source"
+if ! git -C "$tag_checkout" diff --quiet --ignore-submodules -- ||
+  ! git -C "$tag_checkout" diff --cached --quiet --ignore-submodules --; then
+  fail "recorded managed Compose restore left tracked changes"
+fi
+
 run_compose_app_lifecycle tag init
 [[ "$(<"$COMPOSE_APPS_STATE_DIR/tag.deployed-head")" == "$commit_one" ]] || \
   fail "tag deployed HEAD was not recorded"
@@ -281,20 +309,125 @@ if grep -Eq 'source = "https://github\.com/.*/archive/(refs/)?(heads|tags)/' "$g
 fi
 
 linux_runtime="$repo_root/modules/linux-vm-runtime/main.tf"
-grep -Fq "archive_url_b64='\${base64encode(local.rootfs_archive_url)}'" "$linux_runtime" || \
-  fail "Linux rootfs archive URL is not rendered as base64 shell data"
-if grep -Fq 'archive_url=${jsonencode(local.rootfs_archive_url)}' "$linux_runtime"; then
-  fail "Linux rootfs archive URL is still rendered as executable shell syntax"
-fi
-grep -Fq 'archive_additional_rootfs_commands' "$linux_runtime" || \
-  fail "Additional rootfs content is not reapplied after archive extraction"
+linux_runtime_outputs="$repo_root/modules/linux-vm-runtime/outputs.tf"
+linux_runtime_variables="$repo_root/modules/linux-vm-runtime/variables.tf"
+linux_runtime_tests="$repo_root/modules/linux-vm-runtime/runtime_inputs.tftest.hcl"
+gcp_cloud_init="$repo_root/templates/cloud-init.yml"
+linux_cloud_init="$repo_root/modules/linux-vm-runtime/templates/cloud-init.yml"
+archive_program="$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"
+
+grep -Eq 'ROOTFS_ARCHIVE_URL_B64[[:space:]]*=[[:space:]]*base64encode\(local\.rootfs_archive_url\)' "$linux_runtime" || \
+  fail "Linux rootfs archive URL is not transported as base64 data"
+grep -Fq 'count = local.rootfs_archive_url != "" && local.rootfs_test_source_archive_prefix == "" ? 1 : 0' "$linux_runtime" || \
+  fail "Linux production archive mode does not keep the release sidecar mandatory"
+grep -Fq 'variable "rootfs_test_source_archive_prefix"' "$linux_runtime_variables" || \
+  fail "Linux hosted smoke source mode is not unmistakably test-only"
+grep -Fq 'regex("^cloud-compose-[0-9a-f]{40}$"' "$linux_runtime_variables" || \
+  fail "Linux hosted smoke source mode does not require one exact lowercase commit SHA"
+grep -Fq 'https://github.com/libops/cloud-compose/archive/${trimprefix(local.rootfs_test_source_archive_prefix, "cloud-compose-")}.tar.gz' "$linux_runtime_outputs" || \
+  fail "Linux hosted smoke source mode does not bind its URL to the exact prefix commit"
+for negative_contract in \
+  rejects_source_archive_from_another_commit \
+  rejects_tag_named_source_archive_prefix \
+  rejects_arbitrary_test_source_archive_url; do
+  grep -Fq "run \"${negative_contract}\"" "$linux_runtime_tests" || \
+    fail "Linux hosted smoke source mode lacks ${negative_contract} coverage"
+done
+for production_surface in \
+  "$repo_root/variables.tf" \
+  "$repo_root/modules/gcp/variables.tf" \
+  "$repo_root/providers/gcp/variables.tf" \
+  "$repo_root/providers/do/variables.tf" \
+  "$repo_root/providers/linode/variables.tf"; do
+  if grep -Fq 'rootfs_test_source_archive_prefix' "$production_surface"; then
+    fail "$production_surface exposes the test-only hosted source mode"
+  fi
+done
+grep -Fq 'ROOTFS_ARCHIVE_URL_B64' "$linux_cloud_init" || \
+  fail "Linux cloud-init does not pass rootfs archive URL data to its checked-in entrypoint"
+grep -Fq 'prepare-linux-test-source' "$linux_cloud_init" || \
+  fail "Linux hosted smoke cannot invoke the checked source-archive fixture path"
+grep -Fq 'rootfs_overlay_staging_path' "$linux_runtime" || \
+  fail "Additional rootfs content is not staged for reapplication after archive extraction"
 for runtime_module in "$linux_runtime" "$gcp_module"; do
-  grep -Fq -- "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2" "$runtime_module" || \
-    fail "rootfs archive download is not restricted to HTTPS with TLS 1.2 or newer in $runtime_module"
-  grep -Fq -- '--connect-timeout 10 --max-time 300 -o "$tmp/rootfs.tar.gz" -- "$archive_url"' "$runtime_module" || \
-    fail "rootfs archive download is not bounded or separated from curl options in $runtime_module"
-  grep -Fq 'rootfs_dir="$(find "$tmp" -mindepth 1 -maxdepth 3 -type d -name rootfs -print -quit)"' "$runtime_module" || \
-    fail "rootfs archive discovery does not accept the documented depth range in $runtime_module"
+  grep -Fq 'ROOTFS_ARCHIVE_SCRIPT_B64' "$runtime_module" || \
+    fail "$runtime_module does not transfer the checked-in rootfs archive program"
+  grep -Fq 'rootfs_contract_sha256 = sha256(join("", [' "$runtime_module" || \
+    fail "$runtime_module does not bind archive contents to its exact bundled rootfs"
+  grep -Fq 'cloud-compose-rootfs.contract.sha256' "$runtime_module" || \
+    fail "$runtime_module does not derive the immutable rootfs contract sidecar"
+  grep -Fq 'data "http" "rootfs_contract"' "$runtime_module" || \
+    fail "$runtime_module does not verify the release contract during planning"
+  if grep -Fq -- "curl -fsSL --proto '=https'" "$runtime_module"; then
+    fail "$runtime_module still embeds the rootfs archive shell implementation"
+  fi
+done
+for cloud_init_template in "$linux_cloud_init" "$gcp_cloud_init"; do
+  grep -Fq '/var/lib/cloud-compose/bootstrap/rootfs-archive.sh' "$cloud_init_template" || \
+    fail "$cloud_init_template does not install or invoke the checked-in rootfs archive program"
+done
+grep -Fq -- "curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2" "$archive_program" || \
+  fail "rootfs archive download is not restricted to HTTPS with TLS 1.2 or newer"
+grep -Fq -- '--connect-timeout 10 --max-time 300' "$archive_program" || \
+  fail "rootfs archive download is not bounded"
+grep -Fq -- '-o "$stage_root/rootfs.tar.gz" -- "$archive_url"' "$archive_program" || \
+  fail "rootfs archive URL is not separated from curl options"
+grep -Fq 'validate_rootfs_archive "$stage_root/rootfs.tar.gz"' "$archive_program" || \
+  fail "rootfs archive members are not validated before extraction"
+grep -Fq 'validate_rootfs_test_source_archive "$stage_root/rootfs.tar.gz" "$test_source_prefix"' "$archive_program" || \
+  fail "hosted smoke source-archive members are not validated before extraction"
+grep -Fq 'https://github.com/libops/cloud-compose/archive/${source_commit}.tar.gz' "$archive_program" || \
+  fail "hosted smoke source archives are not tied to one exact libops/cloud-compose commit"
+grep -Fq '[[ "$member_type" == "-" || "$member_type" == "d" ]]' "$archive_program" || \
+  fail "rootfs archive validation does not reject links before extraction"
+grep -Fq 'rootfs archive paths, bytes, or canonical metadata do not match this cloud-compose module source' "$archive_program" || \
+  fail "rootfs archive extraction does not reject module/archive content mismatches"
+grep -Fq "stat -c '%a:%h:%F'" "$archive_program" || \
+  fail "rootfs archive contract does not reject noncanonical modes or hard links"
+for embedded_source in "$linux_runtime" "$gcp_module" "$linux_cloud_init" "$gcp_cloud_init"; do
+  if grep -Eq 'sha256sum -c -|tar --no-same-owner|rootfs_dir=\"\$\(find' "$embedded_source"; then
+    fail "$embedded_source still embeds the substantive rootfs archive program"
+  fi
+done
+
+cloud_smoke="$repo_root/ci/cloud-smoke.sh"
+cloud_smoke_workflow="$repo_root/.github/workflows/cloud-smoke.yml"
+for fixture in "$repo_root/tests/smoke/do/main.tf" "$repo_root/tests/smoke/linode/main.tf"; do
+  grep -Fq 'rootfs_test_source_archive_prefix = "cloud-compose-${var.cloud_compose_source_ref}"' "$fixture" || \
+    fail "$fixture does not select the explicit exact-commit source-archive fixture mode"
+done
+grep -Fq 'source = "../../../modules/digitalocean"' "$repo_root/tests/smoke/do/main.tf" || \
+  fail "DigitalOcean hosted smoke does not keep source-archive mode below the public provider entrypoint"
+grep -Fq 'source = "../../../modules/linode"' "$repo_root/tests/smoke/linode/main.tf" || \
+  fail "Linode hosted smoke does not keep source-archive mode below the public provider entrypoint"
+for example_name in digitalocean linode; do
+  example_main="$repo_root/examples/$example_name/main.tf"
+  example_variables="$repo_root/examples/$example_name/variables.tf"
+  source_ref_block="$(sed -n '/^variable "cloud_compose_source_ref" {/,/^}/p' "$example_variables")"
+  source_sha_block="$(sed -n '/^variable "cloud_compose_source_sha256" {/,/^}/p' "$example_variables")"
+  if grep -Fq 'default' <<<"$source_ref_block" || grep -Fq 'default' <<<"$source_sha_block"; then
+    fail "$example_name runnable example still defaults to an obsolete cloud-compose release"
+  fi
+  grep -Fq 'releases/download/${var.cloud_compose_source_ref}/cloud-compose-rootfs.tar.gz' "$example_main" || \
+    fail "$example_name runnable example does not derive its canonical archive from the required exact release"
+  grep -Fq 'rootfs_archive_sha256 = var.cloud_compose_source_sha256' "$example_main" || \
+    fail "$example_name runnable example does not require the matching archive checksum"
+done
+grep -Fq 'run "rejects_rootfs_release_from_another_module_version"' "$linux_runtime_tests" || \
+  fail "runnable provider examples lack plan-time module/archive mismatch coverage"
+grep -Fq '"$source_ref" != "$checkout_sha"' "$cloud_smoke" || \
+  fail "hosted smoke does not bind its downloadable source archive to the checked-out commit"
+grep -Fq 'CLOUD_COMPOSE_SOURCE_REF: ${{ github.sha }}' "$cloud_smoke_workflow" || \
+  fail "hosted smoke does not select the exact tested merge commit"
+grep -Fq 'contents: read' "$cloud_smoke_workflow" || \
+  fail "hosted smoke lacks read-only repository permission"
+if grep -Fq 'contents: write' "$cloud_smoke_workflow"; then
+  fail "untrusted pull-request smoke code has repository write permission"
+fi
+for cloud_init_template in "$linux_cloud_init" "$gcp_cloud_init"; do
+  if grep -Eq '^[[:space:]]*-[[:space:]]*[|>][+-]?[[:space:]]*$' "$cloud_init_template"; then
+    fail "$cloud_init_template still embeds a shell program instead of invoking a checked-in file"
+  fi
 done
 
 rollout_installer="$repo_root/rootfs/home/cloud-compose/deploy-rollout.sh"

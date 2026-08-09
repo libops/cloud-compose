@@ -29,9 +29,9 @@ module "apps" {
     }
     sitectl = {
       package_versions = {
-        sitectl        = "v1.0.0"
-        sitectl-wp     = "v1.0.0"
-        sitectl-drupal = "v1.0.0"
+        sitectl        = "v1.9.1"
+        sitectl-wp     = "v2.1.0"
+        sitectl-drupal = "v1.5.0"
       }
     }
   }

@@ -234,6 +234,22 @@ phase_output() {
   chmod 0600 "$output_json"
 }
 
+stage_upgrade_remote_program() {
+  local home_dir="$1" key_path="$2" host="$3" port="$4" user="$5"
+  local source_path="$6" program_name="$7"
+  local remote_dir=/home/cloud-compose/.cache/libops-ci remote_path
+
+  [[ "$program_name" =~ ^[a-z0-9][a-z0-9.-]*\.sh$ ]] ||
+    fail "unsafe remote upgrade program name: $program_name"
+  [[ -f "$source_path" && ! -L "$source_path" ]] ||
+    fail "remote upgrade program is missing or unsafe: $source_path"
+  remote_path="$remote_dir/$program_name"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "install -d -m 0700 $remote_dir && install -m 0700 /dev/stdin $remote_path" \
+    <"$source_path" || return 1
+  printf '%s\n' "$remote_path"
+}
+
 dump_remote_logs_from_output() {
   local home_dir="$1" key_path="$2" output_json="$3"
   local host port user project_dir
@@ -247,7 +263,7 @@ dump_remote_logs_from_output() {
 
 run_phase_healthcheck() {
   local phase="$1" home_dir="$2" key_path="$3" output_json="$4"
-  local host port user project_dir
+  local host port user project_dir remote_program
 
   host="$(jq -er '.host' "$output_json")"
   port="$(jq -er '.ssh_port' "$output_json")"
@@ -262,16 +278,11 @@ run_phase_healthcheck() {
     dump_remote_logs "$home_dir" "$key_path" "$host" "$port" "$user" "$project_dir"
     return 1
   fi
-  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set -euo pipefail
-sudo systemctl disable --now internal-services.timer internal-services.service 2>/dev/null || true
-sudo systemctl disable --now cloud-compose-internal-services.timer cloud-compose-internal-services.service 2>/dev/null || true
-for unit in internal-services.timer internal-services.service cloud-compose-internal-services.timer cloud-compose-internal-services.service; do
-  if sudo systemctl is-active --quiet \"\$unit\" 2>/dev/null; then
-    echo \"Fixture-only internal service remained active: \$unit\" >&2
-    exit 1
-  fi
-done
-'"
+  remote_program="$(stage_upgrade_remote_program \
+    "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$repo_root/ci/remote/gcp-upgrade-assert-services-disabled.sh" \
+    gcp-upgrade-assert-services-disabled.sh)"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "$remote_program"
   configure_sitectl_context "$home_dir" "$key_path" "$output_json"
   if ! run_healthcheck "$home_dir" "$key_path" "$output_json"; then
     dump_remote_logs "$home_dir" "$key_path" "$host" "$port" "$user" "$project_dir"
@@ -357,76 +368,40 @@ run_direct_vpc_cold_start() {
 
 verify_metadata_isolation() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local host port user remote_script encoded_script quoted_script
+  local host port user remote_program container_program quoted_container_program
 
   host="$(jq -er '.host' "$output_json")"
   port="$(jq -er '.ssh_port' "$output_json")"
   user="$(jq -er '.ssh_user' "$output_json")"
 
-  read -r -d '' remote_script <<'EOF' || true
-set -euo pipefail
-
-metadata_address="169.254.169.254"
-metadata_header="Metadata-Flavor: Google"
-alpine_image="alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"
-
-# The default bridge must retain normal and Compute internal DNS through the
-# metadata resolver, while metadata HTTP and HTTPS remain unreachable.
-docker run --rm --network bridge "$alpine_image" /bin/sh -ec '
-  nslookup dl-cdn.alpinelinux.org >/dev/null
-  nslookup metadata.google.internal | grep -Fq "169.254.169.254"
-  for metadata_port in 80 443; do
-    if nc -z -w 3 169.254.169.254 "$metadata_port"; then
-      echo "Container reached GCP metadata TCP port ${metadata_port}" >&2
-      exit 1
-    fi
-  done
-'
-
-# Root retains the narrow access required by key rotation.
-curl -fsS --connect-timeout 3 --max-time 10 \
-  --header "$metadata_header" \
-  "http://${metadata_address}/computeMetadata/v1/instance/id" >/dev/null
-
-# No unprivileged host process may reach either metadata transport.
-if sudo -u cloud-compose curl -kfsS --connect-timeout 3 --max-time 5 \
-  --header "$metadata_header" \
-  "http://${metadata_address}/computeMetadata/v1/instance/id" >/dev/null 2>&1; then
-  echo "Unprivileged host process reached GCP metadata HTTP" >&2
-  exit 1
-fi
-if sudo -u cloud-compose curl -kfsS --connect-timeout 3 --max-time 5 \
-  --header "$metadata_header" \
-  "https://${metadata_address}/computeMetadata/v1/instance/id" >/dev/null 2>&1; then
-  echo "Unprivileged host process reached GCP metadata HTTPS" >&2
-  exit 1
-fi
-EOF
-
-  encoded_script="$(printf '%s' "$remote_script" | base64 | tr -d '\n')"
-  quoted_script="$(shell_quote "$encoded_script")"
+  remote_program="$(stage_upgrade_remote_program \
+    "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$repo_root/ci/remote/gcp-upgrade-verify-metadata-isolation.sh" \
+    gcp-upgrade-verify-metadata-isolation.sh)"
+  container_program="$(stage_upgrade_remote_program \
+    "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$repo_root/ci/remote/gcp-upgrade-container-metadata-isolation.sh" \
+    gcp-upgrade-container-metadata-isolation.sh)"
+  quoted_container_program="$(shell_quote "$container_program")"
   echo "Verifying GCP DNS continuity and metadata isolation after the replacement boot"
   ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "printf %s ${quoted_script} | base64 -d | sudo bash"
+    "$remote_program ${quoted_container_program}"
 }
 
 write_disk_sentinels() {
   local home_dir="$1" key_path="$2" output_json="$3" nonce="$4"
-  local host port user encoded_nonce quoted_nonce
+  local host port user remote_program quoted_nonce
 
   host="$(jq -er '.host' "$output_json")"
   port="$(jq -er '.ssh_port' "$output_json")"
   user="$(jq -er '.ssh_user' "$output_json")"
-  encoded_nonce="$(printf '%s' "$nonce" | base64 | tr -d '\n')"
-  quoted_nonce="$(shell_quote "$encoded_nonce")"
-
-  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" "bash -lc 'set -euo pipefail
-sudo findmnt -n /mnt/disks/data >/dev/null
-sudo findmnt -n /mnt/disks/volumes >/dev/null
-printf %s ${quoted_nonce} | base64 -d | sudo tee /mnt/disks/data/.cloud-compose-upgrade-sentinel >/dev/null
-printf %s ${quoted_nonce} | base64 -d | sudo tee /mnt/disks/volumes/.cloud-compose-upgrade-sentinel >/dev/null
-sudo sync
-'"
+  remote_program="$(stage_upgrade_remote_program \
+    "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$repo_root/ci/remote/gcp-upgrade-write-disk-sentinels.sh" \
+    gcp-upgrade-write-disk-sentinels.sh)"
+  quoted_nonce="$(shell_quote "$nonce")"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$remote_program ${quoted_nonce}"
 }
 
 verify_disk_sentinels() {
@@ -437,9 +412,9 @@ verify_disk_sentinels() {
   port="$(jq -er '.ssh_port' "$output_json")"
   user="$(jq -er '.ssh_user' "$output_json")"
   actual_data="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "sudo cat /mnt/disks/data/.cloud-compose-upgrade-sentinel")"
+    "cat /mnt/disks/data/.cloud-compose-upgrade-sentinel")"
   actual_volumes="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "sudo cat /mnt/disks/volumes/.cloud-compose-upgrade-sentinel")"
+    "cat /mnt/disks/volumes/.cloud-compose-upgrade-sentinel")"
 
   [[ "$actual_data" == "$nonce" ]] || fail "the persistent data-disk sentinel did not survive the upgrade"
   [[ "$actual_volumes" == "$nonce" ]] || fail "the Docker-volume disk sentinel did not survive the upgrade"
@@ -447,27 +422,18 @@ verify_disk_sentinels() {
 
 read_data_filesystem_size_bytes() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local host port user remote_script encoded_script quoted_script size_bytes
+  local host port user remote_program size_bytes
 
   host="$(jq -er '.host' "$output_json")"
   port="$(jq -er '.ssh_port' "$output_json")"
   user="$(jq -er '.ssh_user' "$output_json")"
 
-  read -r -d '' remote_script <<'EOF' || true
-set -euo pipefail
-
-filesystem="$(findmnt -n -o FSTYPE --target /mnt/disks/data)"
-if [[ "$filesystem" != "ext4" ]]; then
-  echo "Application-data mount uses ${filesystem:-an unknown filesystem}, expected ext4" >&2
-  exit 1
-fi
-df --block-size=1 --output=size -- /mnt/disks/data | awk 'NR == 2 { print $1 }'
-EOF
-
-  encoded_script="$(printf '%s' "$remote_script" | base64 | tr -d '\n')"
-  quoted_script="$(shell_quote "$encoded_script")"
+  remote_program="$(stage_upgrade_remote_program \
+    "$home_dir" "$key_path" "$host" "$port" "$user" \
+    "$repo_root/ci/remote/gcp-upgrade-read-filesystem-size.sh" \
+    gcp-upgrade-read-filesystem-size.sh)"
   size_bytes="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "printf %s ${quoted_script} | base64 -d | sudo bash")"
+    "$remote_program")"
   size_bytes="${size_bytes//$'\r'/}"
   [[ "$size_bytes" =~ ^[1-9][0-9]*$ ]] ||
     fail "mounted application-data ext4 reported an invalid byte capacity: ${size_bytes:-empty}"
@@ -740,7 +706,7 @@ run_upgrade() (
   chmod 0600 "$old_state_json" "$old_state_list"
   write_phase_ids old "$old_state_json" "$old_ids"
 
-  nonce="$(printf '%s' "${run_id}:${base_sha}:${current_sha}" | sha256sum | awk '{print $1}')"
+  read -r nonce _ < <(printf '%s' "${run_id}:${base_sha}:${current_sha}" | sha256sum)
   write_disk_sentinels "$old_home" "$key_path" "$old_output" "$nonce"
 
   initialize_phase "$new_root" "$new_data" "$state_path"

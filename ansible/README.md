@@ -62,6 +62,27 @@ is meaningful: it disables that phase and is not replaced by the default.
 Runtime feature switches must be YAML booleans, not quoted strings; ambiguous
 values are rejected before host mutation.
 
+Lifecycle list entries are program selectors, not shell source. Use the
+built-in `/home/cloud-compose/default-lifecycle.sh ACTION`, `true`, `false`, or
+one argument-free root-owned executable immediately below
+`/etc/cloud-compose/lifecycle.d`. Put multi-step logic and quoting inside that
+checked program file.
+
+The provider-neutral disaster-recovery interface is shared with Terraform:
+
+```yaml
+cloud_compose_runtime:
+  disaster_recovery:
+    required: true
+    driver_path: /etc/cloud-compose/libexec/offhost-backup-driver
+```
+
+Install that executable and its credentials separately as root. The role
+renders only the boolean requirement and executable path; storage endpoints,
+credentials, encryption keys, and retention policy must not be placed in
+inventory. See [the driver contract](../docs/disaster-recovery.md) for receipt
+and scheduled restore-proof requirements.
+
 Set `cloud_compose_runtime.rollout` to enable the same authenticated rollout
 listener used by Terraform. Supply a pinned HTTPS `release_url`, its lowercase
 `release_sha256`, an HTTPS `jwks_uri`, `jwt_audience`, and optional JSON-object
@@ -73,7 +94,8 @@ The role installs lifecycle dispatchers as `root:cloud-compose` mode `0750` and
 the root-consumed `.env`, project/application JSON, and managed-artifact
 manifest as `root:cloud-compose` mode `0640`. Reapplying the role restores that
 ownership boundary while leaving app checkout directories writable by the
-`cloud-compose` account.
+`cloud-compose` account. Before a requested runtime bootstrap, the role invokes
+the same checked-in bootstrap path hardener used by the Terraform modules.
 
 The normal on-prem shape is one app per machine. Put each machine in the
 `cloud_compose` inventory group and set that host's template/runtime variables.
@@ -100,7 +122,7 @@ all:
             sitectl:
               environment: production
               package_versions:
-                sitectl-isle: v1.0.0
+                sitectl-isle: v1.5.0
         wp-prod.example.edu:
           ansible_user: debian
           cloud_compose_name: wp-prod

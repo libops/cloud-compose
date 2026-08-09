@@ -30,37 +30,46 @@ func TestTemplateVersionContract(t *testing.T) {
 
 	expectedVersions := map[string]map[string]string{
 		"default": {
-			"sitectl": "v1.0.0",
+			"sitectl": "v1.9.1",
 		},
 		"archivesspace": {
-			"sitectl":               "v1.0.0",
-			"sitectl-archivesspace": "v1.0.0",
+			"sitectl":               "v1.9.1",
+			"sitectl-archivesspace": "v2.1.1",
 		},
 		"drupal": {
-			"sitectl":        "v1.0.0",
-			"sitectl-drupal": "v1.0.0",
+			"sitectl":        "v1.9.1",
+			"sitectl-drupal": "v1.5.0",
 		},
 		"isle": {
-			"sitectl":        "v1.0.0",
-			"sitectl-drupal": "v1.0.0",
-			"sitectl-isle":   "v1.0.0",
+			"sitectl":        "v1.9.1",
+			"sitectl-drupal": "v1.5.0",
+			"sitectl-isle":   "v1.6.0",
 		},
 		"ojs": {
-			"sitectl":     "v1.0.0",
-			"sitectl-ojs": "v1.0.0",
+			"sitectl":     "v1.9.1",
+			"sitectl-ojs": "v1.4.0",
 		},
 		"omeka-classic": {
-			"sitectl":               "v1.0.0",
-			"sitectl-omeka-classic": "v1.0.0",
+			"sitectl":               "v1.9.1",
+			"sitectl-omeka-classic": "v1.4.0",
 		},
 		"omeka-s": {
-			"sitectl":         "v1.0.0",
-			"sitectl-omeka-s": "v1.0.0",
+			"sitectl":         "v1.9.1",
+			"sitectl-omeka-s": "v1.4.0",
 		},
 		"wp": {
-			"sitectl":    "v1.0.0",
-			"sitectl-wp": "v1.0.0",
+			"sitectl":    "v1.9.1",
+			"sitectl-wp": "v2.1.0",
 		},
+	}
+	expectedBranches := map[string]string{
+		"archivesspace": "v1.0.1",
+		"drupal":        "v1.2.1",
+		"isle":          "v1.3.1",
+		"ojs":           "v1.2.1",
+		"omeka-classic": "v1.2.1",
+		"omeka-s":       "v1.2.1",
+		"wp":            "v1.1.1",
 	}
 
 	if !maps.Equal(registry.Default.PackageVersions, expectedVersions["default"]) {
@@ -80,10 +89,7 @@ func TestTemplateVersionContract(t *testing.T) {
 		if !maps.Equal(definition.PackageVersions, expected) {
 			t.Errorf("template %q package versions diverged:\nexpected %s\nactual   %s", name, prettyJSON(t, expected), prettyJSON(t, definition.PackageVersions))
 		}
-		expectedBranch := "v1.0.0"
-		if name == "isle" {
-			expectedBranch = "v1.1.0"
-		}
+		expectedBranch := expectedBranches[name]
 		if definition.Branch != expectedBranch {
 			t.Errorf("template %q branch = %q, want stable contract %s", name, definition.Branch, expectedBranch)
 		}
@@ -140,8 +146,8 @@ func TestTemplateVersionContract(t *testing.T) {
 		for _, packageName := range []string{"sitectl", "sitectl-wp", "sitectl-drupal"} {
 			requireContains(t, content, packageName, relativePath+" bin-pack package")
 		}
-		requireContains(t, content, `sitectl        = "v1.0.0"`, relativePath+" bin-pack core selector")
-		requireContains(t, content, `sitectl-wp     = "v1.0.0"`, relativePath+" bin-pack WordPress selector")
-		requireContains(t, content, `sitectl-drupal = "v1.0.0"`, relativePath+" bin-pack Drupal selector")
+		requireContains(t, content, `sitectl        = "v1.9.1"`, relativePath+" bin-pack core selector")
+		requireContains(t, content, `sitectl-wp     = "v2.1.0"`, relativePath+" bin-pack WordPress selector")
+		requireContains(t, content, `sitectl-drupal = "v1.5.0"`, relativePath+" bin-pack Drupal selector")
 	}
 }

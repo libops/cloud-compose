@@ -2,6 +2,28 @@
 
 set -euo pipefail
 
+_cc_docker_plugins_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_docker_plugins_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_docker_plugins_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_docker_plugins_source _cc_docker_plugins_dir _cc_docker_plugins_installed_home
+if [[ -n "$_cc_docker_plugins_installed_home" &&
+    ( "$_cc_docker_plugins_installed_home" == "/" ||
+        "$_cc_docker_plugins_source" == "${_cc_docker_plugins_installed_home%/}/"* ) ]]; then
+    _cc_docker_plugins_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_docker_plugins_checked_programs="$_cc_docker_plugins_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_docker_plugins_checked_programs
+# shellcheck disable=SC1090
+source "$_cc_docker_plugins_checked_programs"
+cloud_compose_bind_program \
+    "$_cc_docker_plugins_source" \
+    CLOUD_COMPOSE_RELEASE_CHECKSUM_PROGRAM \
+    /etc/cloud-compose/awk/release-checksum.awk \
+    "$_cc_docker_plugins_dir/../../etc/cloud-compose/awk/release-checksum.awk"
+release_checksum_program="$CLOUD_COMPOSE_RELEASE_CHECKSUM_PROGRAM"
+readonly release_checksum_program
+
 docker_arch() {
     case "$(uname -m)" in
         x86_64 | amd64) echo "x86_64" ;;
@@ -28,22 +50,7 @@ release_checksum() {
     local manifest="$1"
     local asset="$2"
 
-    awk -v asset="$asset" '
-        {
-            filename = $2
-            sub(/^\*/, "", filename)
-            if (filename == asset) {
-                checksum = $1
-                matches++
-            }
-        }
-        END {
-            if (matches != 1) {
-                exit 1
-            }
-            print checksum
-        }
-    ' "$manifest"
+    awk -v asset="$asset" -f "$release_checksum_program" "$manifest"
 }
 
 validate_release_version() {

@@ -2,6 +2,29 @@
 
 set -euo pipefail
 
+_cc_persist_filesystems_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_persist_filesystems_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_persist_filesystems_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_persist_filesystems_source _cc_persist_filesystems_dir _cc_persist_filesystems_installed_home
+if [[ -n "$_cc_persist_filesystems_installed_home" &&
+    ( "$_cc_persist_filesystems_installed_home" == "/" ||
+        "$_cc_persist_filesystems_source" == "${_cc_persist_filesystems_installed_home%/}/"* ) ]]; then
+    # shellcheck disable=SC1091
+    source /etc/cloud-compose/libexec/checked-programs.bash
+    cloud_compose_bind_program \
+        "$_cc_persist_filesystems_source" \
+        CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM \
+        /etc/cloud-compose/awk/reconcile-fstab.awk \
+        /etc/cloud-compose/awk/reconcile-fstab.awk
+    fstab_reconcile_program="$CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM"
+else
+    # Early boot executes a verified root-owned copy from /run and passes its
+    # separately verified awk program explicitly. Repository contracts use the
+    # same override without weakening the installed /home path.
+    fstab_reconcile_program="${CLOUD_COMPOSE_FSTAB_RECONCILE_PROGRAM:-$_cc_persist_filesystems_dir/../../etc/cloud-compose/awk/reconcile-fstab.awk}"
+fi
+readonly fstab_reconcile_program
+
 log() {
     printf '[filesystem-persist] %s\n' "$*" >&2
 }
@@ -185,28 +208,8 @@ main() {
     trap 'rm -f -- "$tmp"' EXIT
     awk -v begin="$begin_marker" -v end="$end_marker" \
         -v data_device="$data_device" -v data_provider_mount="$data_provider_mount" \
-        -v volumes_device="$volumes_device" -v volumes_provider_mount="$volumes_provider_mount" '
-        $0 == begin { managed = 1; next }
-        $0 == end { managed = 0; next }
-        !managed {
-            if (data_provider_mount != "" && $2 == data_provider_mount) {
-                if ($1 == data_device) next
-                conflict = 1
-            }
-            if (volumes_provider_mount != "" && $2 == volumes_provider_mount) {
-                if ($1 == volumes_device) next
-                conflict = 1
-            }
-            if ($2 == "/mnt/disks/data" ||
-                $2 == "/mnt/disks/volumes" ||
-                $2 == "/mnt/disks/data/docker/volumes" ||
-                $2 == "/mnt/disks/prod-readonly") {
-                conflict = 1
-            }
-            print
-        }
-        END { if (managed || conflict) exit 42 }
-    ' "$fstab_path" >"$tmp" || {
+        -v volumes_device="$volumes_device" -v volumes_provider_mount="$volumes_provider_mount" \
+        -f "$fstab_reconcile_program" "$fstab_path" >"$tmp" || {
         status=$?
         if [[ "$status" -eq 42 ]]; then
             log "fstab contains an unterminated managed block or an unmanaged cloud-compose mount target"

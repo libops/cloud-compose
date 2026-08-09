@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export CLOUD_COMPOSE_JQ_PROGRAM_DIR="$repo_root/rootfs/etc/cloud-compose/jq"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -14,6 +15,23 @@ fail() {
 assert_contains() {
   local file="$1" pattern="$2"
   grep -Fq -- "$pattern" "$file" || fail "$file does not contain: $pattern"
+}
+
+binding_inventory() {
+  local file="$1" marker="$2" line
+  local capture=false
+
+  while IFS= read -r line; do
+    if [[ "$line" == *"$marker"* ]]; then
+      capture=true
+    fi
+    if [[ "$capture" == "true" ]]; then
+      printf '%s\n' "$line"
+      if [[ "$line" != *\\ ]]; then
+        capture=false
+      fi
+    fi
+  done <"$file"
 }
 
 mkdir -p "$tmp/bin"
@@ -165,6 +183,8 @@ assert_contains "$profile_script" 'export PATH="/usr/local/sbin:/usr/local/bin:/
 tmpfiles_conf="$repo_root/rootfs/etc/tmpfiles.d/cloud-compose.conf"
 assert_contains "$tmpfiles_conf" 'd /run/lock/cloud-compose 0750 root cloud-compose -'
 assert_contains "$tmpfiles_conf" 'f /run/lock/cloud-compose/lifecycle.lock 0660 root cloud-compose -'
+assert_contains "$tmpfiles_conf" 'd /var/lib/cloud-compose 0755 root root -'
+assert_contains "$tmpfiles_conf" 'd /home/cloud-compose 0755 root root -'
 host_init="$repo_root/rootfs/home/cloud-compose/host-init.sh"
 if grep -Eq 'chown[[:space:]]+-R[[:space:]]+cloud-compose[^[:space:]]*[[:space:]]+/home/cloud-compose' "$host_init"; then
   fail "host initialization gives the app account recursive ownership of root-executed code"
@@ -174,11 +194,25 @@ if grep -Eq 'chown[[:space:]]+-R[[:space:]]+cloud-compose[^[:space:]]*[[:space:]
 fi
 assert_contains "$host_init" 'chown root:root /home/cloud-compose'
 assert_contains "$host_init" "-exec chown root:root {} +"
+assert_contains "$host_init" 'Unsafe Cloud Compose lifecycle dispatcher:'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/bootstrap-security.sh" \
+  'Cloud Compose control input is not root-controlled'
 assert_contains "$host_init" '/home/cloud-compose/.sitectl \'
 assert_contains "$host_init" 'install -d -m 0750 -o cloud-compose -g cloud-compose "$mutable_dir"'
+assert_contains "$host_init" 'Managed command directory was not secured by the runtime installer'
+if sed -n '/for mutable_dir in/,/done/p' "$host_init" | grep -Fq '/home/cloud-compose/bin'; then
+  fail "host initialization leaves the privileged published command directory app-writable"
+fi
 assert_contains "$host_init" 'install -d -m 1775 -o root -g cloud-compose /mnt/disks/data'
 assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/volumes'
 assert_contains "$host_init" 'install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops'
+managed_runtime="$repo_root/rootfs/home/cloud-compose/libops-managed-runtime.sh"
+assert_contains "$managed_runtime" 'prepare_managed_runtime_directory'
+assert_contains "$managed_runtime" 'validate_published_bin_directory'
+assert_contains "$managed_runtime" '$STATE_DIR:0755:false'
+assert_contains "$managed_runtime" '$PUBLISHED_BIN_DIR:0755:true'
+assert_contains "$managed_runtime" 'managed runtime updates must run as root'
+assert_contains "$managed_runtime" 'production managed runtime directories require a root updater'
 if grep -A12 -F 'source_compose_app_env()' "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" | \
     grep -Eq 'source[[:space:]]+.*COMPOSE_APPS_ENV_DIR'; then
   fail "privileged Compose manifest loading still sources an app-writable shell file"
@@ -215,7 +249,8 @@ fi
 
 assert_contains "$rotate_script" 'prepare|status|audit|recover|authenticate|ready|commit|rollback|rollback-ready'
 assert_contains "$rotate_script" 'ROTATION_DISABLE_GRACE_SECONDS'
-assert_contains "$rotate_script" 'https://oauth2.googleapis.com/token'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/jq/service-account-credentials-valid.jq" \
+  'https://oauth2.googleapis.com/token'
 assert_contains "$rotate_script" 'KEY_OPERATION_RESULT=absent'
 
 run_script="$repo_root/rootfs/home/cloud-compose/run.sh"
@@ -227,11 +262,193 @@ if grep -Fq 'rotate-keys' "$repo_root/rootfs/home/cloud-compose/docker-prune.sh"
   fail "provider-neutral Docker prune still invokes GCP key rotation"
 fi
 
-archive_source="$repo_root/modules/linux-vm-runtime/main.tf"
+archive_source="$repo_root/rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"
 verify_line="$(grep -n 'sha256sum -c -' "$archive_source" | head -n 1 | cut -d: -f1)"
-extract_line="$(grep -n 'tar -xzf "\$tmp/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
-[[ -n "$verify_line" && -n "$extract_line" && "$verify_line" -lt "$extract_line" ]] || \
-  fail "rootfs archive is not verified before extraction"
+source_members_line="$(grep -n 'validate_rootfs_test_source_archive "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+source_extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+members_line="$(grep -n 'validate_rootfs_archive "\$stage_root/rootfs.tar.gz"' "$archive_source" | head -n 1 | cut -d: -f1)"
+extract_line="$(grep -n 'tar --no-same-owner --same-permissions -xzf "\$stage_root/rootfs.tar.gz"' "$archive_source" | tail -n 1 | cut -d: -f1)"
+contract_line="$(grep -n 'rootfs archive paths, bytes, or canonical metadata do not match this cloud-compose module source' "$archive_source" | head -n 1 | cut -d: -f1)"
+copy_line="$(grep -n 'cp -a "\$staged_rootfs"/. /' "$archive_source" | head -n 1 | cut -d: -f1)"
+[[ -n "$verify_line" && -n "$source_members_line" && -n "$source_extract_line" &&
+  -n "$members_line" && -n "$extract_line" && -n "$contract_line" && -n "$copy_line" &&
+  "$verify_line" -lt "$source_members_line" && "$source_members_line" -lt "$source_extract_line" &&
+  "$source_extract_line" -lt "$contract_line" && "$verify_line" -lt "$members_line" &&
+  "$members_line" -lt "$extract_line" && "$extract_line" -lt "$contract_line" &&
+  "$contract_line" -lt "$copy_line" ]] || \
+  fail "$archive_source does not verify archive bytes and canonical rootfs metadata before installation"
+assert_contains "$archive_source" "stat -c '%a:%h:%F'"
+assert_contains "$archive_source" '[[ "$metadata" == "${expected_mode}:1:regular file" ]]'
+assert_contains "$archive_source" '[[ "$require_root_owner" != "true" || "$owner" == "0:0" ]]'
+
+if [[ -n "$(git -C "$repo_root" ls-files 'rootfs/usr/**')" ]]; then
+  fail "Cloud Compose-owned rootfs programs still target immutable /usr"
+fi
+for trusted_program in \
+  rootfs/etc/cloud-compose/awk/compose-secret-files.awk \
+  rootfs/etc/cloud-compose/awk/reconcile-fstab.awk \
+  rootfs/etc/cloud-compose/awk/release-checksum.awk \
+  rootfs/etc/cloud-compose/bin/cloud-compose-diagnostics.sh \
+  rootfs/etc/cloud-compose/libexec/checked-programs.bash \
+  rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh \
+  rootfs/etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh \
+  rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh \
+  rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh \
+  rootfs/etc/cloud-compose/libexec/build-cos-make.sh \
+  rootfs/etc/cloud-compose/libexec/bootstrap-security.sh \
+  rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh \
+  rootfs/etc/cloud-compose/libexec/rootfs-archive.sh \
+  rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh \
+  rootfs/etc/cloud-compose/libexec/run-bootstrap.sh \
+  rootfs/etc/cloud-compose/libexec/run-root-program.sh \
+  rootfs/etc/cloud-compose/jq/offhost-validate-manifest.jq \
+  rootfs/etc/cloud-compose/jq/compose-validate-projects.jq \
+  rootfs/etc/cloud-compose/jq/rotation-validate-state.jq \
+  rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq; do
+  [[ -f "$repo_root/$trusted_program" ]] || fail "COS-safe trusted program is missing: $trusted_program"
+done
+
+checked_programs="$repo_root/rootfs/etc/cloud-compose/libexec/checked-programs.bash"
+assert_contains "$checked_programs" 'candidate_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"'
+assert_contains "$checked_programs" 'installed_home="$(cloud_compose_installed_home)" || return 2'
+assert_contains "$checked_programs" 'Installed Cloud Compose home resolves to the filesystem root'
+assert_contains "$checked_programs" '"$alias_target" != "var/home"'
+assert_contains "$checked_programs" "stat -c '%u:%g:%a'"
+assert_contains "$checked_programs" "stat -c '%u:%g:%a:%h'"
+assert_contains "$checked_programs" '"$program" == "$program_dir/$program_name"'
+assert_contains "$checked_programs" 'cloud_compose_validate_installed_program_dir "$selected"'
+assert_contains "$checked_programs" '$((8#$mode & 0022)) -ne 0'
+assert_contains "$checked_programs" '"$links" != 1'
+assert_contains "$checked_programs" 'cannot override the installed Cloud Compose program'
+assert_contains "$checked_programs" 'cannot override the installed Cloud Compose source program'
+assert_contains "$checked_programs" 'readonly "$variable_name"'
+if grep -Fq '%F' "$checked_programs"; then
+  fail "checked program validation relies on localized file-type labels"
+fi
+
+while IFS= read -r checked_consumer; do
+  assert_contains "$checked_consumer" '/etc/cloud-compose/libexec/checked-programs.bash'
+  assert_contains "$checked_consumer" 'readlink -f -- /home/cloud-compose'
+done < <(grep -RlE --include='*.sh' \
+  'cloud_compose_bind_(program|program_dir|source_program)' \
+  "$repo_root/rootfs/home/cloud-compose")
+
+if grep -REq --include='*.sh' '\$\{![A-Za-z_]' \
+  "$repo_root/rootfs/home/cloud-compose"; then
+  fail "indirect parameter expansion bypasses the installed source/program inventory"
+fi
+
+source_reference_pattern='\$CLOUD_COMPOSE_[A-Z0-9_]*_PATH([^A-Z0-9_]|$)|\$\{CLOUD_COMPOSE_[A-Z0-9_]*_PATH([^A-Z0-9_]|$)'
+while IFS= read -r source_consumer; do
+  source_binding_inventory="$(binding_inventory \
+    "$source_consumer" cloud_compose_bind_source_program)"
+  mapfile -t referenced_source_variables < <(
+    grep -oE \
+      '\$CLOUD_COMPOSE_[A-Z0-9_]*_PATH|\$\{CLOUD_COMPOSE_[A-Z0-9_]*_PATH([^A-Z0-9_]|$)' \
+      "$source_consumer" |
+      sed -E 's/^\$\{//; s/^\$//; s/([^A-Z0-9_]).*$//' |
+      sort -u
+  )
+  requires_source_binder=false
+  for source_variable in "${referenced_source_variables[@]}"; do
+    case "$source_variable" in
+      CLOUD_COMPOSE_DOCKER_PRUNE_LOCK_PATH)
+        [[ "$source_consumer" == "$repo_root/rootfs/home/cloud-compose/docker-prune.sh" ]] || \
+          fail "$source_variable is registered only as docker-prune lock data"
+        continue
+        ;;
+      CLOUD_COMPOSE_FSTAB_PATH | CLOUD_COMPOSE_FSTAB_LOCK_PATH)
+        [[ "$source_consumer" == "$repo_root/rootfs/home/cloud-compose/persist-filesystems.sh" ]] || \
+          fail "$source_variable is registered only as fstab data"
+        continue
+        ;;
+    esac
+    requires_source_binder=true
+    grep -Eq "(^|[^A-Z0-9_])${source_variable}([^A-Z0-9_]|$)" \
+      <<<"$source_binding_inventory" || \
+      fail "$source_consumer references $source_variable without binding that exact source variable"
+  done
+  if [[ "$requires_source_binder" == "true" ]]; then
+    assert_contains "$source_consumer" 'cloud_compose_bind_source_program'
+    assert_contains "$source_consumer" '/etc/cloud-compose/libexec/checked-programs.bash'
+    assert_contains "$source_consumer" 'readlink -f -- /home/cloud-compose'
+  fi
+done < <(grep -RlE --include='*.sh' \
+  "$source_reference_pattern" \
+  "$repo_root/rootfs/home/cloud-compose")
+
+program_reference_pattern='\$CLOUD_COMPOSE_[A-Z0-9_]*(PROGRAM|PROGRAM_DIR)([^A-Z0-9_]|$)|\$\{CLOUD_COMPOSE_[A-Z0-9_]*(PROGRAM|PROGRAM_DIR)([^A-Z0-9_]|$)'
+while IFS= read -r program_consumer; do
+  program_dir_binding_inventory="$(binding_inventory \
+    "$program_consumer" cloud_compose_bind_program_dir)"
+  program_binding_inventory="$(binding_inventory \
+    "$program_consumer" 'cloud_compose_bind_program ')"
+  mapfile -t referenced_program_variables < <(
+    grep -oE \
+      '\$CLOUD_COMPOSE_[A-Z0-9_]*(PROGRAM|PROGRAM_DIR)|\$\{CLOUD_COMPOSE_[A-Z0-9_]*(PROGRAM|PROGRAM_DIR)([^A-Z0-9_]|$)' \
+      "$program_consumer" |
+      sed -E 's/^\$\{//; s/^\$//; s/([^A-Z0-9_]).*$//' |
+      sort -u
+  )
+  for program_variable in "${referenced_program_variables[@]}"; do
+    case "$program_variable" in
+      *_PROGRAM_DIR) binding_inventory="$program_dir_binding_inventory" ;;
+      *) binding_inventory="$program_binding_inventory" ;;
+    esac
+    grep -Eq "(^|[^A-Z0-9_])${program_variable}([^A-Z0-9_]|$)" \
+      <<<"$binding_inventory" || \
+      fail "$program_consumer references $program_variable without binding that exact program variable"
+  done
+  assert_contains "$program_consumer" '/etc/cloud-compose/libexec/checked-programs.bash'
+  assert_contains "$program_consumer" 'readlink -f -- /home/cloud-compose'
+done < <(grep -RlE --include='*.sh' \
+  "$program_reference_pattern" \
+  "$repo_root/rootfs/home/cloud-compose")
+
+assert_contains "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" \
+  '/etc/cloud-compose/awk/compose-secret-files.awk'
+[[ ! -e "$repo_root/rootfs/home/cloud-compose/compose-secret-files.awk" ]] || \
+  fail "Compose secret extraction program remains under the runtime home"
+assert_contains "$rotate_script" 'cloud_compose_bind_source_program'
+assert_contains "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" \
+  'CLOUD_COMPOSE_ROTATE_KEYS_PATH'
+assert_contains "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" \
+  'CLOUD_COMPOSE_COMPOSE_APPS_PATH'
+assert_contains "$managed_runtime" 'cloud_compose_bind_source_program'
+
+assert_contains "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" \
+  '-f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/compose-validate-projects.jq"'
+assert_contains "$repo_root/rootfs/home/cloud-compose/compose-apps.sh" \
+  'if [[ "$filter_status" -ne 1 ]]; then'
+assert_contains "$repo_root/rootfs/home/cloud-compose/profile.sh" \
+  '-f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/application-env-validate.jq"'
+assert_contains "$rotate_script" \
+  '-f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/rotation-validate-state.jq"'
+assert_contains "$repo_root/rootfs/home/cloud-compose/rotate-keys-app.sh" \
+  '-f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/service-account-credentials-valid.jq"'
+assert_contains "$managed_runtime" \
+  '-f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/sitectl-package-versions-validate.jq"'
+assert_contains "$repo_root/rootfs/home/cloud-compose/persist-filesystems.sh" \
+  '-f "$fstab_reconcile_program"'
+assert_contains "$repo_root/rootfs/home/cloud-compose/install-docker-plugins.sh" \
+  '-f "$release_checksum_program"'
+
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" \
+  '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh" \
+  '/etc/cloud-compose/libexec/harden-bootstrap-paths.sh'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
+  'chown root:root "$cloud_compose_home"'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/libexec/harden-bootstrap-paths.sh" \
+  "0:1:regular file"
+for cloud_init_program in \
+  "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" \
+  "$repo_root/rootfs/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"; do
+  assert_contains "$cloud_init_program" 'install-diagnostics "$diagnostics_sha256"'
+  if grep -Eq 'install -d[^#]* /usr/local' "$cloud_init_program"; then
+    fail "$cloud_init_program writes Cloud Compose-owned programs beneath immutable /usr"
+  fi
+done
 
 for variables_file in \
   "$repo_root/variables.tf" \

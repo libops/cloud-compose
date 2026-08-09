@@ -10,6 +10,9 @@ cloud_compose:
   internal_services_auto_update: true
   template: wp
   runtime:
+    disaster_recovery:
+      required: false
+      driver_path: /etc/cloud-compose/libexec/salt-offhost
     extra_env:
       BASH_ENV: /tmp/cloud-compose-salt-untrusted-bash-env
       LD_PRELOAD: /tmp/cloud-compose-salt-untrusted-preload.so
@@ -43,8 +46,8 @@ cloud_compose:
     sitectl:
       environment: production
       package_versions:
-        sitectl: v1.0.0
-        sitectl-wp: v1.0.0
+        sitectl: v1.8.2
+        sitectl-wp: v2.0.0
     managed_runtime:
       enabled: false
       internal_services_enabled: false

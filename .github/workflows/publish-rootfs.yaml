@@ -20,11 +20,17 @@ jobs:
           ci/rootfs-package-contract.sh
           ci/package-rootfs.sh dist
 
-      - name: Upload rootfs asset and checksum
+      - name: Upload rootfs asset, archive checksum, and source contract
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release upload "$GITHUB_REF_NAME"
           dist/cloud-compose-rootfs.tar.gz
           dist/cloud-compose-rootfs.tar.gz.sha256
+          dist/cloud-compose-rootfs.contract.sha256
           --clobber
+
+      - name: Verify published rootfs release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ci/verify-rootfs-release.sh tag "$GITHUB_REF_NAME"

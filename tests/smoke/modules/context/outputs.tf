@@ -5,7 +5,7 @@ output "name" {
 
 output "runtime" {
   value       = local.runtime_base
-  description = "Provider-neutral runtime overrides for smoke tests."
+  description = "Provider-neutral runtime with template defaults and private fixture inputs resolved for hosted smoke tests."
 }
 
 output "gcp_runtime" {

@@ -86,6 +86,8 @@ all:
           cloud_compose_name: ${SMOKE_NAME}
           cloud_compose_template: ${SMOKE_TEMPLATE}
           cloud_compose_dedicated_host_acknowledged: true
+          cloud_compose_bootstrap_timeout: 1500
+          cloud_compose_bootstrap_wait_seconds: 1200
           cloud_compose_runtime:
             compose:
               ingress_port: 80
@@ -100,6 +102,8 @@ EOF
 }
 
 deploy_salt() {
+  local remote_command
+
   if ! tar -C /work \
     --exclude="./.git" \
     --exclude="./.terraform" \
@@ -110,141 +114,69 @@ deploy_salt() {
     return 1
   fi
 
-  # Smoke settings must be expanded locally for the remote shell.
-  # shellcheck disable=SC2029
-  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
-set -euo pipefail
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends python3-venv ca-certificates
-
-python3 -m venv /opt/cloud-compose-salt-smoke
-/opt/cloud-compose-salt-smoke/bin/python -m pip install --no-cache-dir \
-  salt==3007.1 \
-  tornado==6.4.2 \
-  looseversion==1.3.0 \
-  PyYAML==6.0.2 \
-  packaging==24.2 \
-  msgpack==1.1.0 \
-  distro==1.9.0 \
-  Jinja2==3.1.4
-
-mkdir -p /tmp/cloud-compose-salt/etc /tmp/cloud-compose-salt/cache /tmp/cloud-compose-salt/pki /srv/cloud-compose/.smoke-pillar
-cat >/tmp/cloud-compose-salt/etc/minion <<EOF
-id: ${SMOKE_NAME}
-file_client: local
-file_roots:
-  base:
-    - /srv/cloud-compose/salt
-    - /srv/cloud-compose
-pillar_roots:
-  base:
-    - /srv/cloud-compose/.smoke-pillar
-cachedir: /tmp/cloud-compose-salt/cache
-pki_dir: /tmp/cloud-compose-salt/pki
-log_file: /tmp/cloud-compose-salt/minion.log
-EOF
-
-cat >/srv/cloud-compose/.smoke-pillar/top.sls <<EOF
-base:
-  '${SMOKE_NAME}':
-    - cloud-compose
-EOF
-
-cat >/srv/cloud-compose/.smoke-pillar/cloud-compose.sls <<EOF
-cloud_compose:
-  name: ${SMOKE_NAME}
-  provider: onprem
-  template: ${SMOKE_TEMPLATE}
-  dedicated_host_acknowledged: true
-  runtime:
-    compose:
-      ingress_port: 80
-      project_dir: ${SMOKE_PROJECT_DIR}
-    sitectl:
-      environment: ${SMOKE_ENVIRONMENT}
-EOF
-
-/opt/cloud-compose-salt-smoke/bin/salt-call \
-  --local \
-  --retcode-passthrough \
-  --config-dir=/tmp/cloud-compose-salt/etc \
-  state.show_sls cloud-compose >/tmp/cloud-compose-salt-show-sls.txt
-
-/opt/cloud-compose-salt-smoke/bin/salt-call \
-  --local \
-  --retcode-passthrough \
-  --config-dir=/tmp/cloud-compose-salt/etc \
-  state.apply cloud-compose
-REMOTE
-  then
+  printf -v remote_command '%q ' \
+    /srv/cloud-compose/ci/remote/config-management-deploy-salt.sh \
+    "$SMOKE_NAME" \
+    "$SMOKE_TEMPLATE" \
+    "$SMOKE_ENVIRONMENT" \
+    "$SMOKE_PROJECT_DIR"
+  if ! ssh "${ssh_opts[@]}" "$ssh_target" "$remote_command"; then
     return 1
   fi
 }
 
 verify_remote() {
-  # Smoke settings must be expanded locally for the remote shell.
-  # shellcheck disable=SC2029
+  local remote_contract_dir lifecycle_contract runtime_state_contract verification_program
+  local remote_command status
+
+  remote_contract_dir="$(ssh "${ssh_opts[@]}" "$ssh_target" \
+    'mktemp -d /tmp/cloud-compose-hosted-contract.XXXXXX')" || return 1
+  if [[ ! "$remote_contract_dir" =~ ^/tmp/cloud-compose-hosted-contract\.[A-Za-z0-9]+$ ]]; then
+    echo "Remote contract directory is unsafe: $remote_contract_dir" >&2
+    return 1
+  fi
+
+  lifecycle_contract="$remote_contract_dir/lifecycle-program-contract.sh"
+  runtime_state_contract="$remote_contract_dir/config-management-runtime-state-contract.py"
+  verification_program="$remote_contract_dir/config-management-verify.sh"
+  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
+    "install -m 0700 /dev/stdin $lifecycle_contract" \
+    </work/ci/lifecycle-program-contract.sh; then
+    ssh "${ssh_opts[@]}" "$ssh_target" "rmdir -- $remote_contract_dir" || true
+    return 1
+  fi
+  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
+    "install -m 0600 /dev/stdin $runtime_state_contract" \
+    </work/ci/config-management-runtime-state-contract.py; then
+    ssh "${ssh_opts[@]}" "$ssh_target" \
+      "rm -f -- $lifecycle_contract && rmdir -- $remote_contract_dir" || true
+    return 1
+  fi
+  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
+    "install -m 0700 /dev/stdin $verification_program" \
+    </work/ci/remote/config-management-verify.sh; then
+    ssh "${ssh_opts[@]}" "$ssh_target" \
+      "rm -f -- $lifecycle_contract $runtime_state_contract && rmdir -- $remote_contract_dir" || true
+    return 1
+  fi
+
+  printf -v remote_command '%q ' \
+    "$verification_program" \
+    "$SMOKE_NAME" \
+    "$SMOKE_TEMPLATE" \
+    "$SMOKE_ENVIRONMENT" \
+    "$SMOKE_PROJECT_DIR" \
+    "$lifecycle_contract" \
+    "$runtime_state_contract"
+  if ssh "${ssh_opts[@]}" "$ssh_target" "$remote_command"; then
+    status=0
+  else
+    status=$?
+  fi
+
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "SMOKE_NAME=${SMOKE_NAME} SMOKE_TEMPLATE=${SMOKE_TEMPLATE} SMOKE_ENVIRONMENT=${SMOKE_ENVIRONMENT} SMOKE_PROJECT_DIR=${SMOKE_PROJECT_DIR} bash -s" <<'REMOTE'
-set -euo pipefail
-
-test -x /home/cloud-compose/init
-test -x /home/cloud-compose/up
-test -x /home/cloud-compose/down
-test -x /home/cloud-compose/rollout
-test -x /home/cloud-compose/run.sh
-test -x /home/cloud-compose/start-cloud-compose-bootstrap.sh
-python3 -m json.tool /home/cloud-compose/compose-projects.json >/dev/null
-python3 -m json.tool /home/cloud-compose/application-env.json >/dev/null
-
-python3 - <<'PY'
-import json
-import os
-import subprocess
-from pathlib import Path
-
-name = os.environ["SMOKE_NAME"]
-template = os.environ["SMOKE_TEMPLATE"]
-project_dir = os.environ["SMOKE_PROJECT_DIR"]
-def load_runtime_env(path):
-    result = subprocess.run(
-        [
-            "env", "-i", "PATH=/usr/bin:/bin", f"CLOUD_COMPOSE_ENV_FILE={path}",
-            "bash", "--noprofile", "--norc", "-c",
-            "source /home/cloud-compose/profile.sh; env -0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return {
-        entry.split(b"=", 1)[0].decode(): entry.split(b"=", 1)[1].decode()
-        for entry in result.stdout.split(b"\0") if b"=" in entry
-    }
-
-env = load_runtime_env(Path("/home/cloud-compose/.env"))
-
-projects = json.loads(Path("/home/cloud-compose/compose-projects.json").read_text())
-project = projects[name]
-
-assert env["CLOUD_COMPOSE_PROVIDER"] == "onprem"
-assert env["CLOUD_COMPOSE_APPS"] == name
-assert env["CLOUD_COMPOSE_PRIMARY_APP"] == name
-assert env["SITECTL_PLUGIN"] == template
-assert env["DOCKER_COMPOSE_DIR"] == project_dir
-assert f"sitectl-{template}" in env["SITECTL_PACKAGES"].split()
-assert project["docker_compose_repo"] == f"https://github.com/libops/{template}.git"
-assert project["project_dir"] == project_dir
-assert project["sitectl_plugin"] == template
-PY
-
-test -d "$SMOKE_PROJECT_DIR/.git"
-systemctl is-active --quiet cloud-compose
-runuser -u cloud-compose -- env HOME=/home/cloud-compose bash -lc \
-  "source /home/cloud-compose/profile.sh && sitectl healthcheck --context \"${SMOKE_NAME}\" --persist --format table"
-REMOTE
+    "rm -f -- $lifecycle_contract $runtime_state_contract $verification_program && rmdir -- $remote_contract_dir" || true
+  return "$status"
 }
 
 case "$SMOKE_METHOD" in

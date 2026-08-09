@@ -147,6 +147,56 @@ run "public_entrypoint_rejects_reserved_extra_environment" {
   expect_failures = [var.runtime]
 }
 
+run "public_entrypoint_accepts_provider_neutral_disaster_recovery_driver" {
+  command = plan
+
+  variables {
+    name           = "root-contract"
+    cloud_provider = "gcp"
+    template       = "wp"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
+    runtime = {
+      disaster_recovery = {
+        required    = true
+        driver_path = "/etc/cloud-compose/libexec/acme-offhost"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      local.runtime.disaster_recovery.required &&
+      local.runtime.disaster_recovery.driver_path == "/etc/cloud-compose/libexec/acme-offhost"
+    )
+    error_message = "The public entrypoint must preserve provider-neutral DR controls."
+  }
+}
+
+run "public_entrypoint_rejects_unsafe_disaster_recovery_driver_path" {
+  command = plan
+
+  variables {
+    name           = "root-contract"
+    cloud_provider = "gcp"
+    template       = "wp"
+    gcp = {
+      project_id     = "test-project"
+      project_number = "123456789"
+    }
+    runtime = {
+      disaster_recovery = {
+        required    = true
+        driver_path = "/tmp/driver with spaces"
+      }
+    }
+  }
+
+  expect_failures = [var.runtime]
+}
+
 run "public_entrypoint_accepts_direct_cloud_run_proxy_depth" {
   command = plan
 

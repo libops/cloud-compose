@@ -2,8 +2,47 @@
 
 set -euo pipefail
 
+_cc_managed_runtime_source="$(readlink -f -- "${BASH_SOURCE[0]}")"
+_cc_managed_runtime_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_cc_managed_runtime_installed_home="$(readlink -f -- /home/cloud-compose 2>/dev/null || true)"
+readonly _cc_managed_runtime_source _cc_managed_runtime_dir _cc_managed_runtime_installed_home
+if [[ -n "$_cc_managed_runtime_installed_home" &&
+    ( "$_cc_managed_runtime_installed_home" == "/" ||
+        "$_cc_managed_runtime_source" == "${_cc_managed_runtime_installed_home%/}/"* ) ]]; then
+    _cc_managed_runtime_checked_programs=/etc/cloud-compose/libexec/checked-programs.bash
+else
+    _cc_managed_runtime_checked_programs="$_cc_managed_runtime_dir/../../etc/cloud-compose/libexec/checked-programs.bash"
+fi
+readonly _cc_managed_runtime_checked_programs
 # shellcheck disable=SC1090
-source "${CLOUD_COMPOSE_PROFILE_PATH:-/home/cloud-compose/profile.sh}"
+source "$_cc_managed_runtime_checked_programs"
+cloud_compose_bind_source_program \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_PROFILE_PATH \
+    /home/cloud-compose/profile.sh \
+    "$_cc_managed_runtime_dir/profile.sh"
+
+# shellcheck disable=SC1090
+source "$CLOUD_COMPOSE_PROFILE_PATH"
+
+# Reload the fixed resolver after the profile before binding data programs.
+# shellcheck disable=SC1090
+source "$_cc_managed_runtime_checked_programs"
+cloud_compose_bind_program_dir \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_JQ_PROGRAM_DIR \
+    /etc/cloud-compose/jq \
+    "$_cc_managed_runtime_dir/../../etc/cloud-compose/jq" \
+    github-latest-release-tag.jq \
+    sitectl-package-version.jq \
+    sitectl-package-versions-validate.jq \
+    object-field-delimited.jq \
+    object-keys-base64.jq
+cloud_compose_bind_program \
+    "$_cc_managed_runtime_source" \
+    CLOUD_COMPOSE_RELEASE_CHECKSUM_ENTRY_PROGRAM \
+    /etc/cloud-compose/awk/release-checksum-entry.awk \
+    "$_cc_managed_runtime_dir/../../etc/cloud-compose/awk/release-checksum-entry.awk"
 
 LOG_PREFIX="[libops-managed-runtime]"
 STATE_DIR="/mnt/disks/data/libops-managed"
@@ -27,20 +66,135 @@ enabled() {
 }
 
 mkdirs() {
+    local expected_uid expected_gid path mode allow_owner_migration spec
+    local -a directory_specs
+
+    expected_uid="$EUID"
+    expected_gid="$(id -g)"
+    if [[ "$STATE_DIR" == "/mnt/disks/data/libops-managed" ||
+        "$PUBLISHED_BIN_DIR" == "/home/cloud-compose/bin" ]]; then
+        if ((EUID != 0)); then
+            log "production managed runtime directories require a root updater"
+            return 1
+        fi
+        expected_uid=0
+        expected_gid=0
+    fi
+
     # The managed binary is published through /home/cloud-compose/bin and must
     # remain traversable after a root-owned bootstrap drops to cloud-compose.
-    # Converge existing directories as well as new ones so a previously
-    # restrictive service umask cannot leave the published symlink unusable.
-    install -d -m 0755 "$STATE_DIR" "$BIN_DIR"
-    install -d -m 0700 "$TMP_DIR" "$PACKAGE_STATE_DIR" "$ARTIFACT_STATE_DIR"
-    mkdir -p "$PUBLISHED_BIN_DIR"
+    # Refuse redirected, non-directory, non-owner-controlled, or writable
+    # state before creating package staging files beneath the shared data mount.
+    directory_specs=(
+        "$STATE_DIR:0755:false"
+        "$BIN_DIR:0755:false"
+        "$TMP_DIR:0700:false"
+        "$PACKAGE_STATE_DIR:0700:false"
+        "$ARTIFACT_STATE_DIR:0700:false"
+        "$PUBLISHED_BIN_DIR:0755:true"
+    )
+    for spec in "${directory_specs[@]}"; do
+        IFS=: read -r path mode allow_owner_migration <<<"$spec"
+        prepare_managed_runtime_directory \
+            "$path" "$mode" "$expected_uid" "$expected_gid" "$allow_owner_migration" || return 1
+    done
+}
+
+prepare_managed_runtime_directory() {
+    local path="$1" mode="$2" expected_uid="$3" expected_gid="$4"
+    local allow_owner_migration="$5" metadata owner_uid group_gid actual_mode kind resolved desired_mode
+    local created=false
+
+    if [[ -L "$path" || ( -e "$path" && ! -d "$path" ) ]]; then
+        log "managed runtime path is not a real directory: ${path}"
+        return 1
+    fi
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        # mkdir is the creation boundary: if an unprivileged process wins the
+        # name between inspection and creation, fail rather than adopting its
+        # pre-populated directory with install -d.
+        if ! mkdir -m "$mode" -- "$path"; then
+            log "managed runtime directory appeared during creation: ${path}"
+            return 1
+        fi
+        created=true
+    fi
+    if [[ "$created" != "true" ]]; then
+        if [[ -L "$path" || ! -d "$path" ]]; then
+            log "managed runtime path changed during validation: ${path}"
+            return 1
+        fi
+        metadata="$(stat -c '%u:%g:%a:%F' -- "$path")" || return 1
+        IFS=: read -r owner_uid group_gid actual_mode kind <<<"$metadata"
+        if [[ "$kind" != "directory" || ! "$actual_mode" =~ ^[0-7]{3,4}$ ||
+            $((8#$actual_mode & 0022)) -ne 0 ]]; then
+            log "managed runtime directory is writable by another account: ${path}"
+            return 1
+        fi
+        if [[ ( "$allow_owner_migration" != "true" || "$EUID" != "0" ) &&
+            ( "$owner_uid" != "$expected_uid" || "$group_gid" != "$expected_gid" ) ]]; then
+            log "managed runtime directory is not owned by the updater: ${path}"
+            return 1
+        fi
+        if [[ "$allow_owner_migration" == "true" ]]; then
+            # Close the legacy application-owned PATH directory before walking
+            # its entries. The bootstrap libexec boundary has already made its
+            # parent root-owned, so an old owner cannot race validation.
+            if ((EUID == 0)); then
+                install -d -m "$mode" -o "$expected_uid" -g "$expected_gid" -- "$path" || return 1
+            else
+                chmod "$mode" -- "$path" || return 1
+            fi
+            validate_published_bin_directory "$path" || return 1
+        fi
+    fi
+
+    if ((EUID == 0)); then
+        install -d -m "$mode" -o "$expected_uid" -g "$expected_gid" -- "$path" || return 1
+    else
+        chmod "$mode" -- "$path" || return 1
+    fi
+    resolved="$(readlink -f -- "$path")" || return 1
+    desired_mode="$(printf '%o' "$((8#$mode))")"
+    metadata="$(stat -c '%u:%g:%a:%F' -- "$path")" || return 1
+    if [[ "$resolved" != "$path" || "$metadata" != "${expected_uid}:${expected_gid}:${desired_mode}:directory" ||
+        -L "$path" ]]; then
+        log "managed runtime directory did not converge safely: ${path}"
+        return 1
+    fi
+}
+
+validate_published_bin_directory() {
+    local path="$1" entry name target
+    local -a entries
+
+    # /home/cloud-compose/bin was application-owned on older hosts. Preserve
+    # only generated managed-tool links whose targets remain under the
+    # validated root-owned package directory; reject every other inherited PATH
+    # entry. COS publishes its verified static Make build here because /home
+    # and /var are mounted noexec.
+    shopt -s nullglob dotglob
+    entries=("$path"/*)
+    shopt -u nullglob dotglob
+    for entry in "${entries[@]}"; do
+        name="${entry##*/}"
+        if [[ ! "$name" =~ ^(make|sitectl(-[a-z0-9]+)*)$ || ! -L "$entry" ]]; then
+            log "published command directory contains an unmanaged entry: ${entry}"
+            return 1
+        fi
+        target="$(readlink -- "$entry")" || return 1
+        if [[ "$target" != "${BIN_DIR}/${name}" ]]; then
+            log "published command has an unsafe target: ${entry}"
+            return 1
+        fi
+    done
 }
 
 with_lock() {
     local action="$1"
     shift
 
-    mkdirs
+    mkdirs || return 1
     if command -v flock >/dev/null 2>&1; then
         exec 9>"${STATE_DIR}/runtime.lock"
         if ! flock -n 9; then
@@ -86,10 +240,8 @@ latest_release_tag() {
         return 1
     fi
 
-    if ! tag="$(jq -jr '
-        (.tag_name | select(type == "string" and length > 0 and (explode | index(0) == null))),
-        "\u001f"
-    ' "$metadata")"; then
+    if ! tag="$(jq -jr -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/github-latest-release-tag.jq" \
+        "$metadata")"; then
         log "latest release metadata for ${package} did not contain a tag"
         rm -f "$metadata"
         return 1
@@ -210,7 +362,8 @@ install_release_package() {
         --connect-timeout 10 --max-time 300 -o "${tmp}/checksums.txt" -- "${base_url}/checksums.txt"
 
     checksum_file="${tmp}/checksums.selected.txt"
-    awk -v archive="$archive" '$2 == archive { print }' "${tmp}/checksums.txt" >"$checksum_file"
+    awk -v archive="$archive" -f "$CLOUD_COMPOSE_RELEASE_CHECKSUM_ENTRY_PROGRAM" \
+        "${tmp}/checksums.txt" >"$checksum_file"
     if [[ "$(wc -l <"$checksum_file")" -ne 1 ]]; then
         log "release checksums must contain exactly one entry for ${archive}"
         rm -rf -- "$tmp"
@@ -293,7 +446,7 @@ sitectl_package_version() {
     local fallback="${SITECTL_VERSION:-latest}"
 
     jq -er --arg package "$package" --arg fallback "$fallback" \
-        '.[$package] // $fallback' \
+        -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/sitectl-package-version.jq" \
         <<<"$(sitectl_package_versions_json)"
 }
 
@@ -308,14 +461,8 @@ validate_sitectl_configuration() {
     fi
 
     versions_json="$(sitectl_package_versions_json)"
-    if ! jq -e '
-        type == "object" and
-        all(to_entries[];
-            (.key | explode | index(0) == null) and
-            (.value | type == "string") and
-            (.value | explode | index(0) == null)
-        )
-    ' <<<"$versions_json" >/dev/null; then
+    if ! jq -e -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/sitectl-package-versions-validate.jq" \
+        <<<"$versions_json" >/dev/null; then
         log "SITECTL_PACKAGE_VERSIONS must be a JSON object of sitectl package names to latest or exact semantic-version release tags"
         return 1
     fi
@@ -340,7 +487,9 @@ validate_sitectl_configuration() {
             log "SITECTL_PACKAGE_VERSIONS contains an invalid package name: ${override}"
             return 1
         fi
-        override_version="$(jq -jr --arg package "$override" '(.[$package]), "\u001f"' <<<"$versions_json")" || return 1
+        override_version="$(jq -jr --arg field "$override" \
+            -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-field-delimited.jq" \
+            <<<"$versions_json")" || return 1
         override_version="${override_version%$'\x1f'}"
         if ! valid_sitectl_version "$override_version"; then
             log "SITECTL_PACKAGE_VERSIONS contains an invalid release tag for ${override}: ${override_version}"
@@ -350,7 +499,8 @@ validate_sitectl_configuration() {
             log "SITECTL_PACKAGE_VERSIONS contains an uninstalled package: ${override}"
             return 1
         fi
-    done < <(jq -r 'keys[] | @base64' <<<"$versions_json")
+    done < <(jq -r -f "$CLOUD_COMPOSE_JQ_PROGRAM_DIR/object-keys-base64.jq" \
+        <<<"$versions_json")
 }
 
 validate_stale_managed_sitectl_package() {
@@ -406,7 +556,7 @@ install_sitectl_packages() {
     local -A desired_packages=() stale_seen=()
 
     validate_sitectl_configuration
-    mkdirs
+    mkdirs || return 1
 
     mapfile -t packages < <(sitectl_package_list)
     for package in "${packages[@]}"; do
@@ -687,6 +837,17 @@ write_artifact_state() {
     mv -f -- "$state_tmp" "$state_file"
 }
 
+tab_separated_field_count() {
+    local value="$1"
+    local count=1
+
+    while [[ "$value" == *$'\t'* ]]; do
+        value="${value#*$'\t'}"
+        ((count += 1))
+    done
+    printf '%s\n' "$count"
+}
+
 install_managed_artifacts() {
     local line name url sha path mode owner group restart index
     local state_file failed_state download_tmp install_tmp target_dir target_name backup
@@ -705,7 +866,7 @@ install_managed_artifacts() {
         if [ -z "$line" ] || [[ "$line" == \#* ]]; then
             continue
         fi
-        field_count="$(awk -F '\t' '{ print NF }' <<<"$line")"
+        field_count="$(tab_separated_field_count "$line")"
         if [[ "$field_count" != "8" ]]; then
             log "managed artifact manifest row must contain exactly eight tab-separated fields"
             return 1
@@ -870,6 +1031,11 @@ run_update() {
 
 main() {
     local command="${1:-update}"
+
+    if ((EUID != 0)); then
+        log "managed runtime updates must run as root"
+        return 1
+    fi
 
     case "$command" in
         install-tools)
