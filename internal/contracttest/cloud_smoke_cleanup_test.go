@@ -217,10 +217,12 @@ func TestHostedProviderTokensAreScopedToLifecycleSteps(t *testing.T) {
 	}
 	for label, marker := range map[string]string{
 		"config-management smoke token": `      - name: Run Linode config-management smoke test
+        timeout-minutes: 100
         env:
           LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}`,
 		"config-management destroy token": `      - name: Destroy Linode config-management smoke resources
         if: always()
+        timeout-minutes: 20
         env:
           LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}`,
 	} {
@@ -347,6 +349,7 @@ printf '%s\n' "$@" >"$FAKE_CLEANUP_LOG"
 func TestNonGCPSmokeRunExitCleanupLifecycle(t *testing.T) {
 	t.Parallel()
 	root := repositoryRoot(t)
+	checkoutSHA := repositoryCommitSHA(t, root)
 	tests := []struct {
 		name          string
 		driver        string
@@ -419,6 +422,7 @@ func TestNonGCPSmokeRunExitCleanupLifecycle(t *testing.T) {
 				"CLOUD_COMPOSE_SMOKE_RUN_ID":          "123456789",
 				"CLOUD_COMPOSE_SMOKE_SWEEP_ORPHANS":   "false",
 				"CLOUD_COMPOSE_SMOKE_WORKDIR":         filepath.Join(stateDirectory, "smoke"),
+				"CLOUD_COMPOSE_SOURCE_REF":            checkoutSHA,
 				"CLOUD_COMPOSE_SOURCE_SHA256":         strings.Repeat("0", 64),
 				"DIGITALOCEAN_TOKEN":                  "do-lifecycle-secret",
 				"FAKE_APPLY_SIGNAL":                   test.applySignal,
@@ -578,6 +582,19 @@ func processExitCode(t testing.TB, err error) int {
 		t.Fatalf("run wrapper: %v", err)
 	}
 	return exitError.ExitCode()
+}
+
+func repositoryCommitSHA(t testing.TB, root string) string {
+	t.Helper()
+	output, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("resolve repository commit: %v", err)
+	}
+	commit := strings.TrimSpace(string(output))
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(commit) {
+		t.Fatalf("repository commit is not an exact lowercase SHA: %q", commit)
+	}
+	return commit
 }
 
 func readTestLog(t testing.TB, path string) string {
