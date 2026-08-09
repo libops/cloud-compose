@@ -81,6 +81,7 @@ assert_contains "$root_program_runner" 'Unsupported Cloud Compose root program:'
   fail "validated bootstrap readiness gate is missing or not executable"
 assert_contains "$diagnostics_program" '--- Cloud Compose provisioning heartbeat ---'
 assert_contains "$diagnostics_program" 'ps -p "$main_pid" -o pid=,ppid=,stat=,etime=,comm='
+assert_contains "$diagnostics_program" 'DOCKER_CONFIG=/mnt/disks/data/docker-config'
 assert_contains "$smoke_healthcheck_program" 'source /home/cloud-compose/profile.sh'
 assert_contains "$smoke_healthcheck_program" 'exec sitectl healthcheck --context "$context" --persist --format table'
 assert_contains "$unit_dir/cloud-compose-mariadb-backup.service" 'TimeoutStartSec=12h'

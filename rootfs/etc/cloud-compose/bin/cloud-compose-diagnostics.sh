@@ -163,7 +163,12 @@ dump_compose_state() {
             continue
         fi
         echo "--- docker compose ps: ${app} ---"
-        runuser -u cloud-compose -- env HOME=/home/cloud-compose \
+        # COS mounts /home with noexec. Select the verified plugin copy on the
+        # executable data disk instead of allowing Docker to discover the
+        # compatibility copy below /home/cloud-compose/.docker.
+        runuser -u cloud-compose -- env \
+            HOME=/home/cloud-compose \
+            DOCKER_CONFIG=/mnt/disks/data/docker-config \
             "$docker_path" compose --project-directory "$project_dir" ps 2>&1 || true
     done < <(jq -r -f "$jq_program_dir/diagnostics-project-entries.jq" "$manifest")
 }

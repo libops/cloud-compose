@@ -175,7 +175,10 @@ allowlisted `/home/cloud-compose` program. The privileged entrypoints,
 diagnostics command, and checked-in `jq` programs live below
 `/etc/cloud-compose/{libexec,bin,jq}` because COS permits cloud-init to rebuild
 that stateless tree while its `/usr` filesystem is immutable. Application
-services retain their unprivileged execution model.
+services retain their unprivileged execution model. Compose diagnostics run as
+the application account and select the verified plugin copy below the
+executable data disk explicitly; they do not fall back to the compatibility
+copy below COS's `noexec` `/home` mount.
 
 Terraform and cloud-init are transport and orchestration boundaries, not the
 home of bootstrap implementations. The GCP and provider-neutral templates
