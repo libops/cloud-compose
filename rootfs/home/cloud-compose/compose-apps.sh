@@ -988,8 +988,6 @@ verify_existing_compose_app_checkout() {
 configure_sitectl_app_features() {
     local app="$1"
     local letsencrypt bot_mitigation mode domain acme_email max_upload_size upload_timeout
-    local configure_ingress=false
-    local changed=false
     local trusted_ip
     local -a trusted_ips=()
 
@@ -1010,43 +1008,35 @@ configure_sitectl_app_features() {
     local ingress_args=(set ingress enabled --context "$SITECTL_CONTEXT_NAME" --yolo)
     if [ -n "$mode" ]; then
         ingress_args+=(--mode "$mode")
-        configure_ingress=true
     fi
     if [ -n "$domain" ]; then
         ingress_args+=(--domain "$domain")
-        configure_ingress=true
     fi
     if [ -n "$acme_email" ]; then
         ingress_args+=(--acme-email "$acme_email")
-        configure_ingress=true
     fi
     compose_app_ingress_array_values "$app" trusted_ips trusted_ips || return 1
     for trusted_ip in "${trusted_ips[@]}"; do
         if [ -n "$trusted_ip" ]; then
             ingress_args+=(--trusted-ip "$trusted_ip")
-            configure_ingress=true
         fi
     done
     if [ -n "$max_upload_size" ]; then
         ingress_args+=(--max-upload-size "$max_upload_size")
-        configure_ingress=true
     fi
     if [ -n "$upload_timeout" ]; then
         ingress_args+=(--upload-timeout "$upload_timeout")
-        configure_ingress=true
     fi
 
-    if [ "$configure_ingress" = true ]; then
-        sitectl "${ingress_args[@]}"
-        changed=true
-    fi
+    # Always initialize component desired state, including when every ingress
+    # option uses its default. Verification deliberately fails when
+    # .libops/site.yaml is absent, and component set initializes every
+    # registered component from its declared default before applying ingress.
+    sitectl "${ingress_args[@]}"
     if sitectl_truthy "$bot_mitigation"; then
         sitectl set bot-mitigation on --context "$SITECTL_CONTEXT_NAME" --yolo
-        changed=true
     fi
-    if [ "$changed" = true ]; then
-        sitectl converge --context "$SITECTL_CONTEXT_NAME" --yolo
-    fi
+    sitectl converge --context "$SITECTL_CONTEXT_NAME" --yolo
 }
 
 run_compose_app_lifecycle() {

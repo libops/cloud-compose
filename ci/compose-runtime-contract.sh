@@ -215,23 +215,32 @@ reject_host_network_compose_services
 # one argument, not an unquoted scalar split by the lifecycle shell.
 jq -n \
   --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
-  --arg up_program "$repo_root/ci/fixtures/lifecycle.d/default-up" '{app: {
-  docker_compose_repo: "https://github.com/libops/wp.git",
-  docker_compose_branch: "main",
-  project_dir: $project_dir,
-  compose_project_name: "app",
-  sitectl_context_name: "app",
-  sitectl_environment: "preview",
-  sitectl_verify_args: ["--label", "value with spaces"],
-  up_commands: [$up_program],
-  init_commands: [], down_commands: [], rollout_commands: []
-}}' >"$COMPOSE_PROJECTS_FILE"
+  --arg up_program "$repo_root/ci/fixtures/lifecycle.d/default-up" \
+  -f "$repo_root/ci/fixtures/verify-argv-compose-project.jq" >"$COMPOSE_PROJECTS_FILE"
 ln -s "$repo_root/ci/fixtures/sitectl-argv-log.sh" "$tmp/bin/sitectl"
 export SITECTL_ARGV_LOG="$tmp/sitectl.argv"
 export CLOUD_COMPOSE_LIFECYCLE_PROGRAM_DIR="$repo_root/ci/fixtures/lifecycle.d"
 export CLOUD_COMPOSE_SITECTL_VERIFY_ARGS_PROGRAM="$repo_root/rootfs/etc/cloud-compose/jq/sitectl-verify-args.jq"
 clone_or_update_compose_app() { source_compose_app_env "$1"; }
 record_compose_app_head() { return 0; }
+
+# Even a default ingress configuration must initialize durable desired state;
+# otherwise sitectl verify correctly rejects the missing .libops/site.yaml.
+jq -n \
+  --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
+  -f "$repo_root/ci/fixtures/default-ingress-compose-project.jq" >"$COMPOSE_PROJECTS_FILE"
+write_compose_app_env app
+: >"$SITECTL_ARGV_LOG"
+configure_sitectl_app_features app
+cmp -s "$repo_root/ci/fixtures/default-ingress-sitectl.argv" "$SITECTL_ARGV_LOG" || \
+  fail "default ingress did not initialize and converge sitectl component state"
+
+jq -n \
+  --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
+  --arg up_program "$repo_root/ci/fixtures/lifecycle.d/default-up" \
+  -f "$repo_root/ci/fixtures/verify-argv-compose-project.jq" >"$COMPOSE_PROJECTS_FILE"
+write_compose_app_env app
+: >"$SITECTL_ARGV_LOG"
 CLOUD_COMPOSE_PROVIDER=linode
 run_compose_app_lifecycle app up
 cat >"$tmp/expected.argv" <<'EOF'
