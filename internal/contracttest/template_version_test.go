@@ -63,13 +63,13 @@ func TestTemplateVersionContract(t *testing.T) {
 		},
 	}
 	expectedBranches := map[string]string{
-		"archivesspace": "v1.0.0",
-		"drupal":        "v1.1.0",
-		"isle":          "v1.3.0",
-		"ojs":           "v1.0.0",
-		"omeka-classic": "v1.0.0",
-		"omeka-s":       "v1.0.0",
-		"wp":            "v1.1.0",
+		"archivesspace": "v1.0.1",
+		"drupal":        "v1.2.1",
+		"isle":          "v1.3.1",
+		"ojs":           "v1.2.1",
+		"omeka-classic": "v1.2.1",
+		"omeka-s":       "v1.2.1",
+		"wp":            "v1.1.1",
 	}
 
 	if !maps.Equal(registry.Default.PackageVersions, expectedVersions["default"]) {

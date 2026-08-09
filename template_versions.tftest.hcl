@@ -70,8 +70,8 @@ run "non_isle_template_uses_v1_release_set" {
   }
 
   assert {
-    condition     = local.compose.branch == "v1.1.0"
-    error_message = "The WordPress preset must select its stable v1.1.0 template contract."
+    condition     = local.compose.branch == "v1.1.1"
+    error_message = "The WordPress preset must select its stable v1.1.1 template contract."
   }
 }
 
@@ -100,8 +100,8 @@ run "isle_template_uses_v1_release_set" {
   }
 
   assert {
-    condition     = local.compose.branch == "v1.3.0"
-    error_message = "The ISLE preset must select the stable v1.3.0 template contract."
+    condition     = local.compose.branch == "v1.3.1"
+    error_message = "The ISLE preset must select the stable v1.3.1 template contract."
   }
 
   assert {
