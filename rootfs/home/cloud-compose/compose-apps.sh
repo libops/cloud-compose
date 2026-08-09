@@ -6,6 +6,8 @@ COMPOSE_PROJECTS_FILE="${COMPOSE_PROJECTS_FILE:-/home/cloud-compose/compose-proj
 COMPOSE_APPS_ENV_DIR="${COMPOSE_APPS_ENV_DIR:-/home/cloud-compose/apps}"
 COMPOSE_APPS_STATE_DIR="${COMPOSE_APPS_STATE_DIR:-/home/cloud-compose/state}"
 CLOUD_COMPOSE_DATA_ROOT="${CLOUD_COMPOSE_DATA_ROOT:-/mnt/disks/data}"
+compose_apps_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_SECRET_FILES_PROGRAM="${CLOUD_COMPOSE_COMPOSE_SECRET_FILES_PROGRAM:-$compose_apps_dir/compose-secret-files.awk}"
 
 shell_env_line() {
     local name="$1"
@@ -575,22 +577,7 @@ compose_secret_files() {
             continue
         fi
 
-        awk '
-          /^[[:space:]]*services:/ { in_secrets = 0 }
-          /^[^[:space:]][^:]*:/ {
-            if ($0 ~ /^secrets:/) {
-              in_secrets = 1
-            } else if (in_secrets) {
-              in_secrets = 0
-            }
-          }
-          in_secrets && /^[[:space:]]*file:[[:space:]]*/ {
-            value = $0
-            sub(/^[[:space:]]*file:[[:space:]]*/, "", value)
-            gsub(/^["'\'']|["'\'']$/, "", value)
-            print value
-          }
-        ' "$compose_file"
+        awk -f "$COMPOSE_SECRET_FILES_PROGRAM" "$compose_file"
     done | sort -u
 }
 
