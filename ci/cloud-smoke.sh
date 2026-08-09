@@ -627,7 +627,7 @@ run_lifecycle_program_contract() {
   fi
 
   if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "test -x /home/cloud-compose/default-lifecycle.sh && bash $remote_contract /home/cloud-compose/default-lifecycle.sh"; then
+    "/bin/bash -- $remote_contract /home/cloud-compose/default-lifecycle.sh"; then
     status=0
   else
     status=$?

@@ -41,6 +41,19 @@ grep -Fq -- '^/mnt/disks/data/cloud-compose-hosted-contract\.[A-Za-z0-9]+$' \
 if grep -Fq -- '/tmp/cloud-compose-hosted-contract' <<<"$smoke_lifecycle_contract"; then
   fail "provider smoke still stages an executable lifecycle contract below /tmp"
 fi
+grep -Fq -- '/bin/bash -- $remote_contract /home/cloud-compose/default-lifecycle.sh' \
+  <<<"$smoke_lifecycle_contract" || \
+  fail "provider smoke does not open the checked-in contract through the fixed interpreter"
+if grep -Fq -- 'test -x /home/cloud-compose/default-lifecycle.sh' <<<"$smoke_lifecycle_contract"; then
+  fail "provider smoke still rejects a lifecycle program solely because /home is noexec"
+fi
+lifecycle_contract="$repo_root/ci/lifecycle-program-contract.sh"
+grep -Fq -- 'trap report_unexpected_failure ERR' "$lifecycle_contract" || \
+  fail "lifecycle program contract does not report unexpected command failures"
+grep -Fq -- '[[ -L "$lifecycle_program" ]]' "$lifecycle_contract" || \
+  fail "lifecycle program contract accepts a redirected target"
+grep -Fq -- '[[ ! -r "$lifecycle_program" ]]' "$lifecycle_contract" || \
+  fail "lifecycle program contract accepts an unreadable target"
 grep -Fq -- 'bash "$lifecycle_program_contract" /home/cloud-compose/default-lifecycle.sh' \
   "$repo_root/ci/remote/config-management-verify.sh" || \
   fail "config-management smoke does not execute the lifecycle program contract"

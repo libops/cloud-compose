@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+report_unexpected_failure() {
+    local status=$?
+    local line="${BASH_LINENO[0]:-unknown}"
+
+    trap - ERR
+    echo "lifecycle program contract: unexpected failure at line ${line} with status ${status}" >&2
+    exit "$status"
+}
+
+trap report_unexpected_failure ERR
 
 if [[ "${0##*/}" == "sitectl" ]]; then
     : "${SITECTL_ARGV_LOG:?SITECTL_ARGV_LOG is required}"
@@ -17,8 +28,16 @@ fi
 
 lifecycle_program="${1:-/home/cloud-compose/default-lifecycle.sh}"
 verify_args_program="${2:-/etc/cloud-compose/jq/sitectl-verify-args.jq}"
+if [[ -L "$lifecycle_program" ]]; then
+    echo "lifecycle program contract: target is redirected: $lifecycle_program" >&2
+    exit 1
+fi
 if [[ ! -f "$lifecycle_program" ]]; then
     echo "lifecycle program contract: missing $lifecycle_program" >&2
+    exit 1
+fi
+if [[ ! -r "$lifecycle_program" ]]; then
+    echo "lifecycle program contract: target is unreadable: $lifecycle_program" >&2
     exit 1
 fi
 
