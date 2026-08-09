@@ -270,8 +270,8 @@ EOT
       - path: "/home/cloud-compose/${name}"
         owner: "root:root"
         permissions: "0755"
-        encoding: b64
-        content: ${filebase64("${local.rootFs}/home/cloud-compose/lifecycle-entrypoint.sh")}
+        encoding: gzip+base64
+        content: ${base64gzip(file("${local.rootFs}/home/cloud-compose/lifecycle-entrypoint.sh"))}
 EOT
   ])
   compose_projects_file = <<-EOT
@@ -446,18 +446,18 @@ EOT
   use_overlay                  = length(var.volume_names) > 0
   prod_disk_url                = var.overlay_source_instance != "" ? format("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/disks/%s-docker-volumes", var.project_id, var.zone, var.overlay_source_instance) : ""
   gcp_filesystem_boothook = templatefile("${path.module}/../../templates/gcp-filesystem-boothook.sh.tftpl", {
-    FILESYSTEM_PREP_SCRIPT_B64     = filebase64("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh"),
-    FILESYSTEM_PERSIST_SCRIPT_B64  = filebase64("${local.rootFs}/home/cloud-compose/persist-filesystems.sh"),
-    FSTAB_RECONCILE_AWK_B64        = filebase64("${local.rootFs}/etc/cloud-compose/awk/reconcile-fstab.awk"),
-    GCP_FILESYSTEM_BOOT_SCRIPT_B64 = filebase64("${local.rootFs}/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"),
+    FILESYSTEM_PREP_SCRIPT_B64     = base64gzip(file("${local.rootFs}/home/cloud-compose/prepare-filesystem.sh")),
+    FILESYSTEM_PERSIST_SCRIPT_B64  = base64gzip(file("${local.rootFs}/home/cloud-compose/persist-filesystems.sh")),
+    FSTAB_RECONCILE_AWK_B64        = base64gzip(file("${local.rootFs}/etc/cloud-compose/awk/reconcile-fstab.awk")),
+    GCP_FILESYSTEM_BOOT_SCRIPT_B64 = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-filesystem-boot.sh")),
     FRESH_FILESYSTEM_IDENTITY      = "v1:gcp-disk-id:${google_compute_disk.data.disk_id}",
     USE_OVERLAY                    = local.use_overlay,
   })
   cloud_config_yaml = templatefile("${path.module}/../../templates/cloud-init.yml", {
-    ROOTFS_ARCHIVE_SCRIPT_B64          = filebase64("${local.rootFs}/etc/cloud-compose/libexec/rootfs-archive.sh"),
-    GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64 = filebase64("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh"),
-    GCP_CLOUD_INIT_POST_SCRIPT_B64     = filebase64("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh"),
-    DIAGNOSTICS_SCRIPT_B64             = filebase64("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"),
+    ROOTFS_ARCHIVE_SCRIPT_B64          = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/rootfs-archive.sh")),
+    GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64 = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh")),
+    GCP_CLOUD_INIT_POST_SCRIPT_B64     = base64gzip(file("${local.rootFs}/etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh")),
+    DIAGNOSTICS_SCRIPT_B64             = base64gzip(file("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")),
     DIAGNOSTICS_SCRIPT_SHA256          = filesha256("${local.rootFs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"),
     INIT_COMMANDS_B64                  = base64encode(local.initcmd_content),
     RUNCMD_B64                         = base64encode(local.runcmd_content),
@@ -875,6 +875,10 @@ resource "google_compute_instance" "cloud-compose" {
   }
 
   lifecycle {
+    precondition {
+      condition     = length(data.cloudinit_config.ci.part[0].content) <= 245760
+      error_message = "GCP user-data must stay within a 240 KiB review budget so the 256 KiB metadata-item limit retains bootstrap headroom. Select a verified rootfs archive or reduce unusually large runtime inputs."
+    }
     precondition {
       condition     = var.project_number == "" || var.project_number == local.project_number
       error_message = "project_number does not match the number derived from project_id; omit the deprecated assertion or correct it."

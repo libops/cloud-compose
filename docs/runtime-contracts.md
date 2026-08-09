@@ -221,6 +221,11 @@ AWK program from the same Terraform source or already verified rootfs archive,
 requires an unlinked root-owned mode-0600 file, and invokes it as data with
 `awk -f` before the full stateless rootfs is available.
 
+GCP compresses checked bootstrap programs before carrying them in user-data and
+enforces a 240 KiB plan-time budget. This leaves explicit headroom below the
+provider's 256 KiB metadata-item limit; larger custom inputs must use the
+verified rootfs archive path or be reduced before a VM can be replaced.
+
 ## Sitectl
 
 During init, the VM creates a `sitectl` context for every app. The default `up`

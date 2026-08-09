@@ -8,10 +8,10 @@ readonly filesystem_prep=/run/cloud-compose-prepare-filesystem
 readonly filesystem_persist=/run/cloud-compose-persist-filesystems
 readonly filesystem_reconcile=/run/cloud-compose-reconcile-fstab.awk
 
-printf '%s' '${GCP_FILESYSTEM_BOOT_SCRIPT_B64}' | base64 -d >"$filesystem_boot"
-printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d >"$filesystem_prep"
-printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d >"$filesystem_persist"
-printf '%s' '${FSTAB_RECONCILE_AWK_B64}' | base64 -d >"$filesystem_reconcile"
+printf '%s' '${GCP_FILESYSTEM_BOOT_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_boot"
+printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_prep"
+printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_persist"
+printf '%s' '${FSTAB_RECONCILE_AWK_B64}' | base64 -d | gzip -d >"$filesystem_reconcile"
 chmod 0600 "$filesystem_boot" "$filesystem_prep" "$filesystem_persist" "$filesystem_reconcile"
 
 bash "$filesystem_boot" \

@@ -32,22 +32,22 @@ write_files:
 - path: /var/lib/cloud-compose/bootstrap/rootfs-archive.sh
   owner: root:root
   permissions: "0700"
-  encoding: b64
+  encoding: gzip+base64
   content: ${ROOTFS_ARCHIVE_SCRIPT_B64}
 - path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh
   owner: root:root
   permissions: "0700"
-  encoding: b64
+  encoding: gzip+base64
   content: ${GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64}
 - path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-post-bootstrap.sh
   owner: root:root
   permissions: "0700"
-  encoding: b64
+  encoding: gzip+base64
   content: ${GCP_CLOUD_INIT_POST_SCRIPT_B64}
 - path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
   owner: root:root
   permissions: "0600"
-  encoding: b64
+  encoding: gzip+base64
   content: ${DIAGNOSTICS_SCRIPT_B64}
 - path: /var/lib/cloud-compose/bootstrap/init-commands.sh
   owner: root:root

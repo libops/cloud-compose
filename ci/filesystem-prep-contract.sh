@@ -601,6 +601,14 @@ if grep -Eq 'fsck[^\n]*\|\|[^\n]*mkfs|fsck[^\n]*mkfs' "$repo_root/templates/clou
 fi
 grep -Fq 'FILESYSTEM_PREP_SCRIPT_B64' "$gcp_filesystem_boothook" || \
     fail "GCP boothook does not bootstrap the tested filesystem helper"
+for compressed_boot_program in \
+    'base64 -d | gzip -d >"$filesystem_boot"' \
+    'base64 -d | gzip -d >"$filesystem_prep"' \
+    'base64 -d | gzip -d >"$filesystem_persist"' \
+    'base64 -d | gzip -d >"$filesystem_reconcile"'; do
+    grep -Fq "$compressed_boot_program" "$gcp_filesystem_boothook" || \
+        fail "GCP boothook does not unpack a compressed checked program: $compressed_boot_program"
+done
 grep -Fq 'bash "$filesystem_boot"' "$gcp_filesystem_boothook" || \
     fail "GCP boothook does not invoke the checked filesystem program"
 grep -Fq 'Content-Type: text/cloud-boothook' "$gcp_cloud_init_mime" || \

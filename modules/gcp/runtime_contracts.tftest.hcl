@@ -102,11 +102,11 @@ run "disables_privileged_services_by_default" {
       ) &&
       strcontains(
         local.cloud_init_yaml,
-        filebase64("${path.module}/../../rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh"),
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/libexec/gcp-filesystem-boot.sh")),
       ) &&
       strcontains(
         local.cloud_init_yaml,
-        filebase64("${path.module}/../../rootfs/etc/cloud-compose/awk/reconcile-fstab.awk"),
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/awk/reconcile-fstab.awk")),
       ) &&
       strcontains(
         local.write_files_content,
@@ -115,6 +115,11 @@ run "disables_privileged_services_by_default" {
       strcontains(local.cloud_init_yaml, "Content-Type: text/cloud-boothook")
     )
     error_message = "GCP's early every-boot filesystem programs and root runtime environment must carry the same immutable data-disk identity and checked fstab reconciler."
+  }
+
+  assert {
+    condition     = length(data.cloudinit_config.ci.part[0].content) <= 245760
+    error_message = "The default GCP user-data must preserve headroom below the provider's metadata-item limit."
   }
 
   assert {
@@ -584,7 +589,7 @@ run "renders_verified_archive_before_downstream_overlay" {
     condition = (
       strcontains(
         local.cloud_init_yaml,
-        filebase64("${path.module}/../../rootfs/etc/cloud-compose/libexec/rootfs-archive.sh"),
+        base64gzip(file("${path.module}/../../rootfs/etc/cloud-compose/libexec/rootfs-archive.sh")),
       ) &&
       strcontains(local.cloud_init_yaml, local.rootfs_contract_sha256) &&
       data.http.rootfs_contract[0].url == "https://example.invalid/cloud-compose-rootfs.contract.sha256" &&
