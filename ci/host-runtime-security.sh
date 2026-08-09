@@ -249,7 +249,8 @@ fi
 
 assert_contains "$rotate_script" 'prepare|status|audit|recover|authenticate|ready|commit|rollback|rollback-ready'
 assert_contains "$rotate_script" 'ROTATION_DISABLE_GRACE_SECONDS'
-assert_contains "$rotate_script" 'https://oauth2.googleapis.com/token'
+assert_contains "$repo_root/rootfs/etc/cloud-compose/jq/service-account-credentials-valid.jq" \
+  'https://oauth2.googleapis.com/token'
 assert_contains "$rotate_script" 'KEY_OPERATION_RESULT=absent'
 
 run_script="$repo_root/rootfs/home/cloud-compose/run.sh"
