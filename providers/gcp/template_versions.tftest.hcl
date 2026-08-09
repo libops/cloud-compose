@@ -38,8 +38,8 @@ run "custom_package_set_merges_only_applicable_template_versions" {
   }
 
   assert {
-    condition     = local.runtime.compose.branch == "v1.3.0"
-    error_message = "The GCP entrypoint must inherit the ISLE v1.3.0 template branch when no override is supplied."
+    condition     = local.runtime.compose.branch == "v1.3.1"
+    error_message = "The GCP entrypoint must inherit the ISLE v1.3.1 template branch when no override is supplied."
   }
 
   assert {

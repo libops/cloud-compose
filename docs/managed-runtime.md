@@ -27,10 +27,10 @@ backward-compatible fallback only for an installed package with neither a
 template selector nor an explicit per-package selector.
 
 All presets pin sitectl v1.8.2 with a reviewed application plugin. ISLE uses
-the `libops/isle` v1.3.0 template with sitectl-drupal v1.3.0 and sitectl-isle
-v1.5.0. Drupal and WordPress use their v1.1.0 templates; the other application
-templates remain on v1.0.0. Override the template or package selectors only as
-one reviewed, compatible release set.
+the `libops/isle` v1.3.1 template with sitectl-drupal v1.3.0 and sitectl-isle
+v1.5.0. ArchivesSpace uses v1.0.1, WordPress uses v1.1.1, and Drupal, OJS,
+Omeka Classic, and Omeka S use v1.2.1. Override template or package selectors
+only as one reviewed, compatible release set.
 
 Omitting `runtime.sitectl.packages` selects the template's package set. An
 explicit list replaces that set; `packages = []` or `packages = ["sitectl"]`

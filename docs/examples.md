@@ -141,7 +141,7 @@ runtime = {
     }
   }
   compose = {
-    branch = "v1.1.0"
+    branch = "v1.1.1"
     ingress = {
       letsencrypt    = true
       bot_mitigation = true

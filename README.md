@@ -25,9 +25,9 @@ Its pull requests are promotion candidates: keep the complete compatible set
 together and require the hosted application smoke before merging them.
 
 All presets pin sitectl v1.8.2 plus the latest reviewed application plugin.
-ISLE selects the `libops/isle` v1.3.0 template, Drupal and WordPress select
-their v1.1.0 templates, and the remaining application templates stay on
-v1.0.0. Keep each preset's complete template and package set together when
+ISLE selects the `libops/isle` v1.3.1 template, ArchivesSpace selects v1.0.1,
+WordPress selects v1.1.1, and Drupal, OJS, Omeka Classic, and Omeka S select
+v1.2.1. Keep each preset's complete template and package set together when
 promoting an override.
 
 GCP deployments have two Terraform ownership layers. Apply
