@@ -217,6 +217,8 @@ jobs:
       CLOUD_COMPOSE_UPGRADE_CURRENT_REF: ${{ github.sha }}
       GCLOUD_OIDC_POOL: ${{ vars.GCLOUD_OIDC_POOL || secrets.GCLOUD_OIDC_POOL }}
       GCLOUD_PROJECT: ${{ vars.GCLOUD_PROJECT || secrets.GCLOUD_PROJECT }}
+      GCLOUD_FRESH_REGION: ${{ vars.GCLOUD_FRESH_REGION || secrets.GCLOUD_FRESH_REGION }}
+      GCLOUD_FRESH_ZONE: ${{ vars.GCLOUD_FRESH_ZONE || secrets.GCLOUD_FRESH_ZONE }}
       GCLOUD_REGION: ${{ vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
       GCLOUD_ZONE: ${{ vars.GCLOUD_ZONE || secrets.GCLOUD_ZONE }}
       GCLOUD_NETWORK_PROJECT_ID: ${{ vars.GCLOUD_NETWORK_PROJECT_ID || secrets.GCLOUD_NETWORK_PROJECT_ID }}
@@ -278,6 +280,9 @@ jobs:
 
       - name: Run fresh smoke test
         if: ${{ !startsWith(github.event.pull_request.title, '[major]') }}
+        env:
+          GCLOUD_REGION: ${{ vars.GCLOUD_FRESH_REGION || secrets.GCLOUD_FRESH_REGION || vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
+          GCLOUD_ZONE: ${{ vars.GCLOUD_FRESH_ZONE || secrets.GCLOUD_FRESH_ZONE || vars.GCLOUD_ZONE || secrets.GCLOUD_ZONE }}
         run: make smoke-test PROVIDER=gcp TEMPLATE=wp
 
       - name: Run 0.10.2 upgrade smoke test
@@ -286,6 +291,9 @@ jobs:
 
       - name: Destroy fresh smoke resources
         if: ${{ always() && !startsWith(github.event.pull_request.title, '[major]') && env.GCLOUD_OIDC_POOL != '' && env.GSA != '' && env.GCLOUD_PROJECT != '' }}
+        env:
+          GCLOUD_REGION: ${{ vars.GCLOUD_FRESH_REGION || secrets.GCLOUD_FRESH_REGION || vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
+          GCLOUD_ZONE: ${{ vars.GCLOUD_FRESH_ZONE || secrets.GCLOUD_FRESH_ZONE || vars.GCLOUD_ZONE || secrets.GCLOUD_ZONE }}
         run: ci/cloud-smoke.sh destroy-gcp-wp
 
       - name: Destroy upgrade smoke resources

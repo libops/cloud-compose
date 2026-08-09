@@ -994,15 +994,19 @@ convention:
 | --- | --- | --- |
 | DigitalOcean create/test/destroy | `cloud-smoke-digitalocean` | `DIGITALOCEAN_TOKEN` |
 | Linode create/test/destroy | `cloud-smoke-linode` | `LINODE_TOKEN` |
-| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE` |
+| GCP create/test/destroy | `cloud-smoke-gcp` | `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE`, and optional fresh-smoke overrides `GCLOUD_FRESH_REGION` and `GCLOUD_FRESH_ZONE` |
 | GCP major-version upgrade | `cloud-smoke-gcp` | the GCP values above plus `GCLOUD_NETWORK_PROJECT_ID`, `GCLOUD_NETWORK_NAME`, `GCLOUD_SUBNETWORK_NAME`, `GCLOUD_POWER_START_ROLE`, and `GCLOUD_POWER_SUSPEND_ROLE` |
 | DigitalOcean fallback deletion | `cloud-smoke-cleanup-digitalocean` | a distinct cleanup-only `DIGITALOCEAN_TOKEN` |
 | Linode fallback deletion | `cloud-smoke-cleanup-linode` | a distinct cleanup-only `LINODE_TOKEN` |
-| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE` |
+| GCP fallback deletion | `cloud-smoke-cleanup-gcp` | cleanup-specific `GCLOUD_OIDC_POOL`, `GSA`, `GCLOUD_PROJECT`, optional `GCLOUD_REGION` and `GCLOUD_ZONE`, plus any `GCLOUD_FRESH_REGION` and `GCLOUD_FRESH_ZONE` overrides used by the smoke environment |
 
-When `GCLOUD_ZONE` is set, it must belong to `GCLOUD_REGION`. Mirror the same
-zone in `cloud-smoke-gcp` and `cloud-smoke-cleanup-gcp` so fallback cleanup
-targets the smoke-test location.
+When `GCLOUD_ZONE` is set, it must belong to `GCLOUD_REGION`. Those values keep
+the historical major-upgrade smoke aligned with its persistent subnet. A fresh
+smoke can use a different location by setting `GCLOUD_FRESH_REGION` and
+`GCLOUD_FRESH_ZONE`; the latter must belong to the former. Mirror both location
+pairs in `cloud-smoke-gcp` and `cloud-smoke-cleanup-gcp`. The fallback first
+sweeps the upgrade region, then also sweeps the fresh-smoke region when it is
+different, so region-scoped Cloud Run resources cannot be stranded.
 
 Configure required reviewers and prevent self-review on the three
 `cloud-smoke-*` environments. Permit only the same-repository feature branches

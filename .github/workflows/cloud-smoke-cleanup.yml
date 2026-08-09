@@ -99,6 +99,8 @@ jobs:
       CLOUD_COMPOSE_SMOKE_RUN_ID: ${{ github.event.workflow_run.id }}
       GCLOUD_OIDC_POOL: ${{ vars.GCLOUD_OIDC_POOL || secrets.GCLOUD_OIDC_POOL }}
       GCLOUD_PROJECT: ${{ vars.GCLOUD_PROJECT || secrets.GCLOUD_PROJECT }}
+      GCLOUD_FRESH_REGION: ${{ vars.GCLOUD_FRESH_REGION || secrets.GCLOUD_FRESH_REGION }}
+      GCLOUD_FRESH_ZONE: ${{ vars.GCLOUD_FRESH_ZONE || secrets.GCLOUD_FRESH_ZONE }}
       GCLOUD_REGION: ${{ vars.GCLOUD_REGION || secrets.GCLOUD_REGION }}
       GCLOUD_ZONE: ${{ vars.GCLOUD_ZONE || secrets.GCLOUD_ZONE }}
       GSA: ${{ vars.GSA || secrets.GSA }}
@@ -134,5 +136,12 @@ jobs:
       - name: Install gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
 
-      - name: Sweep GCP smoke resources
+      - name: Sweep GCP upgrade-region resources
+        run: ci/cloud-smoke.sh sweep-gcp-wp
+
+      - name: Sweep GCP fresh-smoke region
+        if: ${{ env.GCLOUD_FRESH_REGION != '' && env.GCLOUD_FRESH_REGION != env.GCLOUD_REGION }}
+        env:
+          GCLOUD_REGION: ${{ env.GCLOUD_FRESH_REGION }}
+          GCLOUD_ZONE: ${{ env.GCLOUD_FRESH_ZONE }}
         run: ci/cloud-smoke.sh sweep-gcp-wp
