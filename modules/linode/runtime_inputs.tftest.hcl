@@ -2,7 +2,7 @@ mock_provider "linode" {}
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "20732b7e37bab43eb1b7478305e242f6b3ccced09669d646b05ef656284cfab1\n"
+      response_body = "fb6105bfdc7ecf37c7eb84cf5de7c4c513dd7a3087b40742cd7fe0dab18fe255\n"
       status_code   = 200
     }
   }
