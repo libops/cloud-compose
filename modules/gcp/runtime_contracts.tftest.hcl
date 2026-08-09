@@ -588,10 +588,8 @@ run "renders_verified_archive_before_downstream_overlay" {
 
   assert {
     condition = (
-      strcontains(local.cloud_init_yaml, "[bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install") &&
-      strcontains(local.cloud_init_yaml, "[bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh") &&
-      length(split("/var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install", local.cloud_init_yaml)[0]) <
-      length(split("/var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh", local.cloud_init_yaml)[0])
+      strcontains(local.cloud_config_yaml, "runcmd:\n- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install") &&
+      strcontains(local.cloud_config_yaml, "\n- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh")
     )
     error_message = "The verified base archive and downstream overlay must be installed before GCP application initialization."
   }
