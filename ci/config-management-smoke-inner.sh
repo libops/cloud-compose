@@ -313,7 +313,7 @@ run_salt_case \
   sitectl-drupal \
   drupal.example.edu \
   /mnt/disks/data/libops/drupal.git/drupal-prod \
-  libops-drupal-v1-1-0
+  libops-drupal-v1-2-1
 
 run_invalid_salt_case() {
   local invalid_case="$1" expected="$2"
