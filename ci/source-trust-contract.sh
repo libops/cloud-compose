@@ -68,6 +68,9 @@ retry_until_success() {
 
 # shellcheck disable=SC1091
 source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
+export CLOUD_COMPOSE_TEST_LIFECYCLE_EXECUTOR="$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh"
+# shellcheck disable=SC1091
+source "$repo_root/ci/fixtures/checked-lifecycle-executor.sh"
 
 pinned_checkout="$tmp/pinned"
 write_project pinned "$commit_one" "$pinned_checkout"

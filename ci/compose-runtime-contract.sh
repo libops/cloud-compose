@@ -72,9 +72,9 @@ source "$repo_root/rootfs/home/cloud-compose/compose-apps.sh"
 # Exercise the checked-in executor while retaining the immutable production
 # path contract above. The production image installs the same file at the
 # canonical /etc location.
-run_compose_lifecycle_executor() {
-  "$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh" "$@"
-}
+export CLOUD_COMPOSE_TEST_LIFECYCLE_EXECUTOR="$repo_root/rootfs/etc/cloud-compose/libexec/run-lifecycle-program.sh"
+# shellcheck disable=SC1091
+source "$repo_root/ci/fixtures/checked-lifecycle-executor.sh"
 
 cat >"$CLOUD_COMPOSE_DATA_ROOT/project/compose.yaml" <<'EOF'
 secrets:
