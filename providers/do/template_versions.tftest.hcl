@@ -6,7 +6,7 @@ run "custom_package_set_merges_only_applicable_template_versions" {
   override_data {
     target = module.digitalocean.module.runtime.data.http.rootfs_contract[0]
     values = {
-      response_body = "fb6105bfdc7ecf37c7eb84cf5de7c4c513dd7a3087b40742cd7fe0dab18fe255\n"
+      response_body = "91e0257c5867a0f5084ffb1820df585b23502e4f5b66c91e8bb704565abe6ad4\n"
       status_code   = 200
     }
   }
@@ -52,7 +52,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
   override_data {
     target = module.digitalocean.module.runtime.data.http.rootfs_contract[0]
     values = {
-      response_body = "fb6105bfdc7ecf37c7eb84cf5de7c4c513dd7a3087b40742cd7fe0dab18fe255\n"
+      response_body = "91e0257c5867a0f5084ffb1820df585b23502e4f5b66c91e8bb704565abe6ad4\n"
       status_code   = 200
     }
   }
