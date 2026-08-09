@@ -564,6 +564,14 @@ run "renders_verified_archive_before_downstream_overlay" {
     }
   }
 
+  override_data {
+    target = data.http.rootfs_contract[0]
+    values = {
+      response_body = "c71bcb8a431176c641eaded5a8a9d8f36d76ea3ad3d709f8b6d2b3eaa12c7cb0\n"
+      status_code   = 200
+    }
+  }
+
   assert {
     condition = (
       strcontains(
