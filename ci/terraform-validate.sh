@@ -93,6 +93,13 @@ validate_root() {
       init_status=$?
     fi
     if [[ "$attempt" -lt 3 ]]; then
+      # A truncated or otherwise corrupted download leaves a cached package
+      # that fails its lock file checksum on every future init that shares
+      # this plugin cache, in this directory and every later one in the same
+      # run. Clear it so the retry (and any later directory) re-downloads
+      # cleanly instead of repeatedly failing against the same bad cache
+      # entry.
+      rm -rf "${TF_PLUGIN_CACHE_DIR:?}"/*
       echo "terraform init failed in ${rel}; retrying in $((attempt * 10))s (attempt ${attempt}/3)" >&2
       sleep $((attempt * 10))
     fi
@@ -156,7 +163,7 @@ main() {
     find "$repo_root" \
       -path "*/.terraform" -prune -o \
       -path "$repo_root/docs/site" -prune -o \
-      -name "*.tf" -printf '%h\n' |
+      -name "*.tf" -exec dirname {} \; |
       sort -u
   )
 
