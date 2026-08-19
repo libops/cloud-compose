@@ -63,7 +63,7 @@ validate_public_provider_graph() {
 
 validate_root() {
   local root="$1" data_root="$2"
-  local rel data_dir lockfile created_lock init_status validate_status provider_status test_status
+  local rel data_dir lockfile lockfile_backup created_lock init_status validate_status provider_status test_status
   local -a init_args
 
   rel="${root#"$repo_root"/}"
@@ -119,6 +119,25 @@ validate_root() {
       sleep $((attempt * 10))
     fi
   done
+
+  if [[ "$init_status" -ne 0 || "$validate_status" -ne 0 ]] && [[ -f "$lockfile" ]]; then
+    # Identical failure across clean retries in the same job means this
+    # environment's install path is producing a package hash the lock file
+    # genuinely does not have, not a truncated/transient download. Diagnose
+    # what hash this exact environment needs without mutating the real lock
+    # file: upgrade a scratch copy and print only the added hash lines.
+    echo "Diagnosing the required provider hash for this environment (not applied to the repository's lock file):" >&2
+    lockfile_backup="$(mktemp)"
+    cp "$lockfile" "$lockfile_backup"
+    rm -rf "${TF_PLUGIN_CACHE_DIR:?}"/*
+    if TF_DATA_DIR="$data_dir" terraform -chdir="$root" init -backend=false -input=false -upgrade >/dev/null 2>&1; then
+      diff "$lockfile_backup" "$lockfile" >&2 || true
+    else
+      echo "  (diagnostic upgrade attempt also failed to complete)" >&2
+    fi
+    cp "$lockfile_backup" "$lockfile"
+    rm -f "$lockfile_backup"
+  fi
 
   if [[ "$created_lock" == "true" ]]; then
     rm -f "$lockfile"
