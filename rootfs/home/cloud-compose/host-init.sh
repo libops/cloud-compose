@@ -107,8 +107,23 @@ for runtime_input in .env compose-projects.json application-env.json; do
   fi
 done
 groupadd --force docker
+# Pin a fixed UID/GID for cloud-compose. useradd's default dynamic allocation
+# picks the next free ID in the base image at creation time, which is not
+# stable across VM replacements on providers whose root filesystem (and
+# therefore /etc/passwd) does not persist across boots. A cloud-compose
+# account recreated with a different UID cannot read or write anything it
+# previously owned on the persistent data disk, breaking Compose bootstrap.
+# Chosen well outside the default useradd/groupadd auto-allocation range
+# (commonly capped under 60000) and Docker's default subuid/subgid remap
+# range (typically starting at 100000), to minimize collision risk across
+# arbitrary base images and providers.
+readonly cloud_compose_uid=770077
+readonly cloud_compose_gid=770077
+groupadd --force --gid "$cloud_compose_gid" cloud-compose
 if ! id -u cloud-compose >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash --groups docker cloud-compose
+  useradd --create-home --shell /bin/bash \
+    --uid "$cloud_compose_uid" --gid "$cloud_compose_gid" \
+    --groups docker cloud-compose
 elif ! id -nG cloud-compose | tr ' ' '\n' | grep -qx docker; then
   usermod --append --groups docker cloud-compose || {
     echo "Warning: failed to add cloud-compose to docker group" >&2

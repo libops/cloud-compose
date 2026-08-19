@@ -2,7 +2,7 @@ mock_provider "cloudinit" {}
 mock_provider "http" {
   mock_data "http" {
     defaults = {
-      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      response_body = "a0f4dac5a536d8e61c7367170b7afc2689838c4e3bf155b1cde2fe17032c06db\n"
       status_code   = 200
     }
   }
@@ -580,7 +580,7 @@ run "renders_verified_archive_before_downstream_overlay" {
   override_data {
     target = data.http.rootfs_contract[0]
     values = {
-      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      response_body = "a0f4dac5a536d8e61c7367170b7afc2689838c4e3bf155b1cde2fe17032c06db\n"
       status_code   = 200
     }
   }
@@ -765,7 +765,7 @@ run "rejects_archive_without_checksum" {
   override_data {
     target = data.http.rootfs_contract[0]
     values = {
-      response_body = "c33470299657aca69837d7ce2cee73659aa5fd9a3297dcaad4444b50b54cdde2\n"
+      response_body = "a0f4dac5a536d8e61c7367170b7afc2689838c4e3bf155b1cde2fe17032c06db\n"
       status_code   = 200
     }
   }

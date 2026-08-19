@@ -84,34 +84,41 @@ validate_root() {
 
   echo "Validating Terraform in ${rel}"
 
-  init_status=0
+  # A shared plugin cache can let `terraform init` install a package without
+  # fully re-verifying it against this directory's lock file; a truncated or
+  # otherwise corrupted cache entry then only surfaces later, when validate
+  # or test actually loads the provider plugin. Retry the whole
+  # init+validate(+test) sequence together and purge the cache between
+  # attempts, rather than only wrapping init, so a corrupted entry discovered
+  # at any step gets a clean re-download on the next attempt.
   for attempt in 1 2 3; do
-    if TF_DATA_DIR="$data_dir" terraform -chdir="$root" init "${init_args[@]}" >/dev/null; then
-      init_status=0
+    init_status=0
+    TF_DATA_DIR="$data_dir" terraform -chdir="$root" init "${init_args[@]}" >/dev/null || init_status=$?
+
+    validate_status=0
+    if [[ "$init_status" -eq 0 ]]; then
+      TF_DATA_DIR="$data_dir" terraform -chdir="$root" validate -no-color || validate_status=$?
+    fi
+
+    provider_status=0
+    if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 ]]; then
+      validate_public_provider_graph "$root" "$data_dir" "$rel" || provider_status=$?
+    fi
+
+    test_status=0
+    if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 && "$provider_status" -eq 0 ]] && find "$root" -maxdepth 1 -name '*.tftest.hcl' -print -quit | grep -q .; then
+      TF_DATA_DIR="$data_dir" terraform -chdir="$root" test -no-color || test_status=$?
+    fi
+
+    if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 && "$provider_status" -eq 0 && "$test_status" -eq 0 ]]; then
       break
-    else
-      init_status=$?
     fi
     if [[ "$attempt" -lt 3 ]]; then
-      echo "terraform init failed in ${rel}; retrying in $((attempt * 10))s (attempt ${attempt}/3)" >&2
+      rm -rf "${TF_PLUGIN_CACHE_DIR:?}"/*
+      echo "Terraform validation failed in ${rel}; retrying in $((attempt * 10))s (attempt ${attempt}/3)" >&2
       sleep $((attempt * 10))
     fi
   done
-
-  validate_status=0
-  if [[ "$init_status" -eq 0 ]]; then
-    TF_DATA_DIR="$data_dir" terraform -chdir="$root" validate -no-color || validate_status=$?
-  fi
-
-  provider_status=0
-  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 ]]; then
-    validate_public_provider_graph "$root" "$data_dir" "$rel" || provider_status=$?
-  fi
-
-  test_status=0
-  if [[ "$init_status" -eq 0 && "$validate_status" -eq 0 && "$provider_status" -eq 0 ]] && find "$root" -maxdepth 1 -name '*.tftest.hcl' -print -quit | grep -q .; then
-    TF_DATA_DIR="$data_dir" terraform -chdir="$root" test -no-color || test_status=$?
-  fi
 
   if [[ "$created_lock" == "true" ]]; then
     rm -f "$lockfile"
@@ -156,7 +163,7 @@ main() {
     find "$repo_root" \
       -path "*/.terraform" -prune -o \
       -path "$repo_root/docs/site" -prune -o \
-      -name "*.tf" -printf '%h\n' |
+      -name "*.tf" -exec dirname {} \; |
       sort -u
   )
 
