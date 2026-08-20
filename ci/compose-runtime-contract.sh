@@ -286,6 +286,19 @@ configure_sitectl_app_features app
 cmp -s "$repo_root/ci/fixtures/default-ingress-sitectl.argv" "$SITECTL_ARGV_LOG" || \
   fail "default ingress did not initialize and converge sitectl component state"
 
+# The "core" plugin is cloud-compose's own default for any app without a
+# named CMS template (templates/apps.json). sitectl itself rejects "set" and
+# "converge" against a pluginless context, so configure_sitectl_app_features
+# must skip them instead of failing every app-init for a non-templated app.
+jq -n \
+  --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
+  -f "$repo_root/ci/fixtures/core-plugin-compose-project.jq" >"$COMPOSE_PROJECTS_FILE"
+write_compose_app_env app
+: >"$SITECTL_ARGV_LOG"
+configure_sitectl_app_features app
+[ ! -s "$SITECTL_ARGV_LOG" ] || \
+  fail "core plugin (no component contract) invoked sitectl set/converge"
+
 jq -n \
   --arg project_dir "$CLOUD_COMPOSE_DATA_ROOT/project" \
   --arg up_program "$repo_root/ci/fixtures/lifecycle.d/default-up" \

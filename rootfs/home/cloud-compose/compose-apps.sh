@@ -1059,6 +1059,15 @@ configure_sitectl_app_features() {
 
     source_compose_app_env "$app"
 
+    # The "core" plugin (cloud-compose's own default for any app without a
+    # named CMS template) carries no component contract. sitectl itself
+    # rejects "set" and "converge" against a pluginless context, so calling
+    # them here would fail every app-init for a non-templated app. Only a
+    # real plugin can own ingress/component desired state.
+    if [[ -z "${SITECTL_PLUGIN:-}" || "$SITECTL_PLUGIN" == "core" ]]; then
+        return 0
+    fi
+
     letsencrypt="$(compose_app_ingress_field "$app" letsencrypt)"
     bot_mitigation="$(compose_app_ingress_field "$app" bot_mitigation)"
     mode="$(compose_app_ingress_field "$app" mode)"
