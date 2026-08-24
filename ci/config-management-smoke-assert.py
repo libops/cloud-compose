@@ -136,6 +136,8 @@ def assert_ansible_runtime() -> None:
     assert project["docker_compose_repo"] == "https://github.com/libops/isle"
     assert project["project_dir"] == "/mnt/disks/data/libops/isle/isle-prod"
     assert project["compose_project_name"] == "libops-isle-v1-3-1"
+    assert type(project["ingress_port"]) is int
+    assert project["ingress_port"] == 80
     assert project["ingress"]["domain"] == "isle.example.edu"
     assert project["sitectl_plugin"] == "isle"
     assert project["init_commands"] == []
