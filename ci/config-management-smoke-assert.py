@@ -277,7 +277,7 @@ def assert_salt_runtime(
         assert not Path("/tmp/cloud-compose-salt-command-injection").exists()
     elif expected_name == "drupal-prod":
         assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-            "sitectl": "v1.12.7",
+            "sitectl": "v1.12.8",
             "sitectl-drupal": "v1.5.0",
         }
 
