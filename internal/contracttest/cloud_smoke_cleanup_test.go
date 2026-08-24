@@ -586,7 +586,7 @@ func processExitCode(t testing.TB, err error) int {
 
 func repositoryCommitSHA(t testing.TB, root string) string {
 	t.Helper()
-	output, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	output, err := exec.Command("git", "-c", "safe.directory="+root, "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("resolve repository commit: %v", err)
 	}

@@ -2,16 +2,12 @@
 
 set -eu
 
-if [[ "$#" -ne 2 ]]; then
-    echo "usage: gcp-cloud-init-finalize.sh INIT_COMMANDS_FILE DIAGNOSTICS_SHA256" >&2
+if [[ "$#" -ne 1 ]]; then
+    echo "usage: gcp-cloud-init-finalize.sh INIT_COMMANDS_FILE" >&2
     exit 2
 fi
 
 init_commands_file="$1"
-diagnostics_sha256="$2"
-
-bash /var/lib/cloud-compose/bootstrap/rootfs-archive.sh \
-    install-diagnostics "$diagnostics_sha256"
 if [[ ! -f /run/cloud-compose-filesystems-ready ]]; then
     echo "Cloud Compose filesystems were not prepared; refusing application initialization" >&2
     exit 1
@@ -29,4 +25,4 @@ chmod 0775 /mnt/disks/volumes
 install -d -m 0775 -o cloud-compose -g cloud-compose /mnt/disks/data/libops
 rm -f /var/lib/cloud-compose/bootstrap-complete
 /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
-bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+/etc/cloud-compose/bin/bootstrap-sitectl host systemd ensure-bootstrap

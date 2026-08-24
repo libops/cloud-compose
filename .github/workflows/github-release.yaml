@@ -9,30 +9,7 @@ jobs:
   release:
     if: github.event.pull_request.merged == true && !contains(github.event.pull_request.title, 'skip-release')
     uses: libops/.github/.github/workflows/bump-release.yaml@8dfaf9c854df71d9bbffde48c5676ff07c543c51
-    with:
-      workflow_file: publish-rootfs.yaml
     permissions:
       contents: write
       actions: write
     secrets: inherit
-
-  verify-rootfs-assets:
-    name: Verify rootfs release assets
-    needs: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout merged source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-
-      - name: Wait for and verify immutable rootfs assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          ci/verify-rootfs-release.sh commit
-          "${{ github.event.pull_request.merge_commit_sha }}"

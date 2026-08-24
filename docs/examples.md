@@ -31,19 +31,14 @@ module "app" {
       cloud_compose_keys = var.operator_ssh_keys
     }
   }
-  runtime = {
-    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
-    rootfs_archive_sha256 = var.cloud_compose_rootfs_archive_sha256
-  }
 }
 ```
 
-Replace the source placeholder with an exact release that publishes all three
-canonical rootfs assets, and set the URL and SHA-256 from that same release.
-The runnable DigitalOcean and Linode examples intentionally provide no release
-default. Terraform fetches the adjacent rootfs contract during planning and
-rejects a module/archive mismatch; omitting `?ref=` would make future plans
-consume a moving module source.
+Replace the source placeholder with an exact reviewed release. The module
+compresses its checked-in rootfs directly into cloud-init and rejects a payload
+that exceeds the provider limit; there is no separate runtime archive or
+checksum input. Omitting `?ref=` would make future plans consume a moving module
+source.
 
 ## GCP foundation and application states
 
@@ -136,7 +131,7 @@ healthcheck settings:
 runtime = {
   sitectl = {
     package_versions = {
-      sitectl      = "v1.9.1"
+      sitectl      = "v1.12.7"
       sitectl-wp   = "v2.1.0"
     }
   }
@@ -182,7 +177,7 @@ runtime = {
   }
   sitectl = {
     package_versions = {
-      sitectl        = "v1.9.1"
+      sitectl        = "v1.12.7"
       sitectl-wp     = "v2.1.0"
       sitectl-drupal = "v1.5.0"
     }

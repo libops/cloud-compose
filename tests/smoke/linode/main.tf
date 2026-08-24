@@ -14,22 +14,17 @@ provider "linode" {}
 module "context" {
   source = "../modules/context"
 
-  cloud_provider                    = "linode"
-  template                          = var.template
-  ssh_public_key                    = var.ssh_public_key
-  operator_ssh_public_keys          = var.operator_ssh_public_keys
-  smoke_run_id                      = var.smoke_run_id
-  docker_compose_branch             = var.docker_compose_branch
-  ingress_port                      = var.ingress_port
-  rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/${var.cloud_compose_source_ref}.tar.gz"
-  rootfs_archive_sha256             = var.cloud_compose_source_sha256
-  rootfs_test_source_archive_prefix = "cloud-compose-${var.cloud_compose_source_ref}"
-  tags                              = var.tags
+  cloud_provider           = "linode"
+  template                 = var.template
+  ssh_public_key           = var.ssh_public_key
+  operator_ssh_public_keys = var.operator_ssh_public_keys
+  smoke_run_id             = var.smoke_run_id
+  docker_compose_branch    = var.docker_compose_branch
+  ingress_port             = var.ingress_port
+  tags                     = var.tags
 }
 
 module "app" {
-  # Hosted smoke alone needs the exact-commit source-archive fixture. Keep that
-  # test-only escape hatch below the public provider entrypoint.
   source = "../../../modules/linode"
 
   name = module.context.name

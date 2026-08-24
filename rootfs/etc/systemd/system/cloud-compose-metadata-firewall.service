@@ -6,7 +6,7 @@ PartOf=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh configure-metadata-firewall.sh
+ExecStart=/etc/cloud-compose/libexec/sitectl-host.sh metadata-firewall
 RemainAfterExit=yes
 TimeoutStartSec=2min
 

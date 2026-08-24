@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
-
-set -uo pipefail
-
-# shellcheck disable=SC1091
-if ! source /etc/cloud-compose/libexec/bootstrap-security.sh; then
-    echo "Cloud Compose bootstrap security helper could not be loaded" >&2
-    exit 255
-fi
-
-if ! cloud_compose_bootstrap_require_root; then
-    exit 255
-fi
-if cloud_compose_bootstrap_marker_ready; then
-    # ExecCondition exit 1 skips an already-complete oneshot without marking it
-    # failed. Missing or invalid evidence returns zero below and must converge.
-    exit 1
-fi
+set -u
+((EUID == 0)) || exit 255
+sitectl=/etc/cloud-compose/bin/bootstrap-sitectl
+[[ -x "$sitectl" && ! -L "$sitectl" ]] || sitectl=/home/cloud-compose/bin/sitectl
+"$sitectl" host marker valid /var/lib/cloud-compose/bootstrap-complete >/dev/null 2>&1 && exit 1
 exit 0

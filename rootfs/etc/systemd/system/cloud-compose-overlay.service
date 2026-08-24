@@ -7,8 +7,7 @@ RequiresMountsFor=/mnt/disks/data /mnt/disks/volumes /mnt/disks/data/docker/volu
 Type=oneshot
 User=root
 Group=root
-EnvironmentFile=-/home/cloud-compose/.env
-ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh mount-overlays.sh
+ExecStart=/etc/cloud-compose/libexec/sitectl-host.sh overlays
 RemainAfterExit=yes
 
 [Install]

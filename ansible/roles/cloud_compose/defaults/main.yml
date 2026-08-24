@@ -54,10 +54,10 @@ cloud_compose_default_ingress:
   upload_timeout: ""
 
 cloud_compose_default_init:
-  - '/home/cloud-compose/default-lifecycle.sh init'
+  - 'sitectl:default init'
 cloud_compose_default_up:
-  - '/home/cloud-compose/default-lifecycle.sh up'
+  - 'sitectl:default up'
 cloud_compose_default_down:
-  - '/home/cloud-compose/default-lifecycle.sh down'
+  - 'sitectl:default down'
 cloud_compose_default_rollout:
-  - '/home/cloud-compose/default-lifecycle.sh rollout'
+  - 'sitectl:default rollout'

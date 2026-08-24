@@ -1,12 +1,6 @@
 locals {
-  rootfs                            = "${path.module}/../../rootfs"
-  additional_rootfs                 = var.rootfs != "" ? var.rootfs : ""
-  rootfs_archive_url                = trimspace(var.rootfs_archive_url)
-  rootfs_archive_sha256             = lower(trimspace(var.rootfs_archive_sha256))
-  rootfs_test_source_archive_prefix = trimspace(var.rootfs_test_source_archive_prefix)
-  rootfs_archive_asset_url          = split("#", split("?", local.rootfs_archive_url)[0])[0]
-  rootfs_contract_sidecar_url       = local.rootfs_archive_url == "" || local.rootfs_test_source_archive_prefix != "" ? "" : replace(local.rootfs_archive_asset_url, "/[^/]+$/", "cloud-compose-rootfs.contract.sha256")
-  rootfs_overlay_staging_path       = "/var/lib/cloud-compose/rootfs-overlay"
+  rootfs            = "${path.module}/../../rootfs"
+  additional_rootfs = var.rootfs != "" ? var.rootfs : ""
 
   single_compose_project = {
     (var.name) = {
@@ -86,20 +80,21 @@ locals {
     flatten([for _, app in local.compose_projects : app.sitectl_packages])
   ))
 
-  rootfs_contract_files = sort(tolist(fileset(local.rootfs, "**")))
-  rootfs_contract_directories = sort(distinct(flatten([
-    for file in local.rootfs_contract_files : dirname(file) == "." ? [] : [
-      for index in range(length(split("/", dirname(file)))) :
-      join("/", slice(split("/", dirname(file)), 0, index + 1))
-    ]
-  ])))
-  rootfs_contract_sha256 = sha256(join("", [
-    for entry in concat(
-      [for directory in local.rootfs_contract_directories : "d\t0:0:755\t${directory}\n"],
-      [for file in local.rootfs_contract_files : "f\t${filesha256("${local.rootfs}/${file}")}\t0:0:${endswith(file, ".sh") ? "755" : "644"}\t${file}\n"],
-    ) : entry
-  ]))
-  base_files       = local.rootfs_archive_url == "" ? fileset(local.rootfs, "**") : []
+  gcp_only_files = toset([
+    "etc/cloud-compose/libexec/build-cos-make.sh",
+    "etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh",
+    "etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh",
+    "etc/cloud-compose/libexec/gcp-filesystem-boot.sh",
+    "etc/fluent-bit/fluent-bit.conf",
+    "etc/systemd/system/cloud-compose-internal-services.service",
+    "etc/systemd/system/cloud-compose-internal-services.timer",
+    "home/cloud-compose/install-dependencies-cos.sh",
+    "mnt/disks/data/libops-internal/docker-compose.yaml",
+  ])
+  base_files = setsubtract(
+    fileset(local.rootfs, "**"),
+    var.provider_name == "gcp" ? toset([]) : local.gcp_only_files,
+  )
   additional_files = local.additional_rootfs != "" ? fileset(local.additional_rootfs, "**") : []
   all_files = merge(
     { for file in local.base_files : file => "${local.rootfs}/${file}" },
@@ -107,18 +102,18 @@ locals {
   )
   rootfs_file_permissions = {
     for file in setunion(local.base_files, local.additional_files) :
-    file => endswith(file, ".sh") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
+    file => endswith(file, ".sh") || endswith(file, ".py") || "/${file}" == var.offhost_backup_driver_path ? "0755" : "0644"
   }
 
-  write_files_content = join("\n", [
-    for file, fullpath in local.all_files : <<-EOT
-      - path: ${jsonencode(local.rootfs_archive_url != "" ? "${local.rootfs_overlay_staging_path}/${file}" : startswith(file, "mnt/disks/") ? "/var/lib/cloud-compose/mounted-rootfs/${file}" : "/${file}")}
-        owner: "root:root"
-        permissions: ${jsonencode(local.rootfs_file_permissions[file])}
-        encoding: gzip+base64
-        content: ${jsonencode(base64gzip(file(fullpath)))}
-EOT
-  ])
+  rootfs_bundle_content = jsonencode({
+    version = 1
+    files = {
+      for file, fullpath in local.all_files : file => {
+        mode    = local.rootfs_file_permissions[file]
+        content = file(fullpath)
+      }
+    }
+  })
 
   docker_compose_scripts = join("\n", [
     for name in ["init", "up", "down", "rollout"] : <<-EOT
@@ -275,47 +270,25 @@ EOT
       content: ${jsonencode(base64gzip(jsonencode(var.extra_env)))}
   EOT
   cloud_init = templatefile("${path.module}/templates/cloud-init.yml", {
-    CLOUD_COMPOSE_SSH_KEYS            = var.cloud_compose_ssh_keys
-    SSH_USERS                         = var.ssh_users
-    ROOTFS_ARCHIVE_SCRIPT_B64         = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/rootfs-archive.sh"))
-    LINUX_CLOUD_INIT_SCRIPT_B64       = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"))
-    LINUX_CLOUD_INIT_SCRIPT_SHA256    = filesha256("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh")
-    DIAGNOSTICS_SCRIPT_B64            = base64gzip(file("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"))
-    DIAGNOSTICS_SCRIPT_SHA256         = filesha256("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")
-    DATA_DEVICE                       = var.data_device
-    VOLUMES_DEVICE                    = var.volumes_device
-    WRITE_FILES_CONTENT               = local.write_files_content
-    DOCKER_COMPOSE_SCRIPTS            = local.docker_compose_scripts
-    COMPOSE_PROJECTS_FILE             = local.compose_projects_file
-    ENV_FILE_CONTENT                  = local.env_file_content
-    APPLICATION_ENV_FILE_CONTENT      = local.application_env_file_content
-    VAULT_AGENT_FILES                 = local.vault_agent_files
-    MANAGED_RUNTIME_ARTIFACTS_FILE    = local.managed_runtime_artifacts_file
-    ROLLOUT_ENABLED                   = tostring(var.rollout_enabled)
-    ROOTFS_ARCHIVE_ENABLED            = local.rootfs_archive_url != ""
-    ROOTFS_ARCHIVE_URL_B64            = base64encode(local.rootfs_archive_url)
-    ROOTFS_ARCHIVE_SHA256             = local.rootfs_archive_sha256
-    ROOTFS_CONTRACT_SHA256            = local.rootfs_contract_sha256
-    ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX = local.rootfs_test_source_archive_prefix
+    CLOUD_COMPOSE_SSH_KEYS         = var.cloud_compose_ssh_keys
+    SSH_USERS                      = var.ssh_users
+    ROOTFS_INSTALLER_B64           = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/install-rootfs.py"))
+    ROOTFS_BUNDLE_B64              = base64gzip(local.rootfs_bundle_content)
+    LINUX_CLOUD_INIT_SCRIPT_B64    = base64gzip(file("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh"))
+    LINUX_CLOUD_INIT_SCRIPT_SHA256 = filesha256("${local.rootfs}/etc/cloud-compose/libexec/linux-vm-cloud-init.sh")
+    DIAGNOSTICS_SCRIPT_B64         = base64gzip(file("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh"))
+    DIAGNOSTICS_SCRIPT_SHA256      = filesha256("${local.rootfs}/etc/cloud-compose/bin/cloud-compose-diagnostics.sh")
+    DATA_DEVICE                    = var.data_device
+    VOLUMES_DEVICE                 = var.volumes_device
+    DOCKER_COMPOSE_SCRIPTS         = local.docker_compose_scripts
+    COMPOSE_PROJECTS_FILE          = local.compose_projects_file
+    ENV_FILE_CONTENT               = local.env_file_content
+    APPLICATION_ENV_FILE_CONTENT   = local.application_env_file_content
+    VAULT_AGENT_FILES              = local.vault_agent_files
+    MANAGED_RUNTIME_ARTIFACTS_FILE = local.managed_runtime_artifacts_file
+    ROLLOUT_ENABLED                = tostring(var.rollout_enabled)
+    SITECTL_VERSION                = module.sitectl_runtime.package_versions["sitectl"]
   })
-}
-
-data "http" "rootfs_contract" {
-  count = local.rootfs_archive_url != "" && local.rootfs_test_source_archive_prefix == "" ? 1 : 0
-
-  url                = local.rootfs_contract_sidecar_url
-  request_timeout_ms = 30000
-
-  lifecycle {
-    postcondition {
-      condition = (
-        self.status_code == 200 &&
-        can(regex("^[0-9a-f]{64}\\n?$", self.response_body)) &&
-        trimspace(self.response_body) == local.rootfs_contract_sha256
-      )
-      error_message = "The immutable rootfs release sidecar must contain exactly this module source's canonical rootfs contract digest. Publish or select a matching archive before replacing a VM."
-    }
-  }
 }
 
 module "sitectl_runtime" {

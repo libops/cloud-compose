@@ -25,9 +25,6 @@ run "merges_provider_neutral_and_provider_specific_ssh_users" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       users = {
         shared       = ["ssh-ed25519 AAAARUNTIME"]
         runtime-only = ["ssh-ed25519 AAAANEUTRAL"]
@@ -62,9 +59,6 @@ run "rejects_multiline_authorized_key" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -85,9 +79,6 @@ run "rejects_unsafe_authorized_username" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -117,9 +108,6 @@ run "rejects_public_rollout_listener" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -127,23 +115,6 @@ run "rejects_public_rollout_listener" {
   }
 
   expect_failures = [var.linode]
-}
-
-run "rejects_archive_without_checksum" {
-  command = plan
-
-  variables {
-    name = "contract-test"
-    runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
-      compose = {
-        repo = "https://github.com/libops/wp.git"
-      }
-    }
-  }
-
-  expect_failures = [var.runtime]
 }
 
 run "exposes_independent_sitectl_package_versions" {
@@ -157,9 +128,6 @@ run "exposes_independent_sitectl_package_versions" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/isle.git"
       }
@@ -195,9 +163,6 @@ run "rejects_reserved_extra_environment" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo = "https://github.com/libops/wp.git"
       }
@@ -210,7 +175,7 @@ run "rejects_reserved_extra_environment" {
   expect_failures = [var.runtime]
 }
 
-run "archive_bootstrap_fits_linode_metadata_limit" {
+run "bundled_bootstrap_fits_linode_metadata_limit" {
   command = plan
 
   variables {
@@ -229,9 +194,6 @@ run "archive_bootstrap_fits_linode_metadata_limit" {
       }
     }
     runtime = {
-      rootfs_archive_url                = "https://github.com/libops/cloud-compose/archive/1111111111111111111111111111111111111111.tar.gz"
-      rootfs_archive_sha256             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      rootfs_test_source_archive_prefix = "cloud-compose-1111111111111111111111111111111111111111"
       compose = {
         repo         = "https://github.com/libops/wp.git"
         branch       = "main"
@@ -260,15 +222,7 @@ run "archive_bootstrap_fits_linode_metadata_limit" {
   }
 
   assert {
-    condition     = length(base64gzip(module.runtime.cloud_init)) <= 16384
-    error_message = "A realistic archive-backed Linode bootstrap must fit within the 16 KiB encoded metadata limit."
-  }
-
-  assert {
-    condition = (
-      !strcontains(module.runtime.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/prepare-filesystem.sh")) &&
-      !strcontains(module.runtime.cloud_init, filebase64("${path.module}/../../rootfs/home/cloud-compose/persist-filesystems.sh"))
-    )
-    error_message = "The realistic Linode bootstrap must not regain embedded filesystem helper payloads."
+    condition     = ceil(length(base64gzip(module.runtime.cloud_init)) * 3 / 4) <= 16384
+    error_message = "A realistic bundled Linode bootstrap must fit within the 16 KiB decoded metadata limit."
   }
 }

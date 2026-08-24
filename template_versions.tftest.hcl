@@ -35,7 +35,7 @@ run "default_template_uses_v1_core" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl = "v1.9.1"
+      sitectl = "v1.12.7"
     }
     error_message = "The default template must select the released sitectl v1 core."
   }
@@ -63,7 +63,7 @@ run "non_isle_template_uses_v1_release_set" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.9.1"
+      sitectl    = "v1.12.7"
       sitectl-wp = "v2.1.0"
     }
     error_message = "Non-ISLE templates must select their coordinated sitectl v1 release set."
@@ -92,7 +92,7 @@ run "isle_template_uses_v1_release_set" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl        = "v1.9.1"
+      sitectl        = "v1.12.7"
       sitectl-drupal = "v1.5.0"
       sitectl-isle   = "v1.6.0"
     }
@@ -196,7 +196,7 @@ run "custom_package_set_filters_template_versions" {
 
   assert {
     condition = local.sitectl.package_versions == {
-      sitectl    = "v1.9.1"
+      sitectl    = "v1.12.7"
       sitectl-wp = "v0.6.1"
     }
     error_message = "Template selectors for packages omitted by a custom package set must not reach the runtime."
@@ -223,7 +223,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.sitectl.packages == tolist(["sitectl"]) && local.sitectl.package_versions == {
-      sitectl = "v1.9.1"
+      sitectl = "v1.12.7"
     }
     error_message = "An explicit core-only package set must not be mistaken for an omitted template package selection."
   }

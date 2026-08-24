@@ -63,32 +63,6 @@ variable "ingress_port" {
   description = "Host port exposed by Traefik."
 }
 
-variable "rootfs_archive_url" {
-  type        = string
-  default     = ""
-  description = "Optional cloud-compose rootfs archive URL for providers with metadata size limits. Must be set with rootfs_archive_sha256."
-}
-
-variable "rootfs_archive_sha256" {
-  type        = string
-  default     = ""
-  description = "SHA-256 for rootfs_archive_url."
-}
-
-variable "rootfs_test_source_archive_prefix" {
-  type        = string
-  default     = ""
-  description = "Explicit source-archive prefix used only by hosted smoke tests for an unreleased exact commit."
-
-  validation {
-    condition = (
-      trimspace(var.rootfs_test_source_archive_prefix) == "" ||
-      can(regex("^cloud-compose-[0-9a-f]{40}$", trimspace(var.rootfs_test_source_archive_prefix)))
-    )
-    error_message = "rootfs_test_source_archive_prefix must be empty or identify one exact lowercase 40-character commit SHA."
-  }
-}
-
 variable "tags" {
   type        = list(string)
   default     = ["cloud-compose"]

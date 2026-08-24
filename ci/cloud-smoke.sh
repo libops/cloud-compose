@@ -599,45 +599,15 @@ run_healthcheck() {
     --format table
 }
 
-run_lifecycle_program_contract() {
+verify_sitectl_host_runtime() {
   local home_dir="$1" key_path="$2" output_json="$3"
-  local host port user remote_contract_dir remote_contract status
+  local host port user
 
   host="$(jq -r '.host' "$output_json")"
   port="$(jq -r '.ssh_port' "$output_json")"
   user="$(jq -r '.ssh_user' "$output_json")"
-  if ! remote_contract_dir="$(ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    'mktemp -d /mnt/disks/data/cloud-compose-hosted-contract.XXXXXX')"; then
-    echo "Could not create the remote lifecycle contract directory on the executable data disk" >&2
-    return 1
-  fi
-  if [[ ! "$remote_contract_dir" =~ ^/mnt/disks/data/cloud-compose-hosted-contract\.[A-Za-z0-9]+$ ]]; then
-    echo "Remote lifecycle contract directory is unsafe: $remote_contract_dir" >&2
-    return 1
-  fi
-
-  remote_contract="$remote_contract_dir/lifecycle-program-contract.sh"
-  if ! ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "install -m 0700 /dev/stdin $remote_contract" \
-    <"$repo_root/ci/lifecycle-program-contract.sh"; then
-    echo "Could not install the remote lifecycle program contract" >&2
-    ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-      "rm -f -- $remote_contract && rmdir -- $remote_contract_dir" || true
-    return 1
-  fi
-
-  if ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "/bin/bash -- $remote_contract /home/cloud-compose/default-lifecycle.sh"; then
-    status=0
-  else
-    status=$?
-    echo "Remote lifecycle program contract failed with status $status" >&2
-  fi
-  if ! ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    "rm -f -- $remote_contract && rmdir -- $remote_contract_dir"; then
-    echo "Could not remove the remote lifecycle program contract" >&2
-  fi
-  return "$status"
+  ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
+    'test -x /home/cloud-compose/bin/sitectl && test -x /home/cloud-compose/lifecycle-entrypoint.sh && /home/cloud-compose/bin/sitectl --version'
 }
 
 run_target() (
@@ -737,7 +707,7 @@ run_target() (
     return 1
   fi
 
-  if ! run_lifecycle_program_contract "$home_dir" "$key_path" "$output_json"; then
+  if ! verify_sitectl_host_runtime "$home_dir" "$key_path" "$output_json"; then
     dump_remote_logs "$home_dir" "$key_path" "$host" "$port" "$user" "$project_dir"
     return 1
   fi

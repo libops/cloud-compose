@@ -7,5 +7,5 @@ RequiresMountsFor=/mnt/disks/data
 Type=oneshot
 User=cloud-compose
 Group=cloud-compose
-ExecStart=/bin/bash /home/cloud-compose/mariadb-backup.sh
+ExecStart=/etc/cloud-compose/libexec/sitectl-host.sh backup mariadb
 TimeoutStartSec=12h

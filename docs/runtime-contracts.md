@@ -169,62 +169,44 @@ with `systemctl status cloud-compose-bootstrap cloud-compose`. Bootstrap output
 uses a fixed `info` priority and has no unit-specific Fluent Bit input, so raw
 bootstrap output is not forwarded to Cloud Logging; systemd's own service
 failures remain available to the existing warning-level collector.
-Root systemd jobs enter through `/etc/cloud-compose/libexec`, validate the
-root-owned home scripts and control inputs, and only then execute their
-allowlisted `/home/cloud-compose` program. The privileged entrypoints,
-diagnostics command, and checked-in `jq` and AWK programs live below
-`/etc/cloud-compose/{libexec,bin,jq,awk}` because COS permits cloud-init to rebuild
-that stateless tree while its `/usr` filesystem is immutable. Application
-services retain their unprivileged execution model. Compose diagnostics run as
-the application account and select the verified plugin copy below the
-executable data disk explicitly; they do not fall back to the compatibility
-copy below COS's `noexec` `/home` mount.
-
-An installed script resolved below `/home/cloud-compose` always uses the fixed
-`/etc/cloud-compose/jq` and `/etc/cloud-compose/awk` programs. Environment
-overrides for those programs, the shared profile, key-rotation entrypoint, or
-any other sourced runtime helper are rejected in installed mode. Repository
-and CI fixtures may select checked programs only while the owning script resolves
-outside the installed home. Before an installed program is consumed, its
-canonical root-owned parent chain must contain no symlink or group/world-writable
-directory. The only accepted logical alias is the operating-system-owned
-`/home -> /var/home` link used by Fedora CoreOS. The program itself must be a
-root-owned, single-link, non-writable regular file. Configuration-management
+Root systemd jobs enter through one root-owned
+`/etc/cloud-compose/libexec/sitectl-host.sh` launcher. It loads the validated
+host environment and invokes only the hidden `sitectl host` command tree; it
+does not dispatch arbitrary home-directory programs. Configuration-management
 adapters make `/home/cloud-compose` root-owned immediately after copying rootfs,
-before any root execution; mutable application state remains in its explicitly
-account-owned child/data paths. A checked directory binding validates every
-direct `jq` or AWK program in that installed directory, so adding a new filter
-cannot bypass per-file ownership, link, and mode checks. Production rootfs shell
-scripts invoke `jq` and AWK only with checked `-f` program files; the static CI
-contract rejects embedded filters so review and integrity checks cannot be
-bypassed by a later one-line program.
+before any root execution. Mutable application state remains in its explicitly
+account-owned child and data paths. Application lifecycle services retain their
+unprivileged execution model. Compose diagnostics run as the application
+account and select the verified plugin copy below the executable data disk
+explicitly; they do not fall back to the compatibility copy below COS's
+`noexec` `/home` mount.
 
 Terraform and cloud-init are transport and orchestration boundaries, not the
-home of bootstrap implementations. The GCP and provider-neutral templates
-transfer checked-in programs from `rootfs/etc/cloud-compose/libexec` and invoke
-them by path with data-only arguments. GCP packages its checked filesystem
-program in a `text/cloud-boothook` MIME part so durable mounts are validated at
-the original early, every-boot phase before cloud-config writes files or starts
-services. Archive-mode Linux user data separately transports the small current
-bootstrap driver and verifies its Terraform-rendered SHA-256 before execution;
-filesystem helpers and the rest of the runtime still come from the verified
-rootfs archive. This preserves metadata headroom without requiring an older
-rootfs archive to contain the new driver. Files destined for `/mnt/disks` are
-staged until the checked-in filesystem program has mounted and validated the
-durable disks. GCP `initcmd` and `runcmd` values are likewise written as
-root-controlled program files before they are sourced at their documented
-points in the bootstrap sequence. Keep substantive shell, Python, `jq`, and
-similar programs in reviewed files; do not interpolate them into Terraform
-heredocs, cloud-init command strings, Compose commands, or configuration-
-management task bodies. The early filesystem path stages its checked-in fstab
-AWK program from the same Terraform source or already verified rootfs archive,
-requires an unlinked root-owned mode-0600 file, and invokes it as data with
-`awk -f` before the full stateless rootfs is available.
+home of bootstrap implementations. Terraform serializes every checked-in
+`rootfs/` file into one compressed JSON bundle. A small root-owned Python
+installer rejects traversal, symlinked parents, unsupported modes, and unsafe
+destinations before publishing files atomically. Before durable storage is
+mutated, a small Bash shim downloads and checksum-verifies the selected core
+`sitectl` release. The hidden `sitectl host` runtime then owns filesystem
+discovery, formatting safeguards, fstab reconciliation, overlays, readiness
+markers, systemd convergence, metadata isolation, Vault Agent readiness,
+verified Docker plugins, and privileged-path checks. GCP invokes the same Go
+filesystem implementation from a `text/cloud-boothook` MIME part so mounts are
+validated during the early, every-boot phase. Files destined for `/mnt/disks`
+are staged until that implementation has mounted and validated the durable
+disks.
+GCP `initcmd` and `runcmd` values are likewise written as root-controlled
+program files before they are sourced at their documented points in bootstrap.
+Rootfs shell is limited to narrow boot, package-manager, and process-launcher
+adapters; CI caps the aggregate at 1,000 lines. Put new provider-neutral host
+behavior and its tests in `sitectl`, not in a shell wrapper. Do not interpolate
+substantive programs into Terraform heredocs, cloud-init command strings,
+Compose commands, or configuration-management task bodies.
 
-GCP compresses checked bootstrap programs before carrying them in user-data and
-enforces a 240 KiB plan-time budget. This leaves explicit headroom below the
-provider's 256 KiB metadata-item limit; larger custom inputs must use the
-verified rootfs archive path or be reduced before a VM can be replaced.
+GCP enforces a 240 KiB plan-time budget, leaving explicit headroom below its
+256 KiB metadata-item limit. DigitalOcean and Linode enforce 64 KiB limits on
+their rendered payloads. Oversized custom inputs must be reduced before a VM
+can be replaced.
 
 ## Sitectl
 
@@ -242,8 +224,11 @@ with `runtime.sitectl.package_versions`; its keys are package names such as
 exact compatible package set recorded in `templates/apps.json`; explicit
 per-package values win, and template values are filtered to the installed
 package list before validation. Terraform, Ansible, and Salt serialize their
-resolved map as `SITECTL_PACKAGE_VERSIONS` JSON and the privileged installer
-validates it again before downloading anything. Per-project package versions
+resolved map as `SITECTL_PACKAGE_VERSIONS` JSON. The early bootstrap shim
+verifies only the first core `sitectl` binary; `sitectl host runtime install`
+then validates, downloads, and verifies the complete package set before
+publishing one immutable generation. A failed package never partially advances
+the active generation. Per-project package versions
 are not supported because projects on one host share the same binaries.
 `/home/cloud-compose/bin` is reserved for generated managed-tool symlinks. They
 target the root-owned managed binary directory and normally comprise `sitectl`,
@@ -258,22 +243,16 @@ invokes `sitectl verify`; spaces in one value never become additional arguments.
 Newlines, carriage returns, and NUL bytes are rejected instead of being flattened
 into an ambiguous shell scalar.
 
-Each configured lifecycle list value names an independent checked program; it
-is not parsed as shell source. The built-in `init`, `up`, `down`, and `rollout`
-defaults each contain exactly `/home/cloud-compose/default-lifecycle.sh ACTION`,
-where `ACTION` matches the lifecycle field. A custom entry must be one
-argument-free, root-controlled program immediately below
-`/etc/cloud-compose/lifecycle.d`; pass data through the documented lifecycle
-environment. `true` and `false` remain explicit no-op and failure sentinels.
-Multi-step work, state such as local variables or traps, and any quoting belong
-inside that reviewed program file. The constrained executor invokes its argv
-without evaluating a manifest value as shell source. Custom programs retain
-direct execution. After the same root-owner, link-count, parent-directory, and
-mode checks, the built-in script is opened as
-`/bin/bash -- /home/cloud-compose/default-lifecycle.sh ACTION`; this fixed
-interpreter path keeps the built-in lifecycle usable on Container-Optimized OS,
-where `/home` is deliberately mounted `noexec`, without turning the manifest
-entry into a shell command string.
+Each configured lifecycle list value is typed data, never shell source. The
+built-in `init`, `up`, `down`, and `rollout` defaults use
+`sitectl:default ACTION`, where `ACTION` matches the lifecycle field. sitectl
+interprets that marker directly and runs the typed Compose, health, verify, and
+deploy operations in Go. A custom entry must be one argument-free,
+root-controlled program immediately below `/etc/cloud-compose/lifecycle.d`;
+pass data through the documented lifecycle environment. `true` and `false`
+remain explicit no-op and failure sentinels. The constrained executor validates
+and directly executes custom programs without evaluating a manifest value as
+shell source.
 
 ## Vault
 
@@ -734,46 +713,12 @@ reported as complete only when the service account has no user-managed key.
 
 A definite IAM rejection that proves no key was created clears the pre-create
 state. A timeout, transport failure, or otherwise ambiguous key-creation
-response never triggers an automatic second create. `rotate-keys.sh audit ...`
-reports only the baseline delta/key IDs. Recovery requires the single audited
-orphan key ID as explicit confirmation to `rotate-keys.sh recover ... KEY_ID`;
-if no key was created, recovery clears the pending state without deleting
-anything. Recovery also waits `ROTATION_RECOVERY_SETTLE_SECONDS` (60 seconds by
-default) before trusting an empty IAM delta, avoiding a false “no key created”
-result during propagation.
-
-All Terraform entrypoints, including GCP, DigitalOcean, and Linode, support the
-same verified rootfs archive contract. When `runtime.rootfs_archive_url` is
-used, it must be an HTTPS URL without whitespace and
-`runtime.rootfs_archive_sha256` is mandatory with a 64-character SHA-256
-digest. Terraform derives the adjacent
-`cloud-compose-rootfs.contract.sha256` URL and reads it during planning. That
-sidecar must contain exactly the canonical contract digest for the module's
-checked-in `rootfs`: every directory, file path, file byte, root ownership,
-mode, and single-link file topology. A missing, malformed, older, or otherwise
-mismatched sidecar rejects the plan before Terraform can replace a VM.
-
-Boot restricts curl and redirects to HTTPS with TLS 1.2 or newer, downloads to
-a root-only temporary path, verifies the complete archive checksum, rejects
-links and unsupported filesystem objects, and re-verifies the same canonical
-rootfs contract before copying anything onto the host. Packaged directories are
-root-owned mode `0755`; checked `*.sh` programs are mode `0755`; other files are
-mode `0644`; regular files must have one link. The GCP path stages the caller's
-packaged rootfs overlay and reapplies it after the archive, so consumer
-overrides still win. A single checked-in archive program implements download,
-verification, and installation for every Terraform provider rather than
-duplicating provider-specific shell bodies. Use the immutable assets from the
-same release as the Terraform module. Keeping an older archive while advancing
-the module fails safely during planning and leaves the existing workload
-untouched.
-
-Each release publishes three assets:
-`cloud-compose-rootfs.tar.gz`, its archive-byte `.sha256`, and
-`cloud-compose-rootfs.contract.sha256`. The release workflow downloads the
-published assets again, validates the archive bytes and canonical tree, and
-does not complete its release gate until all three agree. Downstream catalogs
-or automation must promote a cloud-compose release only after the
-`Verify rootfs release assets` job is green.
+response never triggers a second create. Rerunning the same sitectl rotation
+reconciles the durable creating state against the exact service-account key
+delta; it deletes only one unambiguous unrecoverable candidate and otherwise
+fails closed. The rootfs is part of the pinned Terraform module source and is
+embedded directly, so there is no independently versioned archive, sidecar, or
+release-asset promotion path to drift from that source.
 
 ## Backups
 
@@ -967,9 +912,8 @@ deploy the same
 `5058610fddc7267ace92d65a5c49713dce570ac3`; an early exact checkout bridges
 the legacy runtime's branch-only clone behavior without following a moving
 branch. Its `gcp.cloud_init.initcmd` disables both generations of the
-internal-service timer after cloud-init writes the units but before the
-root-owned `/etc/cloud-compose/libexec/run-bootstrap.sh` entrypoint
-starts the potentially long bootstrap, so the disposable VM cannot suspend
+internal-service timer after cloud-init writes the units but before
+`cloud-compose-bootstrap.service` starts the potentially long bootstrap, so the disposable VM cannot suspend
 itself. The runner checks the units again after each boot.
 Only the ephemeral runner key is authorized, and SSH is limited to that
 runner's public IPv4 `/32`.

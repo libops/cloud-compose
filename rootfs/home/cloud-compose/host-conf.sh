@@ -4,6 +4,8 @@ set -eou pipefail
 
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
+sitectl=/home/cloud-compose/bin/sitectl
+[[ -x "$sitectl" && ! -L "$sitectl" ]] || sitectl=/etc/cloud-compose/bin/bootstrap-sitectl
 
 if [ -z "${CLOUD_COMPOSE_PROVIDER:-}" ]; then
   echo "CLOUD_COMPOSE_PROVIDER is required" >&2
@@ -19,7 +21,7 @@ fi
 # package content. Debian-family images install Docker below and receive the
 # same policy immediately after that daemon is restarted.
 if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ] && command -v docker >/dev/null 2>&1; then
-  bash /home/cloud-compose/configure-metadata-firewall.sh
+  "$sitectl" host metadata-firewall
 fi
 
 bash /home/cloud-compose/install-dependencies.sh
@@ -36,7 +38,7 @@ systemctl restart docker
 if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ]; then
   # Docker may reprogram its chains during restart. Reassert the deny policy
   # before any persistent application container is allowed to proceed.
-  bash /home/cloud-compose/configure-metadata-firewall.sh
+  "$sitectl" host metadata-firewall
 fi
 
 # wait until our data-root /etc/docker/daemon.json setting is applied
@@ -54,7 +56,7 @@ while [ "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)" != "/
   sleep 2
 done
 
-bash /home/cloud-compose/migrate-legacy-systemd-units.sh
+"$sitectl" host systemd migrate-legacy
 systemctl daemon-reload
 if [ "$CLOUD_COMPOSE_PROVIDER" = "gcp" ]; then
   # Gate later Docker starts behind the early guard on stateful hosts, and make
@@ -68,4 +70,4 @@ else
     cloud-compose-metadata-firewall.service >/dev/null 2>&1 || true
 fi
 
-bash /home/cloud-compose/libops-managed-runtime.sh install-tools
+"$sitectl" host runtime install

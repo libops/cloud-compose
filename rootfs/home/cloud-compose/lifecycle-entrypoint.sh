@@ -13,4 +13,9 @@ esac
 
 # shellcheck disable=SC1091
 source /home/cloud-compose/profile.sh
-exec bash /home/cloud-compose/compose-dispatch.sh "$lifecycle"
+
+if [[ "$lifecycle" == "rollout" && -z "${CLOUD_COMPOSE_APP:-}" && -n "${ROLLOUT_ARG1:-}" ]]; then
+    export CLOUD_COMPOSE_APP="$ROLLOUT_ARG1"
+fi
+
+exec sitectl host apps lifecycle "$lifecycle"

@@ -6,7 +6,7 @@
     "packages": ["sitectl"],
     "extra_env": {},
     "package_versions": {
-      "sitectl": "v1.9.1"
+      "sitectl": "v1.12.7"
     }
   },
   "templates": {
@@ -17,7 +17,7 @@
       "packages": ["sitectl", "sitectl-archivesspace"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-archivesspace": "v2.1.1"
       }
     },
@@ -28,7 +28,7 @@
       "packages": ["sitectl", "sitectl-ojs"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-ojs": "v1.4.0"
       }
     },
@@ -41,7 +41,7 @@
         "ISLANDORA_TAG": "6.3.19"
       },
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-drupal": "v1.5.0",
         "sitectl-isle": "v1.6.0"
       }
@@ -53,7 +53,7 @@
       "packages": ["sitectl", "sitectl-drupal"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-drupal": "v1.5.0"
       }
     },
@@ -64,7 +64,7 @@
       "packages": ["sitectl", "sitectl-wp"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-wp": "v2.1.0"
       }
     },
@@ -75,7 +75,7 @@
       "packages": ["sitectl", "sitectl-omeka-s"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-omeka-s": "v1.4.0"
       }
     },
@@ -86,7 +86,7 @@
       "packages": ["sitectl", "sitectl-omeka-classic"],
       "extra_env": {},
       "package_versions": {
-        "sitectl": "v1.9.1",
+        "sitectl": "v1.12.7",
         "sitectl-omeka-classic": "v1.4.0"
       }
     }

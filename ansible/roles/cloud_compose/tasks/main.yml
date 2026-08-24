@@ -493,6 +493,14 @@
     groups: docker
     append: true
 
+- name: Ensure cloud-compose mount parent is root-owned
+  ansible.builtin.file:
+    path: "{{ cloud_compose_data_dir | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Ensure cloud-compose data directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -530,9 +538,7 @@
   loop:
     - "{{ cloud_compose_home }}"
     - /etc/cloud-compose
-    - /etc/cloud-compose/awk
     - /etc/cloud-compose/bin
-    - /etc/cloud-compose/jq
     - /etc/cloud-compose/libexec
 
 - name: Inspect cloud-compose lifecycle lock directory
@@ -583,46 +589,6 @@
     mode: "0755"
   loop: "{{ cloud_compose_shell_scripts.files }}"
 
-- name: Make checked Cloud Compose program resolver root-controlled
-  ansible.builtin.file:
-    path: /etc/cloud-compose/libexec/checked-programs.bash
-    state: file
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Find checked-in Cloud Compose jq programs
-  ansible.builtin.find:
-    paths: /etc/cloud-compose/jq
-    patterns: "*.jq"
-    recurse: false
-    file_type: file
-  register: cloud_compose_jq_programs
-
-- name: Make checked-in Cloud Compose jq programs root-controlled
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    owner: root
-    group: root
-    mode: "0644"
-  loop: "{{ cloud_compose_jq_programs.files }}"
-
-- name: Find checked-in Cloud Compose awk programs
-  ansible.builtin.find:
-    paths: /etc/cloud-compose/awk
-    patterns: "*.awk"
-    recurse: false
-    file_type: file
-  register: cloud_compose_awk_programs
-
-- name: Make checked-in Cloud Compose awk programs root-controlled
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    owner: root
-    group: root
-    mode: "0644"
-  loop: "{{ cloud_compose_awk_programs.files }}"
-
 - name: Write cloud-compose lifecycle dispatchers
   ansible.builtin.copy:
     src: /home/cloud-compose/lifecycle-entrypoint.sh
@@ -671,6 +637,13 @@
     mode: "0640"
   no_log: true
 
+- name: Stage sitectl for privileged host bootstrap
+  ansible.builtin.command:
+    cmd: >-
+      /etc/cloud-compose/libexec/bootstrap-sitectl.sh
+      --version {{ _cc_sitectl_version | quote }}
+  when: cloud_compose_run_bootstrap | bool
+
 - name: Harden trusted cloud-compose bootstrap paths
   ansible.builtin.command:
     cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
@@ -683,7 +656,7 @@
 
 - name: Install and start authenticated rollout service
   ansible.builtin.command:
-    cmd: bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh
+    cmd: bash /home/cloud-compose/deploy-rollout.sh
   when: _cc_rollout_service.enabled | bool
 
 - name: Clear cloud-compose bootstrap marker
@@ -694,7 +667,7 @@
 
 - name: Inspect validated cloud-compose bootstrap readiness
   ansible.builtin.command:
-    cmd: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
+    cmd: /etc/cloud-compose/libexec/sitectl-host.sh marker valid /var/lib/cloud-compose/bootstrap-complete
   register: cloud_compose_bootstrap_readiness
   changed_when: false
   failed_when: false
@@ -702,7 +675,7 @@
 
 - name: Bootstrap cloud-compose runtime
   ansible.builtin.command:
-    cmd: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+    cmd: /etc/cloud-compose/libexec/sitectl-host.sh systemd ensure-bootstrap
   async: "{{ cloud_compose_bootstrap_timeout }}"
   poll: "{{ cloud_compose_bootstrap_poll_interval }}"
   environment:

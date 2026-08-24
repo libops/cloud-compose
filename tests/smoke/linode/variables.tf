@@ -80,23 +80,3 @@ variable "tags" {
   default     = ["cloud-compose"]
   description = "Extra provider tags applied to smoke-test resources."
 }
-
-variable "cloud_compose_source_ref" {
-  type        = string
-  description = "Exact lowercase cloud-compose commit whose source archive is fetched by providers with metadata size limits."
-
-  validation {
-    condition     = can(regex("^[0-9a-f]{40}$", var.cloud_compose_source_ref))
-    error_message = "cloud_compose_source_ref must be an exact lowercase 40-character commit SHA."
-  }
-}
-
-variable "cloud_compose_source_sha256" {
-  type        = string
-  description = "SHA-256 of the cloud-compose source archive selected by cloud_compose_source_ref."
-
-  validation {
-    condition     = can(regex("^[0-9a-fA-F]{64}$", trimspace(var.cloud_compose_source_sha256)))
-    error_message = "cloud_compose_source_sha256 must be a 64-character SHA-256 digest."
-  }
-}

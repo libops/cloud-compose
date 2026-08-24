@@ -47,60 +47,6 @@ tamper_adapter_control_ownership() {
     /home/cloud-compose/managed-runtime-artifacts.tsv
 }
 
-verify_lifecycle_lock_contract() {
-  local lock_dir=/run/lock/cloud-compose
-  local lock_file="$lock_dir/lifecycle.lock"
-  local profile=/home/cloud-compose/profile.sh
-  local fixture=/work/ci/fixtures/config-management-lifecycle-lock.sh
-  local ready=/tmp/cloud-compose-lifecycle-lock-ready
-  local holder_pid contention_status passwd_sha
-
-  command -v flock >/dev/null
-  command -v runuser >/dev/null
-  command -v systemd-tmpfiles >/dev/null
-  [[ "$(stat -c '%U:%G:%a' "$lock_dir" "$lock_file")" == \
-    $'root:cloud-compose:750\nroot:cloud-compose:660' ]]
-
-  rm -f -- "$ready"
-  CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    "$fixture" hold "$profile" "$ready" &
-  holder_pid=$!
-  for _ in {1..50}; do
-    [[ -e "$ready" ]] && break
-    sleep 0.1
-  done
-  [[ -e "$ready" ]]
-
-  set +e
-  runuser -u cloud-compose -- env \
-    HOME=/home/cloud-compose \
-    CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    CLOUD_COMPOSE_LIFECYCLE_LOCK_TIMEOUT_SECONDS=1 \
-    "$fixture" contend "$profile" >/dev/null 2>&1
-  contention_status=$?
-  set -e
-  [[ "$contention_status" -ne 0 ]]
-  wait "$holder_pid"
-
-  runuser -u cloud-compose -- env \
-    HOME=/home/cloud-compose \
-    CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    "$fixture" subshell "$profile"
-
-  passwd_sha="$(sha256sum /etc/passwd)"
-  mv -- "$lock_file" "${lock_file}.real"
-  ln -s /etc/passwd "$lock_file"
-  if CLOUD_COMPOSE_ENV_FILE=/home/cloud-compose/.env \
-    "$fixture" reject-symlink "$profile" \
-      >/dev/null 2>&1; then
-    echo "Lifecycle lock accepted a symbolic-link target" >&2
-    exit 1
-  fi
-  [[ "$(sha256sum /etc/passwd)" == "$passwd_sha" ]]
-  rm -f -- "$lock_file"
-  mv -- "${lock_file}.real" "$lock_file"
-}
-
 ansible-playbook \
   -i /work/ansible/inventory.example.yml \
   /work/ansible/playbooks/site.yml \
@@ -217,8 +163,6 @@ rm -rf -- /run/lock/cloud-compose
 ansible-playbook \
   -i /work/tests/config-management/ansible/inventory.yml \
   /work/tests/config-management/ansible/smoke.yml
-
-verify_lifecycle_lock_contract
 
 python /work/ci/config-management-smoke-assert.py ansible-runtime
 

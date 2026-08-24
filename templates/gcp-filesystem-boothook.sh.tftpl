@@ -3,20 +3,16 @@
 set -euo pipefail
 
 umask 077
-readonly filesystem_boot=/run/cloud-compose-gcp-filesystem-boot
-readonly filesystem_prep=/run/cloud-compose-prepare-filesystem
-readonly filesystem_persist=/run/cloud-compose-persist-filesystems
-readonly filesystem_reconcile=/run/cloud-compose-reconcile-fstab.awk
+readonly bootstrap_sitectl=/run/cloud-compose-bootstrap-sitectl.sh
+readonly sitectl=/etc/cloud-compose/bin/bootstrap-sitectl
 
-printf '%s' '${GCP_FILESYSTEM_BOOT_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_boot"
-printf '%s' '${FILESYSTEM_PREP_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_prep"
-printf '%s' '${FILESYSTEM_PERSIST_SCRIPT_B64}' | base64 -d | gzip -d >"$filesystem_persist"
-printf '%s' '${FSTAB_RECONCILE_AWK_B64}' | base64 -d | gzip -d >"$filesystem_reconcile"
-chmod 0600 "$filesystem_boot" "$filesystem_prep" "$filesystem_persist" "$filesystem_reconcile"
+printf '%s' '${BOOTSTRAP_SITECTL_B64}' | base64 -d | gzip -d >"$bootstrap_sitectl"
+chmod 0700 "$bootstrap_sitectl"
+bash "$bootstrap_sitectl" --version ${jsonencode(SITECTL_VERSION)}
 
-bash "$filesystem_boot" \
-    ${jsonencode(FRESH_FILESYSTEM_IDENTITY)} \
-    ${jsonencode(USE_OVERLAY ? "true" : "false")} \
-    "$filesystem_prep" \
-    "$filesystem_persist" \
-    "$filesystem_reconcile"
+"$sitectl" host filesystems \
+    --data-device /dev/disk/by-id/google-data \
+    --volumes-device /dev/disk/by-id/google-docker-volumes \
+    --fresh-identity ${jsonencode(FRESH_FILESYSTEM_IDENTITY)} \
+    --ready-marker /run/cloud-compose-filesystems-ready%{ if USE_OVERLAY } \
+    --overlay-device /dev/disk/by-id/google-prod-volumes%{ endif }

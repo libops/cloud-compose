@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cloud-compose-smoke
+  group: cloud-compose-smoke-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:

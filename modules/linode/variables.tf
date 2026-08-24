@@ -85,12 +85,8 @@ variable "linode" {
 variable "runtime" {
   description = "Provider-neutral compose/runtime settings."
   type = object({
-    rootfs                = optional(string, "")
-    rootfs_archive_url    = optional(string, "")
-    rootfs_archive_sha256 = optional(string, "")
-    # Internal hosted-smoke escape hatch. Public provider entrypoints must not expose it.
-    rootfs_test_source_archive_prefix = optional(string, "")
-    users                             = optional(map(list(string)), {})
+    rootfs = optional(string, "")
+    users  = optional(map(list(string)), {})
 
     disaster_recovery = optional(object({
       required    = optional(bool, false)
@@ -196,14 +192,6 @@ variable "runtime" {
     extra_env = optional(map(string), {})
   })
   default = {}
-
-  validation {
-    condition = (
-      (trimspace(var.runtime.rootfs_archive_url) == "") == (trimspace(var.runtime.rootfs_archive_sha256) == "") &&
-      (trimspace(var.runtime.rootfs_archive_sha256) == "" || can(regex("^[0-9a-fA-F]{64}$", trimspace(var.runtime.rootfs_archive_sha256))))
-    )
-    error_message = "runtime.rootfs_archive_url and a 64-character runtime.rootfs_archive_sha256 must be supplied together."
-  }
 
   validation {
     condition = (
