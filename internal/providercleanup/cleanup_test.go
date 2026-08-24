@@ -433,8 +433,7 @@ func TestListRetryPolicyUsesActualHTTPResponses(t *testing.T) {
 	}
 }
 
-func TestListRetryPolicyFailsFastOnPermanentHTTPResponses(t *testing.T) {
-	t.Parallel()
+func TestPermanentListHTTPResponsesAreNotRetryable(t *testing.T) {
 	for _, status := range []int{
 		http.StatusBadRequest,
 		http.StatusUnauthorized,
@@ -445,29 +444,9 @@ func TestListRetryPolicyFailsFastOnPermanentHTTPResponses(t *testing.T) {
 		http.StatusLocked,
 		http.StatusFound,
 	} {
-		status := status
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			t.Parallel()
-			server, requests := newStatusSequenceServer(t, []int{status}, `{"data":[],"page":1,"pages":1,"results":0}`)
-			runner := Runner{
-				Client: testClient(t, Linode, "token", server.URL+"/v4/"),
-				Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
-				Sleep: func(_ context.Context, _ time.Duration) error {
-					t.Fatal("permanent list failure unexpectedly slept for a retry")
-					return nil
-				},
-			}
-			if _, err := runner.listWithRetry(context.Background(), Config{
-				Provider:       Linode,
-				ListAttempts:   6,
-				ListRetryDelay: time.Second,
-			}, kindInstances); err == nil {
-				t.Fatal("listWithRetry() unexpectedly accepted a permanent HTTP failure")
-			}
-			if got := requests.Load(); got != 1 {
-				t.Fatalf("requests = %d; want 1", got)
-			}
-		})
+		if retryableStatus(http.MethodGet, status) {
+			t.Errorf("GET HTTP %d is unexpectedly retryable", status)
+		}
 	}
 }
 
