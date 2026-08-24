@@ -214,16 +214,16 @@
   'upload_timeout': ''
 } %}
 {% set default_init = [
-  '/home/cloud-compose/default-lifecycle.sh init'
+  'sitectl:default init'
 ] %}
 {% set default_up = [
-  '/home/cloud-compose/default-lifecycle.sh up'
+  'sitectl:default up'
 ] %}
 {% set default_down = [
-  '/home/cloud-compose/default-lifecycle.sh down'
+  'sitectl:default down'
 ] %}
 {% set default_rollout = [
-  '/home/cloud-compose/default-lifecycle.sh rollout'
+  'sitectl:default rollout'
 ] %}
 {% set lifecycle_defaults = {
   'init': default_init,
@@ -621,6 +621,15 @@ cloud-compose-user:
       - pkg: cloud-compose-packages
 {% endif %}
 
+cloud-compose-mount-parent:
+  file.directory:
+    - name: /mnt/disks
+    - user: root
+    - group: root
+    - mode: '0755'
+    - require:
+      - user: cloud-compose-user
+
 cloud-compose-data-dirs:
   file.directory:
     - names:
@@ -633,6 +642,7 @@ cloud-compose-data-dirs:
     - makedirs: True
     - require:
       - user: cloud-compose-user
+      - file: cloud-compose-mount-parent
 
 {% if compose_projects %}
 cloud-compose-project-dirs:
@@ -663,9 +673,7 @@ cloud-compose-privileged-program-directories:
     - names:
       - {{ home | json }}
       - /etc/cloud-compose
-      - /etc/cloud-compose/awk
       - /etc/cloud-compose/bin
-      - /etc/cloud-compose/jq
       - /etc/cloud-compose/libexec
     - user: root
     - group: root
@@ -690,33 +698,6 @@ cloud-compose-rootfs-script-modes:
   cmd.run:
     - name: find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' -exec chown root:root {} + -exec chmod 0755 {} +
     - unless: test -z "$(find /home/cloud-compose /etc/cloud-compose/bin /etc/cloud-compose/libexec -maxdepth 1 -type f -name '*.sh' \( ! -user root -o ! -group root -o ! -perm 0755 \) -print -quit)"
-    - require:
-      - file: cloud-compose-rootfs
-      - file: cloud-compose-privileged-program-directories
-
-cloud-compose-checked-program-resolver:
-  file.managed:
-    - name: /etc/cloud-compose/libexec/checked-programs.bash
-    - source: salt://rootfs/etc/cloud-compose/libexec/checked-programs.bash
-    - user: root
-    - group: root
-    - mode: '0644'
-    - require:
-      - file: cloud-compose-rootfs
-      - file: cloud-compose-privileged-program-directories
-
-cloud-compose-rootfs-jq-modes:
-  cmd.run:
-    - name: find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' -exec chown root:root {} + -exec chmod 0644 {} +
-    - unless: test -z "$(find /etc/cloud-compose/jq -maxdepth 1 -type f -name '*.jq' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
-    - require:
-      - file: cloud-compose-rootfs
-      - file: cloud-compose-privileged-program-directories
-
-cloud-compose-rootfs-awk-modes:
-  cmd.run:
-    - name: find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' -exec chown root:root {} + -exec chmod 0644 {} +
-    - unless: test -z "$(find /etc/cloud-compose/awk -maxdepth 1 -type f -name '*.awk' \( ! -user root -o ! -group root -o ! -perm 0644 \) -print -quit)"
     - require:
       - file: cloud-compose-rootfs
       - file: cloud-compose-privileged-program-directories
@@ -791,6 +772,12 @@ cloud-compose-managed-runtime-artifacts:
       - file: cloud-compose-rootfs
 
 {% if run_bootstrap is sameas true %}
+cloud-compose-bootstrap-sitectl:
+  cmd.run:
+    - name: /etc/cloud-compose/libexec/bootstrap-sitectl.sh --version {{ sitectl_version | json }}
+    - require:
+      - cmd: cloud-compose-rootfs-script-modes
+
 cloud-compose-bootstrap-paths-hardened:
   cmd.run:
     - name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh
@@ -800,9 +787,7 @@ cloud-compose-bootstrap-paths-hardened:
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
-      - file: cloud-compose-checked-program-resolver
-      - cmd: cloud-compose-rootfs-jq-modes
-      - cmd: cloud-compose-rootfs-awk-modes
+      - cmd: cloud-compose-bootstrap-sitectl
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}
 {% endfor %}
@@ -819,7 +804,7 @@ cloud-compose-systemd-reload:
 {% if rollout_enabled is sameas true %}
 cloud-compose-rollout-service:
   cmd.run:
-    - name: bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh
+    - name: bash /home/cloud-compose/deploy-rollout.sh
     - require:
       - file: cloud-compose-env
       - file: cloud-compose-application-env
@@ -828,9 +813,6 @@ cloud-compose-rollout-service:
       - file: cloud-compose-rootfs
       - cmd: cloud-compose-lifecycle-lock
       - cmd: cloud-compose-rootfs-script-modes
-      - file: cloud-compose-checked-program-resolver
-      - cmd: cloud-compose-rootfs-jq-modes
-      - cmd: cloud-compose-rootfs-awk-modes
       - file: cloud-compose-lifecycle-init
       - file: cloud-compose-lifecycle-up
       - file: cloud-compose-lifecycle-down
@@ -851,10 +833,10 @@ cloud-compose-clear-bootstrap-marker:
 {% if run_bootstrap is sameas true %}
 cloud-compose-bootstrap:
   cmd.run:
-    - name: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh
+    - name: /etc/cloud-compose/libexec/sitectl-host.sh systemd ensure-bootstrap
     - env:
         CLOUD_COMPOSE_BOOTSTRAP_WAIT_SECONDS: {{ (bootstrap_wait_seconds | string) | json }}
-    - unless: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
+    - unless: /etc/cloud-compose/libexec/sitectl-host.sh marker valid /var/lib/cloud-compose/bootstrap-complete
     - require:
 {% if install_packages %}
       - service: cloud-compose-docker
@@ -864,9 +846,6 @@ cloud-compose-bootstrap:
       - file: cloud-compose-project-manifest
       - file: cloud-compose-managed-runtime-artifacts
       - cmd: cloud-compose-rootfs-script-modes
-      - file: cloud-compose-checked-program-resolver
-      - cmd: cloud-compose-rootfs-jq-modes
-      - cmd: cloud-compose-rootfs-awk-modes
       - cmd: cloud-compose-bootstrap-paths-hardened
 {% for lifecycle in ['init', 'up', 'down', 'rollout'] %}
       - file: cloud-compose-lifecycle-{{ lifecycle }}

@@ -8,5 +8,5 @@ After=docker.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh docker-prune.sh
+ExecStart=/etc/cloud-compose/libexec/sitectl-host.sh maintenance docker-prune
 TimeoutStartSec=30min

@@ -272,20 +272,13 @@ module "wp" {
       cloud_compose_keys = var.operator_ssh_keys
     }
   }
-  runtime = {
-    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
-    rootfs_archive_sha256 = var.cloud_compose_rootfs_sha256
-  }
 }
 ```
 
-Replace the source placeholder with the exact reviewed release that supplied
-`cloud_compose_rootfs_archive_url` and its SHA-256. The runnable example leaves
-both release inputs required because older releases do not publish the adjacent
-contract now required at plan time. DigitalOcean limits Droplet `user_data` to
-64 KiB, and the full managed runtime no longer fits safely inline. Terraform
-rejects both an oversized inline payload and a mismatched module/archive before
-calling the Droplet API. The default DigitalOcean SSH firewall sources include
+Replace the source placeholder with an exact reviewed release. DigitalOcean
+limits Droplet `user_data` to 64 KiB. The module embeds one compressed rootfs
+bundle and rejects an oversized payload before calling the Droplet API. The
+default DigitalOcean SSH firewall sources include
 the public internet; production callers should set
 `digitalocean.firewall.ssh_source_addresses` to institutional or operator
 CIDRs instead of inheriting that default.
@@ -305,13 +298,8 @@ remain unchanged.
 ## Linode
 
 Use `LINODE_TOKEN` or an explicit Linode provider configuration in the calling
-stack. Linode metadata has a 16 KiB limit, so CI and examples pass
-`rootfs_archive_url` instead of embedding the managed rootfs. Archive mode is
-an integrity-pinned input: set an immutable HTTPS source ref and the SHA-256 of
-the exact downloaded archive together. Terraform rejects a non-HTTPS URL, a URL
-without a checksum, a checksum without a URL, and malformed digests. The VM
-restricts redirects to HTTPS with TLS 1.2 or newer and verifies the checksum
-before extracting any archive content.
+stack. The module gzip-compresses cloud-init for Linode metadata and rejects an
+encoded payload above 64 KiB before creating the instance.
 
 ```hcl
 module "drupal" {
@@ -328,27 +316,10 @@ module "drupal" {
       cloud_compose_keys = var.operator_ssh_keys
     }
   }
-  runtime = {
-    rootfs_archive_url    = var.cloud_compose_rootfs_archive_url
-    rootfs_archive_sha256 = var.cloud_compose_rootfs_sha256
-  }
 }
 ```
 
 Linode also defaults SSH ingress to the public internet. Set
 `linode.firewall.ssh_source_ipv4` and `ssh_source_ipv6` to reviewed operator
-CIDRs. Replace the source placeholder only with the exact reviewed release that
-supplied the rootfs archive URL and checksum. The runnable example intentionally
-has no release default.
-
-Use the canonical `cloud-compose-rootfs.tar.gz`, adjacent archive `.sha256`,
-and `cloud-compose-rootfs.contract.sha256` release assets. They are built
-reproducibly from the tagged `rootfs/` tree. Terraform fetches the contract
-sidecar while planning and rejects an archive from a different module release
-before changing a VM; boot independently verifies both the pinned archive
-bytes and the canonical rootfs contract. GitHub's generated repository source
-archives are not a stable long-term checksum boundary because GitHub may
-regenerate their outer compression. CI may use a commit archive only within the
-same run while testing an unreleased commit. Promote a release only after its
-`Verify rootfs release assets` job is green, then use the exact release asset
-URL and published archive checksum in the deployment.
+CIDRs. Replace the source placeholder only with an exact reviewed release; the
+rootfs bytes are part of that pinned Terraform module source.

@@ -147,8 +147,6 @@ module "gcp" {
 
   users                      = local.runtime.users
   rootfs                     = local.runtime.rootfs
-  rootfs_archive_url         = local.runtime.rootfs_archive_url
-  rootfs_archive_sha256      = local.runtime.rootfs_archive_sha256
   offhost_backup_required    = local.runtime.disaster_recovery.required
   offhost_backup_driver_path = local.runtime.disaster_recovery.driver_path
   extra_env                  = local.runtime.extra_env

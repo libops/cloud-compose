@@ -125,6 +125,7 @@
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].docker_compose_repo == "https://github.com/libops/isle"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].project_dir == "/mnt/disks/data/libops/isle/isle-prod"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].compose_project_name == "libops-isle-v1-3-1"'
+          - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].ingress_port == 80'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].ingress.domain == "isle.example.edu"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].sitectl_plugin == "isle"'
           - '(cloud_compose_manifest_file.content | b64decode | from_json)["isle-prod"].init_commands == []'

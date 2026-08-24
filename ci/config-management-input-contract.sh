@@ -13,8 +13,7 @@ cmp -s "$validator" "$salt_validator" || {
 
 ansible_tasks="$repo_root/ansible/roles/cloud_compose/tasks/main.yml"
 salt_state="$repo_root/salt/cloud-compose/init.sls"
-root_program_runner="$repo_root/rootfs/etc/cloud-compose/libexec/run-root-program.sh"
-rollout_runner="bash /etc/cloud-compose/libexec/run-root-program.sh deploy-rollout.sh"
+rollout_runner="bash /home/cloud-compose/deploy-rollout.sh"
 
 contract_fail() {
   echo "config-management input contract: $1" >&2
@@ -22,15 +21,25 @@ contract_fail() {
 }
 
 grep -Fq "cmd: $rollout_runner" "$ansible_tasks" || \
-  contract_fail "Ansible rollout does not use the trusted root-program runner"
-if grep -Fq 'cmd: bash "{{ cloud_compose_home }}/' "$ansible_tasks" || \
-  grep -Fq 'cmd: bash /home/cloud-compose/' "$ansible_tasks"; then
-  contract_fail "Ansible rollout executes a root program directly from the runtime home"
-fi
+  contract_fail "Ansible rollout does not invoke the hardened rollout program"
 grep -Fq 'cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$ansible_tasks" || \
   contract_fail "Ansible does not apply the shared bootstrap path hardener"
 grep -Fq -- '- name: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$salt_state" || \
   contract_fail "Salt does not apply the shared bootstrap path hardener"
+
+ansible_sitectl_line="$(grep -n -m1 '/etc/cloud-compose/libexec/bootstrap-sitectl.sh' "$ansible_tasks" | cut -d: -f1)"
+ansible_hardener_line="$(grep -n -m1 'cmd: /etc/cloud-compose/libexec/harden-bootstrap-paths.sh' "$ansible_tasks" | cut -d: -f1)"
+[[ -n "$ansible_sitectl_line" && "$ansible_sitectl_line" -lt "$ansible_hardener_line" ]] || \
+  contract_fail "Ansible does not stage sitectl before invoking sitectl-backed hardening"
+grep -Fq -- '--version {{ _cc_sitectl_version | quote }}' "$ansible_tasks" || \
+  contract_fail "Ansible does not stage the configured sitectl version"
+
+salt_sitectl_block="$(sed -n '/^cloud-compose-bootstrap-sitectl:/,/^[^[:space:]]/p' "$salt_state")"
+grep -Fq -- '--version {{ sitectl_version | json }}' <<<"$salt_sitectl_block" || \
+  contract_fail "Salt does not stage the configured sitectl version"
+salt_hardener_block="$(sed -n '/^cloud-compose-bootstrap-paths-hardened:/,/^[^[:space:]]/p' "$salt_state")"
+grep -Fq -- '- cmd: cloud-compose-bootstrap-sitectl' <<<"$salt_hardener_block" || \
+  contract_fail "Salt does not stage sitectl before invoking sitectl-backed hardening"
 
 ansible_privileged_block="$(sed -n '/^- name: Secure Cloud Compose privileged program directories/,/^- name:/p' "$ansible_tasks")"
 grep -Fq -- '- "{{ cloud_compose_home }}"' <<<"$ansible_privileged_block" || \
@@ -38,19 +47,18 @@ grep -Fq -- '- "{{ cloud_compose_home }}"' <<<"$ansible_privileged_block" || \
 salt_privileged_block="$(sed -n '/^cloud-compose-privileged-program-directories:/,/^[^[:space:]]/p' "$salt_state")"
 grep -Fq -- '- {{ home | json }}' <<<"$salt_privileged_block" || \
   contract_fail "Salt does not close the account-owned runtime-home window after installing rootfs"
-grep -Fq 'path: /etc/cloud-compose/libexec/checked-programs.bash' "$ansible_tasks" || \
-  contract_fail "Ansible does not explicitly secure the checked program resolver"
-grep -Fq 'source: salt://rootfs/etc/cloud-compose/libexec/checked-programs.bash' "$salt_state" || \
-  contract_fail "Salt does not explicitly secure the checked program resolver"
-
-grep -Fq 'configure-metadata-firewall.sh | deploy-rollout.sh | docker-prune.sh' "$root_program_runner" || \
-  contract_fail "the trusted root-program runner does not allow deploy-rollout.sh"
-
+ansible_mount_parent_block="$(sed -n '/^- name: Ensure cloud-compose mount parent is root-owned/,/^- name:/p' "$ansible_tasks")"
+for marker in 'owner: root' 'group: root' 'mode: "0755"'; do
+  grep -Fq -- "$marker" <<<"$ansible_mount_parent_block" || \
+    contract_fail "Ansible mount parent is missing $marker"
+done
+salt_mount_parent_block="$(sed -n '/^cloud-compose-mount-parent:/,/^[^[:space:]]/p' "$salt_state")"
+for marker in '- name: /mnt/disks' '- user: root' '- group: root' "- mode: '0755'"; do
+  grep -Fq -- "$marker" <<<"$salt_mount_parent_block" || \
+    contract_fail "Salt mount parent is missing $marker"
+done
 salt_rollout_block="$(sed -n '/^cloud-compose-rollout-service:/,/^{% endif %}$/p' "$salt_state")"
 [[ -n "$salt_rollout_block" ]] || contract_fail "Salt rollout state is missing"
-if grep -Fq -- '- name: bash /home/cloud-compose/' "$salt_state"; then
-  contract_fail "Salt rollout executes a root program directly from the runtime home"
-fi
 for marker in \
   "- name: $rollout_runner" \
   '- file: cloud-compose-env' \
@@ -60,9 +68,6 @@ for marker in \
   '- file: cloud-compose-rootfs' \
   '- cmd: cloud-compose-lifecycle-lock' \
   '- cmd: cloud-compose-rootfs-script-modes' \
-  '- file: cloud-compose-checked-program-resolver' \
-  '- cmd: cloud-compose-rootfs-jq-modes' \
-  '- cmd: cloud-compose-rootfs-awk-modes' \
   '- file: cloud-compose-lifecycle-init' \
   '- file: cloud-compose-lifecycle-up' \
   '- file: cloud-compose-lifecycle-down' \

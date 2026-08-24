@@ -29,24 +29,16 @@ users:
 %{ endfor ~}
 
 write_files:
-- path: /var/lib/cloud-compose/bootstrap/rootfs-archive.sh
+- path: /var/lib/cloud-compose/bootstrap/install-rootfs.py
   owner: root:root
   permissions: "0700"
   encoding: gzip+base64
-  content: ${ROOTFS_ARCHIVE_SCRIPT_B64}
-%{ if ROOTFS_ARCHIVE_ENABLED ~}
-- path: /var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh
-  owner: root:root
-  permissions: "0700"
-  encoding: gzip+base64
-  content: ${LINUX_CLOUD_INIT_SCRIPT_B64}
-%{ endif ~}
-- path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
+  content: ${ROOTFS_INSTALLER_B64}
+- path: /var/lib/cloud-compose/bootstrap/rootfs.json
   owner: root:root
   permissions: "0600"
   encoding: gzip+base64
-  content: ${DIAGNOSTICS_SCRIPT_B64}
-${WRITE_FILES_CONTENT}
+  content: ${ROOTFS_BUNDLE_B64}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
 ${ENV_FILE_CONTENT}
@@ -55,13 +47,5 @@ ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
-%{ if ROOTFS_ARCHIVE_ENABLED ~}
-%{ if ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX != "" ~}
-- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, prepare-linux-test-source, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(LINUX_CLOUD_INIT_SCRIPT_SHA256)}, ${jsonencode(ROOTFS_TEST_SOURCE_ARCHIVE_PREFIX)}]
-%{ else ~}
-- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, prepare-linux, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(LINUX_CLOUD_INIT_SCRIPT_SHA256)}]
-%{ endif ~}
-- [bash, /var/lib/cloud-compose/bootstrap/linux-vm-cloud-init.sh, ${jsonencode(DATA_DEVICE)}, ${jsonencode(VOLUMES_DEVICE)}, "true", ${jsonencode(ROLLOUT_ENABLED)}, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
-%{ else ~}
-- [bash, /etc/cloud-compose/libexec/linux-vm-cloud-init.sh, ${jsonencode(DATA_DEVICE)}, ${jsonencode(VOLUMES_DEVICE)}, "false", ${jsonencode(ROLLOUT_ENABLED)}, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
-%{ endif ~}
+- [python3, /var/lib/cloud-compose/bootstrap/install-rootfs.py, /var/lib/cloud-compose/bootstrap/rootfs.json]
+- [bash, /etc/cloud-compose/libexec/linux-vm-cloud-init.sh, ${jsonencode(DATA_DEVICE)}, ${jsonencode(VOLUMES_DEVICE)}, ${jsonencode(ROLLOUT_ENABLED)}, ${jsonencode(SITECTL_VERSION)}]

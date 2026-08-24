@@ -28,15 +28,15 @@ module "site" {
   runtime = {
     compose = {
       rollout = [
-        "/home/cloud-compose/default-lifecycle.sh rollout",
+        "sitectl:default rollout",
       ]
     }
   }
 }
 ```
 
-The `runtime.compose.rollout` entry above is the built-in default and may be
-omitted. It is shown to make the single-program execution boundary explicit.
+The `runtime.compose.rollout` entry above is the built-in sitectl lifecycle and
+may be omitted. It is shown to make the typed lifecycle boundary explicit.
 
 The example pins the reviewed cloud-compose `1.0.0` release. Replace that ref
 only with an exact reviewed release or full commit. `gcp.rollout.release_url`

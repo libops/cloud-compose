@@ -17,7 +17,7 @@ case "$rollout_enabled" in
         ;;
 esac
 
-bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh
+/etc/cloud-compose/bin/bootstrap-sitectl host marker valid /var/lib/cloud-compose/bootstrap-complete
 if [[ "$rollout_enabled" == "true" ]]; then
     bash /home/cloud-compose/deploy-rollout.sh >>/home/cloud-compose/run.log 2>&1
 fi

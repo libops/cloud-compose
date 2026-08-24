@@ -9,10 +9,10 @@ RequiresMountsFor=/mnt/disks/data
 User=root
 Group=root
 EnvironmentFile=-/etc/default/vault-agent
-ExecStartPre=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh prepare
+ExecStartPre=/etc/cloud-compose/libexec/sitectl-host.sh vault-readiness prepare
 ExecStart=/usr/local/bin/vault agent -config=/etc/vault-agent.d/cloud-compose.hcl
-ExecStartPost=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh wait
-ExecStopPost=/bin/bash /etc/cloud-compose/libexec/run-root-program.sh vault-agent-readiness.sh clear
+ExecStartPost=/etc/cloud-compose/libexec/sitectl-host.sh vault-readiness wait
+ExecStopPost=/etc/cloud-compose/libexec/sitectl-host.sh vault-readiness clear
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=2min

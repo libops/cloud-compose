@@ -1,1 +1,5 @@
-{{ _cc_compose_projects | to_nice_json }}
+{% set projects = {} %}
+{% for name, project in _cc_compose_projects.items() %}
+{% set _ = projects.update({name: project | combine({'ingress_port': project.ingress_port | int})}) %}
+{% endfor %}
+{{ projects | to_nice_json }}

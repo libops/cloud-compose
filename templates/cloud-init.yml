@@ -29,26 +29,16 @@ users:
 %{ endfor ~}
 
 write_files:
-- path: /var/lib/cloud-compose/bootstrap/rootfs-archive.sh
+- path: /var/lib/cloud-compose/bootstrap/install-rootfs.py
   owner: root:root
   permissions: "0700"
   encoding: gzip+base64
-  content: ${ROOTFS_ARCHIVE_SCRIPT_B64}
-- path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh
-  owner: root:root
-  permissions: "0700"
-  encoding: gzip+base64
-  content: ${GCP_CLOUD_INIT_FINALIZE_SCRIPT_B64}
-- path: /var/lib/cloud-compose/bootstrap/gcp-cloud-init-post-bootstrap.sh
-  owner: root:root
-  permissions: "0700"
-  encoding: gzip+base64
-  content: ${GCP_CLOUD_INIT_POST_SCRIPT_B64}
-- path: /var/lib/cloud-compose/bootstrap/cloud-compose-diagnostics.sh
+  content: ${ROOTFS_INSTALLER_B64}
+- path: /var/lib/cloud-compose/bootstrap/rootfs.json
   owner: root:root
   permissions: "0600"
   encoding: gzip+base64
-  content: ${DIAGNOSTICS_SCRIPT_B64}
+  content: ${ROOTFS_BUNDLE_B64}
 - path: /var/lib/cloud-compose/bootstrap/init-commands.sh
   owner: root:root
   permissions: "0600"
@@ -59,7 +49,6 @@ write_files:
   permissions: "0600"
   encoding: b64
   content: ${jsonencode(RUNCMD_B64)}
-${WRITE_FILES_CONTENT}
 ${DOCKER_COMPOSE_SCRIPTS}
 ${COMPOSE_PROJECTS_FILE}
 ${ENV_FILE_CONTENT}
@@ -68,10 +57,8 @@ ${VAULT_AGENT_FILES}
 ${MANAGED_RUNTIME_ARTIFACTS_FILE}
 
 runcmd:
-%{ if ROOTFS_ARCHIVE_ENABLED ~}
-- [bash, /var/lib/cloud-compose/bootstrap/rootfs-archive.sh, install, ${jsonencode(ROOTFS_ARCHIVE_URL_B64)}, ${jsonencode(ROOTFS_ARCHIVE_SHA256)}, ${jsonencode(ROOTFS_CONTRACT_SHA256)}, ${jsonencode(ROOTFS_OVERLAY_DIR)}]
-%{ endif ~}
-- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-finalize.sh, /var/lib/cloud-compose/bootstrap/init-commands.sh, ${jsonencode(DIAGNOSTICS_SCRIPT_SHA256)}]
+- [python3, /var/lib/cloud-compose/bootstrap/install-rootfs.py, /var/lib/cloud-compose/bootstrap/rootfs.json]
+- [bash, /etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh, /var/lib/cloud-compose/bootstrap/init-commands.sh]
 %{ if POST_BOOTSTRAP_REQUIRED ~}
-- [bash, /var/lib/cloud-compose/bootstrap/gcp-cloud-init-post-bootstrap.sh, ${jsonencode(ROLLOUT_ENABLED)}, /var/lib/cloud-compose/bootstrap/runcmd.sh]
+- [bash, /etc/cloud-compose/libexec/gcp-cloud-init-post-bootstrap.sh, ${jsonencode(ROLLOUT_ENABLED)}, /var/lib/cloud-compose/bootstrap/runcmd.sh]
 %{ endif ~}

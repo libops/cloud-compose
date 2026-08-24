@@ -8,7 +8,7 @@ RequiresMountsFor=/mnt/disks/data
 User=cloud-compose
 Group=cloud-compose
 WorkingDirectory=/mnt/disks/data
-ExecStart=/bin/bash /home/cloud-compose/run-rollout-service.sh
+ExecStart=/etc/cloud-compose/libexec/sitectl-host.sh rollout-serve
 Restart=on-failure
 RestartSec=5s
 

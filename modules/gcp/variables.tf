@@ -262,7 +262,7 @@ variable "docker_compose_branch" {
 variable "docker_compose_init" {
   type = list(string)
   default = [
-    "/home/cloud-compose/default-lifecycle.sh init"
+    "sitectl:default init"
   ]
   nullable    = false
   description = "After cloning the docker compose git repo, any initialization that needs to happen before the docker compose project can start. One command per list value"
@@ -271,7 +271,7 @@ variable "docker_compose_init" {
 variable "docker_compose_up" {
   type = list(string)
   default = [
-    "/home/cloud-compose/default-lifecycle.sh up"
+    "sitectl:default up"
   ]
   nullable    = false
   description = "Command to start the docker compose project"
@@ -280,7 +280,7 @@ variable "docker_compose_up" {
 variable "docker_compose_down" {
   type = list(string)
   default = [
-    "/home/cloud-compose/default-lifecycle.sh down"
+    "sitectl:default down"
   ]
   nullable    = false
   description = "Command to stop the docker compose project"
@@ -289,7 +289,7 @@ variable "docker_compose_down" {
 variable "docker_compose_rollout" {
   type = list(string)
   default = [
-    "/home/cloud-compose/default-lifecycle.sh rollout"
+    "sitectl:default rollout"
   ]
   nullable    = false
   description = "Commands used by rollout triggers. A validated GIT_COMMIT_SHA takes precedence over GIT_REF/GIT_BRANCH; without one, sitectl reconciles the current checkout."
@@ -581,26 +581,6 @@ variable "rootfs" {
   type        = string
   default     = ""
   description = "Path to additional rootfs files to copy into the VM. Files will be merged with the base rootfs. Example: '/path/to/custom/rootfs'"
-}
-
-variable "rootfs_archive_url" {
-  type        = string
-  default     = ""
-  description = "Optional immutable HTTPS cloud-compose rootfs release archive to fetch during boot instead of embedding the packaged rootfs. Must be set with rootfs_archive_sha256; planning also requires the adjacent cloud-compose-rootfs.contract.sha256 asset to match this module source."
-
-  validation {
-    condition = (
-      trimspace(var.rootfs_archive_url) == "" ||
-      can(regex("^https://[^[:space:]]+$", trimspace(var.rootfs_archive_url)))
-    )
-    error_message = "rootfs_archive_url must be empty or an HTTPS URL without whitespace."
-  }
-}
-
-variable "rootfs_archive_sha256" {
-  type        = string
-  default     = ""
-  description = "Required 64-character SHA-256 checksum when rootfs_archive_url is set."
 }
 
 variable "offhost_backup_required" {

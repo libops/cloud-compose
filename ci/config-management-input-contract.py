@@ -163,9 +163,9 @@ if "files/validate-runtime-inputs.py" not in ansible_tasks:
     fail("Ansible does not execute the shared host-input validator")
 if "--data-root" in ansible_tasks:
     fail("Ansible makes the production project ownership boundary configurable")
-if "cmd: bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh" not in ansible_tasks:
+if "cmd: /etc/cloud-compose/libexec/sitectl-host.sh systemd ensure-bootstrap" not in ansible_tasks:
     fail("Ansible bypasses the retryable bootstrap service")
-if "cmd: bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh" not in ansible_tasks:
+if "cmd: /etc/cloud-compose/libexec/sitectl-host.sh marker valid /var/lib/cloud-compose/bootstrap-complete" not in ansible_tasks:
     fail("Ansible does not validate bootstrap readiness evidence")
 if 'cmd: bash "{{ cloud_compose_home }}/run.sh"' in ansible_tasks:
     fail("Ansible still invokes the one-shot bootstrap script directly")
@@ -194,16 +194,13 @@ cloud_smoke_workflow = (repo_root / ".github/workflows/cloud-smoke.yml").read_te
 local_smoke_driver = (repo_root / "ci/config-management-smoke.sh").read_text()
 local_smoke_container = (repo_root / "ci/config-management-smoke-container.sh").read_text()
 local_smoke_inner = (repo_root / "ci/config-management-smoke-inner.sh").read_text()
-local_lifecycle_fixture = (
-    repo_root / "ci/fixtures/config-management-lifecycle-lock.sh"
-).read_text()
 salt_gate = salt_state.find("cloud-compose-host-inputs-valid:")
 salt_first_mutation = salt_state.find("cloud-compose-packages:")
 if salt_gate < 0 or salt_first_mutation < 0 or salt_gate > salt_first_mutation:
     fail("Salt host-input validation does not precede its first host mutation")
-if "bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh" not in salt_state:
+if "/etc/cloud-compose/libexec/sitectl-host.sh systemd ensure-bootstrap" not in salt_state:
     fail("Salt bypasses the retryable bootstrap service")
-if "bash /etc/cloud-compose/libexec/require-bootstrap-ready.sh" not in salt_state:
+if "/etc/cloud-compose/libexec/sitectl-host.sh marker valid /var/lib/cloud-compose/bootstrap-complete" not in salt_state:
     fail("Salt does not validate bootstrap readiness evidence")
 if "home ~ '/run.sh'" in salt_state:
     fail("Salt still invokes the one-shot bootstrap script directly")
@@ -303,7 +300,7 @@ if "bootstrap_wait_seconds: 1200" not in remote_salt_deploy:
     fail("checked Salt deployment program does not bound the bootstrap service wait")
 for marker in (
     'python3 "$runtime_state_contract"',
-    'bash "$lifecycle_program_contract" /home/cloud-compose/default-lifecycle.sh',
+    '/home/cloud-compose/bin/sitectl --version >/dev/null',
     '/home/cloud-compose/smoke-healthcheck.sh "$SMOKE_NAME"',
 ):
     if marker not in remote_verification:
@@ -337,18 +334,8 @@ if 'exec bash ci/config-management-smoke-inner.sh' not in local_smoke_container:
     fail("local adapter smoke container does not invoke its checked entrypoint directly")
 if "bash -lc" in local_smoke_driver or "bash -c" in local_smoke_driver:
     fail("local adapter smoke still embeds its container entrypoint as a Bash argument")
-if '"$fixture" hold "$profile" "$ready"' not in local_smoke_inner:
-    fail("local adapter smoke does not invoke its checked lifecycle-lock fixture")
 if "bash -lc" in local_smoke_inner or "bash -c" in local_smoke_inner:
     fail("local adapter smoke still embeds lifecycle-lock programs as Bash arguments")
-for marker in (
-    "acquire_cloud_compose_lifecycle_lock root-first-contract",
-    "acquire_cloud_compose_lifecycle_lock contention-contract",
-    "acquire_cloud_compose_lifecycle_lock subshell-contract",
-    "acquire_cloud_compose_lifecycle_lock symlink-contract",
-):
-    if marker not in local_lifecycle_fixture:
-        fail(f"checked lifecycle-lock fixture is missing: {marker!r}")
 for marker in (
     "cloud-init status --long",
     "cloud-compose-bootstrap.service",

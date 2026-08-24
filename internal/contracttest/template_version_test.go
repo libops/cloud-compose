@@ -30,35 +30,35 @@ func TestTemplateVersionContract(t *testing.T) {
 
 	expectedVersions := map[string]map[string]string{
 		"default": {
-			"sitectl": "v1.9.1",
+			"sitectl": "v1.12.8",
 		},
 		"archivesspace": {
-			"sitectl":               "v1.9.1",
+			"sitectl":               "v1.12.8",
 			"sitectl-archivesspace": "v2.1.1",
 		},
 		"drupal": {
-			"sitectl":        "v1.9.1",
+			"sitectl":        "v1.12.8",
 			"sitectl-drupal": "v1.5.0",
 		},
 		"isle": {
-			"sitectl":        "v1.9.1",
+			"sitectl":        "v1.12.8",
 			"sitectl-drupal": "v1.5.0",
 			"sitectl-isle":   "v1.6.0",
 		},
 		"ojs": {
-			"sitectl":     "v1.9.1",
+			"sitectl":     "v1.12.8",
 			"sitectl-ojs": "v1.4.0",
 		},
 		"omeka-classic": {
-			"sitectl":               "v1.9.1",
+			"sitectl":               "v1.12.8",
 			"sitectl-omeka-classic": "v1.4.0",
 		},
 		"omeka-s": {
-			"sitectl":         "v1.9.1",
+			"sitectl":         "v1.12.8",
 			"sitectl-omeka-s": "v1.4.0",
 		},
 		"wp": {
-			"sitectl":    "v1.9.1",
+			"sitectl":    "v1.12.8",
 			"sitectl-wp": "v2.1.0",
 		},
 	}
@@ -146,7 +146,7 @@ func TestTemplateVersionContract(t *testing.T) {
 		for _, packageName := range []string{"sitectl", "sitectl-wp", "sitectl-drupal"} {
 			requireContains(t, content, packageName, relativePath+" bin-pack package")
 		}
-		requireContains(t, content, `sitectl        = "v1.9.1"`, relativePath+" bin-pack core selector")
+		requireContains(t, content, `sitectl        = "v1.12.8"`, relativePath+" bin-pack core selector")
 		requireContains(t, content, `sitectl-wp     = "v2.1.0"`, relativePath+" bin-pack WordPress selector")
 		requireContains(t, content, `sitectl-drupal = "v1.5.0"`, relativePath+" bin-pack Drupal selector")
 	}

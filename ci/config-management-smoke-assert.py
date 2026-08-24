@@ -15,8 +15,6 @@ RUNTIME_HOME = Path("/home/cloud-compose")
 PRIVILEGED_PROGRAM_ROOT = Path("/etc/cloud-compose")
 DIAGNOSTICS_PROGRAM = PRIVILEGED_PROGRAM_ROOT / "bin/cloud-compose-diagnostics.sh"
 BOOTSTRAP_LIBEXEC = Path("/etc/cloud-compose/libexec")
-AWK_PROGRAM_DIR = PRIVILEGED_PROGRAM_ROOT / "awk"
-JQ_PROGRAM_DIR = PRIVILEGED_PROGRAM_ROOT / "jq"
 
 
 def load_runtime_env(path: Path) -> dict[str, str]:
@@ -48,33 +46,14 @@ def assert_runtime_files() -> None:
         RUNTIME_HOME / "up",
         RUNTIME_HOME / "down",
         RUNTIME_HOME / "rollout",
-        RUNTIME_HOME / "default-lifecycle.sh",
         RUNTIME_HOME / "lifecycle-entrypoint.sh",
         RUNTIME_HOME / "run.sh",
-        RUNTIME_HOME / "start-cloud-compose-bootstrap.sh",
         BOOTSTRAP_LIBEXEC / "bootstrap-required.sh",
-        BOOTSTRAP_LIBEXEC / "bootstrap-security.sh",
-        BOOTSTRAP_LIBEXEC / "run-bootstrap.sh",
-        BOOTSTRAP_LIBEXEC / "require-bootstrap-ready.sh",
-        BOOTSTRAP_LIBEXEC / "run-root-program.sh",
-        BOOTSTRAP_LIBEXEC / "start-cloud-compose-bootstrap.sh",
+        BOOTSTRAP_LIBEXEC / "sitectl-host.sh",
         DIAGNOSTICS_PROGRAM,
     ]:
         assert path.exists(), path
         assert os.access(path, os.X_OK), path
-
-    for path in [
-        BOOTSTRAP_LIBEXEC / "checked-programs.bash",
-        AWK_PROGRAM_DIR / "compose-secret-files.awk",
-        AWK_PROGRAM_DIR / "reconcile-fstab.awk",
-        AWK_PROGRAM_DIR / "release-checksum.awk",
-        JQ_PROGRAM_DIR / "diagnostics-validate-compose-projects.jq",
-        JQ_PROGRAM_DIR / "compose-validate-projects.jq",
-        JQ_PROGRAM_DIR / "offhost-validate-manifest.jq",
-        JQ_PROGRAM_DIR / "rotation-validate-state.jq",
-        JQ_PROGRAM_DIR / "sitectl-verify-args.jq",
-    ]:
-        assert path.exists(), path
 
     cloud_compose_gid = grp.getgrnam("cloud-compose").gr_gid
     for path, expected_mode in {
@@ -104,21 +83,11 @@ def assert_runtime_files() -> None:
             oct(stat.S_IMODE(metadata.st_mode)),
         )
 
-    checked_programs = BOOTSTRAP_LIBEXEC / "checked-programs.bash"
-    checked_programs_metadata = checked_programs.lstat()
-    assert not checked_programs.is_symlink()
-    assert checked_programs_metadata.st_uid == 0
-    assert checked_programs_metadata.st_gid == 0
-    assert checked_programs_metadata.st_nlink == 1
-    assert stat.S_IMODE(checked_programs_metadata.st_mode) == 0o644
-
     for path in [
         RUNTIME_HOME,
         PRIVILEGED_PROGRAM_ROOT,
-        AWK_PROGRAM_DIR,
         DIAGNOSTICS_PROGRAM.parent,
         BOOTSTRAP_LIBEXEC,
-        JQ_PROGRAM_DIR,
     ]:
         assert not path.is_symlink(), path
         metadata = path.lstat()
@@ -135,38 +104,10 @@ def assert_runtime_files() -> None:
     assert diagnostics_metadata.st_gid == 0
     assert stat.S_IMODE(diagnostics_metadata.st_mode) == 0o755
 
-    lifecycle_metadata = (RUNTIME_HOME / "default-lifecycle.sh").stat()
+    lifecycle_metadata = (RUNTIME_HOME / "lifecycle-entrypoint.sh").stat()
     assert lifecycle_metadata.st_uid == 0
     assert lifecycle_metadata.st_gid == 0
     assert stat.S_IMODE(lifecycle_metadata.st_mode) == 0o755
-
-    jq_programs = list(JQ_PROGRAM_DIR.glob("*.jq"))
-    assert jq_programs
-    for path in jq_programs:
-        assert not path.is_symlink(), path
-        metadata = path.lstat()
-        assert stat.S_ISREG(metadata.st_mode), path
-        assert metadata.st_nlink == 1, (path, metadata.st_nlink)
-        assert metadata.st_uid == 0, (path, metadata.st_uid)
-        assert metadata.st_gid == 0, (path, metadata.st_gid)
-        assert stat.S_IMODE(metadata.st_mode) == 0o644, (
-            path,
-            oct(stat.S_IMODE(metadata.st_mode)),
-        )
-
-    awk_programs = list(AWK_PROGRAM_DIR.glob("*.awk"))
-    assert awk_programs
-    for path in awk_programs:
-        assert not path.is_symlink(), path
-        metadata = path.lstat()
-        assert stat.S_ISREG(metadata.st_mode), path
-        assert metadata.st_nlink == 1, (path, metadata.st_nlink)
-        assert metadata.st_uid == 0, (path, metadata.st_uid)
-        assert metadata.st_gid == 0, (path, metadata.st_gid)
-        assert stat.S_IMODE(metadata.st_mode) == 0o644, (
-            path,
-            oct(stat.S_IMODE(metadata.st_mode)),
-        )
 
 
 def assert_ansible_runtime() -> None:
@@ -195,6 +136,8 @@ def assert_ansible_runtime() -> None:
     assert project["docker_compose_repo"] == "https://github.com/libops/isle"
     assert project["project_dir"] == "/mnt/disks/data/libops/isle/isle-prod"
     assert project["compose_project_name"] == "libops-isle-v1-3-1"
+    assert type(project["ingress_port"]) is int
+    assert project["ingress_port"] == 80
     assert project["ingress"]["domain"] == "isle.example.edu"
     assert project["sitectl_plugin"] == "isle"
     assert project["init_commands"] == []
@@ -336,7 +279,7 @@ def assert_salt_runtime(
         assert not Path("/tmp/cloud-compose-salt-command-injection").exists()
     elif expected_name == "drupal-prod":
         assert json.loads(env["SITECTL_PACKAGE_VERSIONS"]) == {
-            "sitectl": "v1.9.1",
+            "sitectl": "v1.12.8",
             "sitectl-drupal": "v1.5.0",
         }
 

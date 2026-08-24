@@ -3,14 +3,6 @@ mock_provider "linode" {}
 run "custom_package_set_merges_only_applicable_template_versions" {
   command = plan
 
-  override_data {
-    target = module.linode.module.runtime.data.http.rootfs_contract[0]
-    values = {
-      response_body = "4517a8a8a1a40a5e9d3f1ea2b18092216279c2bf85a0e3217486d27753bd0d65\n"
-      status_code   = 200
-    }
-  }
-
   variables {
     name     = "template-versions"
     template = "isle"
@@ -20,8 +12,6 @@ run "custom_package_set_merges_only_applicable_template_versions" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = ["sitectl", "sitectl-wp"]
         package_versions = {
@@ -54,14 +44,6 @@ run "custom_package_set_merges_only_applicable_template_versions" {
 run "explicit_core_only_package_set_disables_template_plugins" {
   command = plan
 
-  override_data {
-    target = module.linode.module.runtime.data.http.rootfs_contract[0]
-    values = {
-      response_body = "4517a8a8a1a40a5e9d3f1ea2b18092216279c2bf85a0e3217486d27753bd0d65\n"
-      status_code   = 200
-    }
-  }
-
   variables {
     name     = "template-versions"
     template = "isle"
@@ -71,8 +53,6 @@ run "explicit_core_only_package_set_disables_template_plugins" {
       }
     }
     runtime = {
-      rootfs_archive_url    = "https://example.invalid/cloud-compose-rootfs.tar.gz"
-      rootfs_archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       sitectl = {
         packages = []
       }
@@ -81,7 +61,7 @@ run "explicit_core_only_package_set_disables_template_plugins" {
 
   assert {
     condition = local.runtime.sitectl.packages == tolist(["sitectl"]) && local.runtime.sitectl.package_versions == {
-      sitectl = "v1.9.1"
+      sitectl = "v1.12.8"
     }
     error_message = "The Linode entrypoint must preserve an explicit core-only package set."
   }

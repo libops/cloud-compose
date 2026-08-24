@@ -1,8 +1,7 @@
 # Managed Runtime
 
-`cloud-compose` installs a small LibOps-managed runtime on each VM. The runtime
-keeps host tools and LibOps-side support services current without changing the
-customer application repository.
+`cloud-compose` installs a small LibOps-managed runtime on each VM during
+bootstrap without changing the customer application repository.
 
 Managed by default:
 
@@ -17,8 +16,10 @@ CAP and cAdvisor. On GCP, enabling power management also enables this runtime
 because lightsout depends on it. Disabled internal services create no dedicated
 internal service account or IAM bindings, and the `serviceGsa` output is null.
 
-The updater runs once during boot before the application initializes, then on a
-daily systemd timer. Each package follows its own GitHub release stream. The
+The installer runs during boot before the application initializes. Version
+changes are applied by updating the reviewed Terraform inputs and replacing or
+rebootstrapping the host; no timer mutates host binaries independently. Each
+package follows its own GitHub release stream. The
 Terraform template presets select an exact, reviewed core/plugin release set
 from `templates/apps.json`. Use `runtime.sitectl.package_versions` to override
 core and plugins independently. The provider-neutral
@@ -26,7 +27,7 @@ core and plugins independently. The provider-neutral
 backward-compatible fallback only for an installed package with neither a
 template selector nor an explicit per-package selector.
 
-All presets pin sitectl v1.9.1 with reviewed application plugins:
+All presets pin sitectl v1.12.8 with reviewed application plugins:
 sitectl-archivesspace v2.1.1, sitectl-drupal v1.5.0, sitectl-isle v1.6.0,
 sitectl-ojs v1.4.0, sitectl-omeka-classic v1.4.0, sitectl-omeka-s v1.4.0,
 and sitectl-wp v2.1.0. ISLE includes both the Drupal and ISLE plugins. The
@@ -54,7 +55,7 @@ runtime = {
       "sitectl-isle",
     ]
     package_versions = {
-      sitectl          = "v1.9.1"
+      sitectl          = "v1.12.8"
       sitectl-drupal   = "v1.5.0"
       sitectl-isle     = "v1.6.0"
     }
@@ -80,12 +81,11 @@ compatible core/plugin set, and advance core before a plugin that raises its
 minimum core requirement.
 
 The updater resolves and verifies the complete requested package set in a
-staging generation before replacing any live executable. It takes the shared
-application lifecycle lock during the short promotion, records a SHA-256 beside
-each installed version, and repairs local binary drift. If a later plugin cannot
-download or verify, the old set remains active; if promotion itself fails, the
-runtime restores every previous binary and state file instead of leaving a
-mixed core/plugin generation.
+staging generation before replacing any live executable. It serializes updates
+with a root-owned runtime lock, records a SHA-256 beside each installed version,
+and publishes the new immutable generation with one atomic symlink replacement.
+If a later plugin cannot download or verify, the old set remains active; core
+and plugin files are never promoted one at a time into a mixed generation.
 
 Additional LibOps-owned binaries or scripts can use the artifact manifest:
 

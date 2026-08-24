@@ -11,7 +11,7 @@ import (
 )
 
 var expectedRollout = []string{
-	`/home/cloud-compose/default-lifecycle.sh rollout`,
+	`sitectl:default rollout`,
 }
 
 type rolloutSource struct {
@@ -264,7 +264,6 @@ func checkComposeVersions(t testing.TB, root string) []composeVersionSource {
 		{label: "Linux VM module", relativePath: "modules/linux-vm-runtime/variables.tf", expression: `(?ms)variable "docker_compose_version" \{.*?default\s*=\s*"([^"]+)"`},
 		{label: "Ansible", relativePath: "ansible/roles/cloud_compose/defaults/main.yml", expression: `(?m)^cloud_compose_docker_compose_version:\s*(\S+)\s*$`},
 		{label: "Salt", relativePath: "salt/cloud-compose/init.sls", expression: `docker\.get\('compose_version',\s*cc\.get\('docker_compose_version',\s*'([^']+)'\)\)`},
-		{label: "host installer fallback", relativePath: "rootfs/home/cloud-compose/install-docker-plugins.sh", expression: `DOCKER_COMPOSE_VERSION="\$\{DOCKER_COMPOSE_VERSION:-([^}]+)\}"`},
 	}
 
 	releaseTag := regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)

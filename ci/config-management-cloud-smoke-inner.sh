@@ -126,7 +126,7 @@ deploy_salt() {
 }
 
 verify_remote() {
-  local remote_contract_dir lifecycle_contract runtime_state_contract verification_program
+  local remote_contract_dir runtime_state_contract verification_program
   local remote_command status
 
   remote_contract_dir="$(ssh "${ssh_opts[@]}" "$ssh_target" \
@@ -136,27 +136,19 @@ verify_remote() {
     return 1
   fi
 
-  lifecycle_contract="$remote_contract_dir/lifecycle-program-contract.sh"
   runtime_state_contract="$remote_contract_dir/config-management-runtime-state-contract.py"
   verification_program="$remote_contract_dir/config-management-verify.sh"
   if ! ssh "${ssh_opts[@]}" "$ssh_target" \
-    "install -m 0700 /dev/stdin $lifecycle_contract" \
-    </work/ci/lifecycle-program-contract.sh; then
-    ssh "${ssh_opts[@]}" "$ssh_target" "rmdir -- $remote_contract_dir" || true
-    return 1
-  fi
-  if ! ssh "${ssh_opts[@]}" "$ssh_target" \
     "install -m 0600 /dev/stdin $runtime_state_contract" \
     </work/ci/config-management-runtime-state-contract.py; then
-    ssh "${ssh_opts[@]}" "$ssh_target" \
-      "rm -f -- $lifecycle_contract && rmdir -- $remote_contract_dir" || true
+    ssh "${ssh_opts[@]}" "$ssh_target" "rmdir -- $remote_contract_dir" || true
     return 1
   fi
   if ! ssh "${ssh_opts[@]}" "$ssh_target" \
     "install -m 0700 /dev/stdin $verification_program" \
     </work/ci/remote/config-management-verify.sh; then
     ssh "${ssh_opts[@]}" "$ssh_target" \
-      "rm -f -- $lifecycle_contract $runtime_state_contract && rmdir -- $remote_contract_dir" || true
+      "rm -f -- $runtime_state_contract && rmdir -- $remote_contract_dir" || true
     return 1
   fi
 
@@ -166,7 +158,6 @@ verify_remote() {
     "$SMOKE_TEMPLATE" \
     "$SMOKE_ENVIRONMENT" \
     "$SMOKE_PROJECT_DIR" \
-    "$lifecycle_contract" \
     "$runtime_state_contract"
   if ssh "${ssh_opts[@]}" "$ssh_target" "$remote_command"; then
     status=0
@@ -175,7 +166,7 @@ verify_remote() {
   fi
 
   ssh "${ssh_opts[@]}" "$ssh_target" \
-    "rm -f -- $lifecycle_contract $runtime_state_contract $verification_program && rmdir -- $remote_contract_dir" || true
+    "rm -f -- $runtime_state_contract $verification_program && rmdir -- $remote_contract_dir" || true
   return "$status"
 }
 

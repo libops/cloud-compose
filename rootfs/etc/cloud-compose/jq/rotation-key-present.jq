@@ -1,1 +1,0 @@
-any(.[]; .name == $name)

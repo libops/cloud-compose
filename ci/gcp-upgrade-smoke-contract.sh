@@ -196,8 +196,6 @@ grep -Fq 'bash /home/cloud-compose/gcp-upgrade-prepare-repository.sh' "$fixture"
   fail "upgrade fixture does not invoke its checked initialization program"
 grep -Fq '"/etc/cloud-compose/lifecycle.d/gcp-upgrade-up.sh"' "$fixture" ||
   fail "upgrade fixture does not invoke its checked lifecycle program"
-grep -Fq '"/home/cloud-compose/default-lifecycle.sh up"' "$context_fixture" ||
-  fail "hosted smoke context does not invoke the checked default lifecycle program"
 grep -Fq 'sitectl compose --context "$context" up -d --remove-orphans' "$fixture_up" ||
   fail "checked upgrade lifecycle program does not bring up the exact sitectl context"
 grep -Fq 'sitectl healthcheck --context "$context" --persist' "$fixture_up" ||
@@ -220,7 +218,7 @@ baseline_initcmd_line="$(grep -nF 'for CMD in ADDITIONAL_INITCMD' "$tmp/baseline
   fail "baseline cloud-init does not execute fixture initcmd before run.sh"
 
 current_bootstrap_line="$(
-  grep -nF 'bash /etc/cloud-compose/libexec/start-cloud-compose-bootstrap.sh' \
+  grep -nF '/etc/cloud-compose/bin/bootstrap-sitectl host systemd ensure-bootstrap' \
     "$repo_root/rootfs/etc/cloud-compose/libexec/gcp-cloud-init-finalize.sh" |
     cut -d: -f1 || true
 )"

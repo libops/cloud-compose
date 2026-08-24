@@ -60,16 +60,10 @@ locals {
   tags                = distinct(concat(var.tags, ["cloud-compose-smoke", local.target], local.run_tag != "" ? [local.run_tag] : []))
   ssh_keys            = distinct(concat([var.ssh_public_key], var.operator_ssh_public_keys))
   runtime_base = {
-    rootfs_archive_url                = var.rootfs_archive_url
-    rootfs_archive_sha256             = var.rootfs_archive_sha256
-    rootfs_test_source_archive_prefix = var.rootfs_test_source_archive_prefix
     compose = {
       repo         = local.app_template.repo
       branch       = var.docker_compose_branch
       ingress_port = var.ingress_port
-      up = [
-        "/home/cloud-compose/default-lifecycle.sh up"
-      ]
     }
     sitectl = {
       packages         = local.app_template.packages
