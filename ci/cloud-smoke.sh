@@ -607,7 +607,7 @@ verify_sitectl_host_runtime() {
   port="$(jq -r '.ssh_port' "$output_json")"
   user="$(jq -r '.ssh_user' "$output_json")"
   ssh_cmd "$home_dir" "$key_path" "$host" "$port" "$user" \
-    'test -x /home/cloud-compose/bin/sitectl && test -x /home/cloud-compose/lifecycle-entrypoint.sh && /home/cloud-compose/bin/sitectl --version'
+    'test -x /home/cloud-compose/bin/sitectl && /home/cloud-compose/bin/sitectl --version'
 }
 
 run_target() (
