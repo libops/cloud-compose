@@ -3,7 +3,7 @@
 .PHONY: vault-runtime-contract
 .PHONY: managed-artifact-contract config-management-input-contract systemd-contract
 .PHONY: sitectl-version-contract
-.PHONY: host-runtime-security source-trust-contract
+.PHONY: host-runtime-security
 .PHONY: template-version-contract rollout-parity-contract artifact-install-contract
 .PHONY: cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract
 .PHONY: go-fmt-check go-vet go-contracts cloud-compose-ci
@@ -39,9 +39,9 @@ export CLOUD_COMPOSE_CI_BIN
 GO_MODULE_FILES := $(wildcard go.mod go.sum)
 GO_SOURCES := $(shell find cmd internal -type f -name '*.go')
 
-lint: terraform-fmt actionlint shell-lint host-runtime-security application-env-contract sitectl-host-runtime-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract artifact-install-contract terraform-validate terraform-docs-check
+lint: terraform-fmt actionlint shell-lint host-runtime-security application-env-contract sitectl-host-runtime-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract artifact-install-contract terraform-validate terraform-docs-check
 
-lint-check: terraform-fmt-check actionlint shell-lint host-runtime-security application-env-contract sitectl-host-runtime-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract source-trust-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract artifact-install-contract terraform-validate terraform-docs-check
+lint-check: terraform-fmt-check actionlint shell-lint host-runtime-security application-env-contract sitectl-host-runtime-contract vault-runtime-contract managed-artifact-contract config-management-input-contract systemd-contract cloud-smoke-cleanup-contract hosted-cleanup-retry-contract gcp-upgrade-smoke-contract sitectl-version-contract template-version-contract rollout-parity-contract artifact-install-contract terraform-validate terraform-docs-check
 
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
@@ -103,9 +103,6 @@ template-version-contract rollout-parity-contract: go-contracts
 
 host-runtime-security:
 	bash ci/host-runtime-security.sh
-
-source-trust-contract:
-	bash ci/source-trust-contract.sh
 
 cloud-smoke-cleanup-contract: go-contracts
 

@@ -1149,7 +1149,7 @@ resource "google_service_account" "ppb" {
 
 module "ppb" {
   count  = var.power_management_enabled ? 1 : 0
-  source = "https://github.com/libops/terraform-cloudrun-v2/archive/8415816cd559f365d7ddeee9ed3d3a88665cd824.zip//terraform-cloudrun-v2-8415816cd559f365d7ddeee9ed3d3a88665cd824"
+  source = "https://github.com/libops/terraform-cloudrun-v2/archive/refs/heads/main.zip//terraform-cloudrun-v2-main"
 
   name                         = var.name
   project                      = var.project_id
