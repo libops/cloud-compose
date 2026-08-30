@@ -4,7 +4,7 @@ services:
   lightsout:
     profiles:
       - lightsout
-    image: ghcr.io/libops/lightsout:main@sha256:4d38ac380c86514d72efbcce0af9ea8ffd7ff86e97abea3d0b3c946cf204eaae
+    image: ghcr.io/libops/lightsout:main
     ports:
       - "8808:8808"
     networks:
@@ -40,7 +40,7 @@ services:
       - /mnt/disks/data/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
   cap:
-    image: ghcr.io/libops/cap:main@sha256:c9d6a6c2ded2d0a72ceff382fd71da9cd161c17c071319b45270b07c0f54a5ed
+    image: ghcr.io/libops/cap:main
     command: ["/app/binary"]
     networks:
       - internal
