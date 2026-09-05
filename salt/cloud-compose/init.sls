@@ -482,7 +482,7 @@
   'DOCKER_COMPOSE_DIR': primary_project.get('project_dir', project_dir),
   'DOCKER_COMPOSE_REPO': primary_project.get('docker_compose_repo', repo),
   'DOCKER_COMPOSE_BRANCH': primary_project.get('docker_compose_branch', branch),
-  'DOCKER_COMPOSE_VERSION': docker.get('compose_version', cc.get('docker_compose_version', 'v5.3.1')),
+  'DOCKER_COMPOSE_VERSION': docker.get('compose_version', cc.get('docker_compose_version', 'v5.5.1')),
   'DOCKER_BUILDX_VERSION': docker.get('buildx_version', cc.get('docker_buildx_version', 'v0.35.0')),
   'GCP_PROJECT': '',
   'GCP_PROJECT_NUMBER': '',
