@@ -18,7 +18,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-archivesspace": "v2.1.1"
+        "sitectl-archivesspace": "v2.1.2"
       }
     },
     "ojs": {
@@ -29,7 +29,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-ojs": "v1.4.0"
+        "sitectl-ojs": "v1.4.1"
       }
     },
     "isle": {
@@ -42,8 +42,8 @@
       },
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-drupal": "v1.5.0",
-        "sitectl-isle": "v1.6.0"
+        "sitectl-drupal": "v1.6.2",
+        "sitectl-isle": "v1.7.3"
       }
     },
     "drupal": {
@@ -54,7 +54,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-drupal": "v1.5.0"
+        "sitectl-drupal": "v1.6.2"
       }
     },
     "wp": {
@@ -65,7 +65,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-wp": "v2.1.0"
+        "sitectl-wp": "v2.1.1"
       }
     },
     "omeka-s": {
@@ -76,7 +76,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-omeka-s": "v1.4.0"
+        "sitectl-omeka-s": "v1.4.1"
       }
     },
     "omeka-classic": {
@@ -87,7 +87,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-omeka-classic": "v1.4.0"
+        "sitectl-omeka-classic": "v1.4.1"
       }
     }
   }

@@ -336,14 +336,14 @@ variable "sitectl_verify_args" {
 variable "docker_compose_version" {
   type = string
   # renovate: datasource=github-releases depName=docker-compose packageName=docker/compose versioning=semver
-  default     = "v5.3.1"
+  default     = "v5.5.1"
   description = "Docker Compose release tag installed as the Docker CLI plugin."
 }
 
 variable "docker_buildx_version" {
   type = string
   # renovate: datasource=github-releases depName=docker-buildx packageName=docker/buildx versioning=semver
-  default     = "v0.35.0"
+  default     = "v0.37.0"
   description = "Docker Buildx release tag installed as the Docker CLI plugin."
 }
 

@@ -37,7 +37,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache: false
 
       - name: Run repository lint
@@ -92,7 +92,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache: false
 
       - name: Build provider cloud CI runner
@@ -164,7 +164,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache: false
 
       - name: Build provider cloud CI runner
@@ -243,7 +243,7 @@ jobs:
       - name: Install Go for cloud CI runner
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache: false
 
       - name: Build cloud CI runner
