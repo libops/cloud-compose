@@ -12,7 +12,7 @@ cloud_compose_home: /home/cloud-compose
 cloud_compose_data_dir: /mnt/disks/data
 cloud_compose_volumes_dir: /mnt/disks/volumes
 
-cloud_compose_docker_compose_version: v5.3.1
+cloud_compose_docker_compose_version: v5.5.1
 cloud_compose_docker_buildx_version: v0.35.0
 cloud_compose_sitectl_version: latest
 cloud_compose_sitectl_package_versions: {}
