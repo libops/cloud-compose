@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # renovate: datasource=docker depName=python packageName=python versioning=docker
-CONFIG_MANAGEMENT_IMAGE_DEFAULT="python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3"
+CONFIG_MANAGEMENT_IMAGE_DEFAULT="python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d"
 
 usage() {
   cat <<EOF

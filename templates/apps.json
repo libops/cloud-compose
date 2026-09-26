@@ -42,8 +42,8 @@
       },
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-drupal": "v1.5.0",
-        "sitectl-isle": "v1.6.0"
+        "sitectl-drupal": "v1.6.2",
+        "sitectl-isle": "v1.7.3"
       }
     },
     "drupal": {
@@ -54,7 +54,7 @@
       "extra_env": {},
       "package_versions": {
         "sitectl": "v1.12.8",
-        "sitectl-drupal": "v1.5.0"
+        "sitectl-drupal": "v1.6.2"
       }
     },
     "wp": {
